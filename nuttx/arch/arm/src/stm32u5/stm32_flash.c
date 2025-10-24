@@ -52,6 +52,7 @@
 
 #if !defined(CONFIG_STM32U5_STM32U585XX)
 #elif !defined(CONFIG_STM32U5_STM32U5A5XX)
+#elif !defined(CONFIG_STM32U5_STM32U5GXX)
 #else
 #  error "Unrecognized STM32 chip"
 #endif

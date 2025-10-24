@@ -67,8 +67,19 @@
 #  define STM32_SRAM1_BASE        0x20000000  /* 0x20000000-0x200bffff: 768k SRAM1 */
 #  define STM32_SRAM2_BASE        0x200c0000  /* 0x200c0000-0x200cffff:  64k SRAM2 */
 #  define STM32_SRAM3_BASE        0x200d0000  /* 0x200d0000-0x2019ffff: 832k SRAM3 */
-#  define STM32_SRAM4_BASE        0x28000000  /* 0x28000000-0x20003fff: 16k SRAM4 */
-#  define STM32_SRAM5_BASE        0x201a0000  /* 0x201a0000-0x2027ffff: 832k SRAM5 */
+#  define STM32_SRAM4_BASE        0x28000000  /* 0x28000000-0x28003fff: 16k SRAM4 */
+#  define STM32_SRAM5_BASE        0x201a0000  /* 0x201a0000-0x2026ffff: 832k SRAM5 */
+
+#elif defined(CONFIG_STM32U5_STM32U5FXX) || defined(CONFIG_STM32U5_STM32U5GXX)
+
+#  define STM32_BOOT_BASE         0x00000000  /* 0x00000000-0x000fffff: Aliased boot memory */
+#  define STM32_FLASH_BASE        0x08000000  /* 0x08000000-0x081fffff: FLASH memory */
+#  define STM32_SRAM1_BASE        0x20000000  /* 0x20000000-0x200bffff: 768k SRAM1 */
+#  define STM32_SRAM2_BASE        0x200c0000  /* 0x200c0000-0x200cffff:  64k SRAM2 */
+#  define STM32_SRAM3_BASE        0x200d0000  /* 0x200d0000-0x2019ffff: 832k SRAM3 */
+#  define STM32_SRAM4_BASE        0x28000000  /* 0x28000000-0x28003fff: 16k SRAM4 */
+#  define STM32_SRAM5_BASE        0x201a0000  /* 0x201a0000-0x2026ffff: 832k SRAM5 */
+#  define STM32_SRAM6_BASE        0x20270000  /* 0x20270000-0x202effff: 512k SRAM6 */
 
 #else
 #  error "stm32_memorymap: unsupported STM32U5 memory map"

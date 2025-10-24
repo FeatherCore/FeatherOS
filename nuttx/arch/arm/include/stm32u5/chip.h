@@ -45,11 +45,17 @@
 #  define STM32_SRAM2_SIZE       (0x00010000)   /* 64kB  SRAM2 */
 #  define STM32_SRAM3_SIZE       (0x000d0000)   /* 832kB SRAM3 */
 #  define STM32_SRAM5_SIZE       (0x000d0000)   /* 832kB SRAM5 */
+#elif defined(CONFIG_STM32U5_STM32U5FXX) || defined(CONFIG_STM32U5_STM32U5GXX)
+#  define STM32_SRAM1_SIZE       (0x000C0000)   /* 768Kb SRAM1 */
+#  define STM32_SRAM2_SIZE       (0x00010000)   /* 64kB  SRAM2 */
+#  define STM32_SRAM3_SIZE       (0x000d0000)   /* 832kB SRAM3 */
+#  define STM32_SRAM5_SIZE       (0x000d0000)   /* 832kB SRAM5 */
+#  define STM32_SRAM6_SIZE       (0x00080000)   /* 512kB SRAM6 */
 #else
 #  error "Unsupported STM32U5 chip"
 #endif
 
-#if defined(CONFIG_STM32U5_STM32U585XX) || defined(CONFIG_STM32U5_STM32U5A5XX)
+#if defined(CONFIG_STM32U5_STM32U585XX) || defined(CONFIG_STM32U5_STM32U5A5XX) || defined(CONFIG_STM32U5_STM32U5GXX)
 #  define STM32_NFSMC                    1   /* Have FSMC memory controller */
 #  define STM32_NATIM                    2   /* Two advanced timers TIM1 and 8 */
 #  define STM32_NGTIM32                  2   /* 32-bit general timers TIM2 and 5 with DMA */

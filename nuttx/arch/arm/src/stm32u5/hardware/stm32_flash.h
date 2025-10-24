@@ -85,6 +85,12 @@
 #  define STM32_FLASH_SIZE               (STM32_FLASH_NPAGES * STM32_FLASH_PAGESIZE)
 #endif
 
+#if defined(CONFIG_STM32U5_STM32U5GXX)
+#  define STM32_FLASH_NPAGES             512
+#  define STM32_FLASH_PAGESIZE           8192
+#  define STM32_FLASH_SIZE               (STM32_FLASH_NPAGES * STM32_FLASH_PAGESIZE)
+#endif
+
 /* Register Offsets *********************************************************/
 
 #define STM32_FLASH_ACR_OFFSET           0x0000
