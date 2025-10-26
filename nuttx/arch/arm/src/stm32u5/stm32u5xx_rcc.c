@@ -648,8 +648,27 @@ void stm32_stdclockconfig(void)
 
 #else
 
-#  error stm32_stdclockconfig() currently only supports STM32_BOARD_USEMSIS
+    // RCC_CR         RCC clock control register
 
+    /* Enable High-speed external Clock (HSE) */
+
+    // RCC_CR[16]  ->  HSEON: HSE clock enable
+    regval = getreg32(STM32_RCC_CR);
+    regval |= RCC_CR_HSEON;
+    putreg32(regval, STM32_RCC_CR);
+
+  /* Wait until the HSE is either off or ready (or until timeout elapses) */
+
+  for (timeout = HSERDY_TIMEOUT; timeout > 0; timeout--)
+    {
+      // RCC_CR[17]  ->  HSERDY: HSE clock ready flag
+      if ((getreg32(STM32_RCC_CR) & RCC_CR_HSERDY) != 0)
+        {
+          /* If so, then break-out with timeout > 0 */
+
+          break;
+        }
+    }
 #endif
 
   /* Check for a timeout.  If this timeout occurs, then we are hosed.  We
@@ -673,10 +692,22 @@ void stm32_stdclockconfig(void)
        * SYSCLK frequencies greater than 55MHz.
        */
 
+#if defined(STM32_BOARD_USEMSIS)
       regval = getreg32(STM32_RCC_PLL1CFGR);
       regval &= ~(RCC_PLL1CFGR_PLL1SRC_MASK | RCC_PLL1CFGR_PLL1MBOOST_MASK);
       regval |= RCC_PLL1CFGR_PLL1SRC_MSIS | RCC_PLL1CFGR_PLL1MBOOST_DIV_1;
       putreg32(regval, STM32_RCC_PLL1CFGR);
+#else
+      // RCC_PLL1CFGR     RCC PLL1 configuration register
+
+      regval = getreg32(STM32_RCC_PLL1CFGR);
+      regval &= ~(RCC_PLL1CFGR_PLL1SRC_MASK | RCC_PLL1CFGR_PLL1MBOOST_MASK);
+
+      // RCC_PLL1CFGR[ 1: 0]  ->  PLL1SRC[ 1: 0]: PLL1 entry clock source
+      // RCC_PLL1CFGR[15:12]  ->  PLL1MBOOST[3:0]: Prescaler for EPOD booster input clock
+      regval |= RCC_PLL1CFGR_PLL1SRC_HSE | RCC_PLL1CFGR_PLL1MBOOST_DIV_4; // 16MHz / 4
+      putreg32(regval, STM32_RCC_PLL1CFGR);
+#endif
 
       /* Select correct main regulator range */
 
@@ -752,6 +783,7 @@ void stm32_stdclockconfig(void)
 
       putreg32(regval, STM32_RCC_PLL1DIVR);
 
+#if defined(STM32_BOARD_USEMSIS)
       regval = RCC_PLL1CFGR_PLL1SRC_MSIS      |
                RCC_PLL1CFGR_PLL1RGE_4_TO_8MHZ |
                STM32_RCC_PLL1CFGR_PLL1M       |
@@ -767,6 +799,28 @@ void stm32_stdclockconfig(void)
 #endif
 
       putreg32(regval, STM32_RCC_PLL1CFGR);
+#else
+      // RCC_PLL1CFGR[ 1: 0]  ->  PLL1SRC[ 1: 0]: PLL1 entry clock source
+      // RCC_PLL1CFGR[ 3: 2]  ->  PLL1RGE[ 1: 0]: PLL1 input frequency range
+      // RCC_PLL1CFGR[11: 8]  ->  PLL1M[ 3: 0]：Prescaler for PLL1
+      // RCC_PLL1CFGR[15:12]  ->  PLL1MBOOST[3:0]: Prescaler for EPOD booster input clock
+
+      regval = RCC_PLL1CFGR_PLL1SRC_HSE         |
+               RCC_PLL1CFGR_PLL1RGE_8_TO_16MHZ  |
+               STM32_RCC_PLL1CFGR_PLL1M         |
+               RCC_PLL1CFGR_PLL1MBOOST_DIV_4;
+#ifdef STM32_RCC_PLL1CFGR_PLL1P_ENABLED
+      regval |= RCC_PLL1CFGR_PLL1PEN;
+#endif
+#ifdef STM32_RCC_PLL1CFGR_PLL1Q_ENABLED
+      regval |= RCC_PLL1CFGR_PLL1QEN;
+#endif
+#ifdef STM32_RCC_PLL1CFGR_PLL1R_ENABLED
+      regval |= RCC_PLL1CFGR_PLL1REN;
+#endif
+
+      putreg32(regval, STM32_RCC_PLL1CFGR);
+#endif
 
       /* Enable PLL1 */
 
@@ -781,6 +835,10 @@ void stm32_stdclockconfig(void)
         }
 
       /* Select the PLL1 as system clock source */
+
+      // RCC_CFGR1        RCC clock configuration register 1
+
+      // RCC_CFGR1[ 1: 0]     ->  SW[ 3: 0] :system clock switch
 
       regval  = getreg32(STM32_RCC_CFGR1);
       regval &= ~RCC_CFGR1_SW_MASK;

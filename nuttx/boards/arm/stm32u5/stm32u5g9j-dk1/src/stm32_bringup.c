@@ -104,58 +104,6 @@ int stm32_bringup(void)
     }
 #endif
 
-#if defined(CONFIG_I2C)
-  i2c1_m = stm32_i2cbus_initialize(1);
-  if (i2c1_m == NULL)
-    {
-      syslog(LOG_ERR, "ERROR: Failed to init i2c controller\n");
-      return(-1);
-    }
-
-  ret = i2c_register(i2c1_m, DEVNO_ONE);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: Failed to register I2C%d driver: %d\n",
-            DEVNO_ONE, ret);
-      stm32_i2cbus_uninitialize(i2c1_m);
-      return -1;
-    }
-
-#if defined(STM32U5_I2C2)
-  i2c2_m = stm32_i2cbus_initialize(2);
-  if (i2c2_m == NULL)
-    {
-      syslog(LOG_ERR, "ERROR: Failed to init i2c controller\n");
-      return(-1);
-    }
-
-  ret = i2c_register(i2c2_m, DEVNO_TWO);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: Failed to register I2C%d driver: %d\n",
-            DEVNO_TWO, ret);
-      stm32_i2cbus_uninitialize(i2c1_m);
-      stm32_i2cbus_uninitialize(i2c2_m);
-      return -1;
-    }
-#endif /* STM32_I2C2 */
-#endif /* CONFIG_I2C */
-
-#if defined(CONFIG_RTC) && defined(CONFIG_RTC_EXTERNAL) && defined(CONFIG_RTC_DSXXXX)
-  ret = dsxxxx_rtc_initialize(i2c1_m);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: dsxxxx_rtc_initialize() failed: %d\n", ret);
-    }
-  else
-    {
-      /* Synchronize the system time to the RTC time */
-
-      syslog(LOG_INFO, "INFO: clock sync\n");
-      clock_synchronize(NULL);
-    }
-#endif /* CONFIG_RTC */
-
   UNUSED(ret);
   return OK;
 }

@@ -52,11 +52,7 @@
 
 void stm32_board_initialize(void)
 {
-#ifdef CONFIG_SPI
-  /* Configure SPI chip selects */
 
-  stm32_spidev_initialize();
-#endif
 }
 
 /****************************************************************************

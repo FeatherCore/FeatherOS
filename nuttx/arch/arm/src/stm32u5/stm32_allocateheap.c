@@ -390,7 +390,7 @@ void arm_addregion(void)
 
 #  if defined(CONFIG_BUILD_PROTECTED) && defined(CONFIG_MM_KERNEL_HEAP)
 
-  /* Allow user-mode access to the SRAM5 heap */
+  /* Allow user-mode access to the SRAM6 heap */
 
   stm32_mpu_uheap((uintptr_t)SRAM6_START, STM32_SRAM6_SIZE);
 
@@ -400,7 +400,7 @@ void arm_addregion(void)
 
   up_heap_color((void *)SRAM6_START, STM32_SRAM6_SIZE);
 
-  /* Add the SRAM5 user heap region. */
+  /* Add the SRAM6 user heap region. */
 
   kumm_addregion((void *)SRAM6_START, STM32_SRAM6_SIZE);
 

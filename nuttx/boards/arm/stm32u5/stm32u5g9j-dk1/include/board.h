@@ -38,12 +38,12 @@
 
 /* Clocking *****************************************************************/
 
-/* The B-U585I-IOT02A board supports both HSE and LSE crystals (X1 and X2).
- * However, as shipped, the X1 crystal is not populated.  Therefore the board
- * will need to run off the 32kHz-sync'ed MSIS.
+/* The STM32U5G9J-DK1 board supports both HSE and LSE crystals (X1 and X2).
+ *   X1:  16 MHz oscillator for STM32U5G9NJH6Q microcontroller
+ *   X2:  32.768 KHz crystal for STM32U5G9NJH6Q embedded RTC
  *
- *   System Clock source : PLL (MSIS)
- *   SYSCLK(Hz)          : 160000000   Determined by PLL configuration
+ *   System Clock source : PLL (HSE)    16MHz
+ *   SYSCLK(Hz)          : 160000000    Determined by PLL configuration
  *   HCLK(Hz)            : 160000000
  *   AHB Prescaler       : 1            (STM32_RCC_CFGR2_HPRE)  (160MHz)
  *   APB1 Prescaler      : 1            (STM32_RCC_CFGR2_PPRE1) (160MHz)
@@ -53,37 +53,57 @@
  *   MSIK Frequency(Hz)  : 4000000      (nominal)
  *   PLL_MBOOST          : 1            (Embedded power distribution booster)
  *   PLLM                : 1            (STM32_PLLCFG_PLLM)
- *   PLLN                : 80           (STM32_PLLCFG_PLLN)
+ *   PLLN                : 10           (STM32_PLLCFG_PLLN)
  *   PLLP                : 2            (STM32_PLLCFG_PLLP)
  *   PLLQ                : 2            (STM32_PLLCFG_PLLQ)
- *   PLLR                : 2            (STM32_PLLCFG_PLLR)
+ *   PLLR                : 1            (STM32_PLLCFG_PLLR)
  *   Flash Latency(WS)   : 4
  */
 
 /* HSI - 16 MHz RC factory-trimmed
  * LSI - 32 KHz RC
  * MSI - 4 MHz, autotrimmed via LSE
- * HSE - not installed
+ * HSE - 16 MHz installed
  * LSE - 32.768 kHz installed
  */
 
+#define STM32_BOARD_XTAL        16000000ul
+
 #define STM32_HSI_FREQUENCY     16000000ul
 #define STM32_LSI_FREQUENCY     32000
+#define STM32_HSE_FREQUENCY     STM32_BOARD_XTAL
 #define STM32_LSE_FREQUENCY     32768
 
+/* Enable HSE */
+
+#define STM32_USE_HSE           1
+
+#ifndef STM32_USE_HSE
 #define STM32_BOARD_USEMSIS     1
 #define STM32_BOARD_MSISRANGE   RCC_ICSCR1_MSISRANGE_4MHZ
 #define STM32_BOARD_MSIKRANGE   RCC_ICSCR1_MSIKRANGE_4MHZ
+#endif // !STM32_USE_HSE
 
 /* PLL1 config; we use this to generate our system clock */
 
+// RCC_PLL1CFGR     RCC PLL1 configuration register
+// RCC_PLL1DIVR     RCC PLL1 dividers register
+
+// RCC_PLL1CFGR[11: 8]  ->  PLL1M[ 3: 0]：Prescaler for PLL1
 #define STM32_RCC_PLL1CFGR_PLL1M          RCC_PLL1CFGR_PLL1M(1)
-#define STM32_RCC_PLL1DIVR_PLL1N          RCC_PLL1DIVR_PLL1N(80)
+// RCC_PLL1DIVR[ 8: 0]  ->  PLL1N[ 8: 0]: Multiplication factor for PLL1 VCO
+#define STM32_RCC_PLL1DIVR_PLL1N          RCC_PLL1DIVR_PLL1N(10)
+// RCC_PLL1DIVR[15: 9]  ->  PLL1P[ 6: 0]: PLL1 DIVP division factor
 #define STM32_RCC_PLL1DIVR_PLL1P          0
+// RCC_PLL1CFGR[16]     ->  PLL1PEN: PLL1 DIVP divider output disable
 #undef  STM32_RCC_PLL1CFGR_PLL1P_ENABLED
+// RCC_PLL1DIVR[22:16]  ->  PLL1Q[ 6: 0]: PLL1 DIVQ division factor
 #define STM32_RCC_PLL1DIVR_PLL1Q          0
+// RCC_PLL1CFGR[17]     ->  PLL1QEN: PLL1 DIVQ divider output disable
 #undef  STM32_RCC_PLL1CFGR_PLL1Q_ENABLED
-#define STM32_RCC_PLL1DIVR_PLL1R          RCC_PLL1DIVR_PLL1R(2)
+// RCC_PLL1DIVR[30:24]  ->  PLL1R[ 6: 0]: PLL1 DIVR division factor
+#define STM32_RCC_PLL1DIVR_PLL1R          RCC_PLL1DIVR_PLL1R(1)
+// RCC_PLL1CFGR[18]     ->  PLL1REN: PLL1 DIVR divider output enable
 #define STM32_RCC_PLL1CFGR_PLL1R_ENABLED
 
 #define STM32_SYSCLK_FREQUENCY  160000000ul
@@ -94,10 +114,16 @@
 
 /* Configure the HCLK divisor (for the AHB bus, core, memory, and DMA */
 
+// RCC_CFGR2        RCC clock configuration register 2
+
+// RCC_CFGR2[ 3: 0]     ->  HPRE[ 3: 0] :AHB prescaler
 #define STM32_RCC_CFGR2_HPRE    RCC_CFGR2_HPRE_SYSCLK     /* HCLK  = SYSCLK / 1 */
+
 #define STM32_HCLK_FREQUENCY    STM32_SYSCLK_FREQUENCY
 
 /* Configure the APB1 prescaler */
+
+// RCC_CFGR2[ 6: 4]     ->  PPRE1[ 2: 0] :APB1 prescaler
 
 #define STM32_RCC_CFGR2_PPRE1   RCC_CFGR2_PPRE1_HCLK      /* PCLK1 = HCLK / 1 */
 #define STM32_PCLK1_FREQUENCY   (STM32_HCLK_FREQUENCY / 1)
@@ -111,6 +137,8 @@
 
 /* Configure the APB2 prescaler */
 
+// RCC_CFGR2[10: 8]     ->  PPRE2[ 2: 0] :APB2 prescaler
+
 #define STM32_RCC_CFGR2_PPRE2   RCC_CFGR2_PPRE2_HCLK       /* PCLK2 = HCLK / 1 */
 #define STM32_PCLK2_FREQUENCY   (STM32_HCLK_FREQUENCY / 1)
 
@@ -119,6 +147,10 @@
 #define STM32_APB2_TIM16_CLKIN  (STM32_PCLK2_FREQUENCY)
 
 /* Configure the APB3 prescaler */
+
+// RCC_CFGR3        RCC clock configuration register 3
+
+// RCC_CFGR3[ 6: 4]     ->  PPRE3[ 2: 0] :APB3 prescaler
 
 #define STM32_RCC_CFGR3_PPRE3   RCC_CFGR3_PPRE3_HCLK       /* PCLK3 = HCLK / 1 */
 #define STM32_PCLK3_FREQUENCY   (STM32_HCLK_FREQUENCY / 1)
@@ -149,21 +181,6 @@
 
 #define GPIO_USART1_RX   GPIO_USART1_RX_1    /* PA10 */
 #define GPIO_USART1_TX   GPIO_USART1_TX_1    /* PA9  */
-
-/* SPI1: Arduino Connector CN13 */
-
-#define GPIO_SPI1_NSS   (GPIO_OUTPUT|GPIO_SPEED_2MHZ| \
-                         GPIO_PUSHPULL|GPIO_OUTPUT_SET| \
-                         GPIO_PORTE|GPIO_PIN12)             /* PE12 */
-#define GPIO_SPI1_SCK   (GPIO_SPI1_SCK_4|GPIO_SPEED_25MHZ)  /* PE13 */
-#define GPIO_SPI1_MISO  (GPIO_SPI1_MISO_4)                  /* PE14 */
-#define GPIO_SPI1_MOSI  (GPIO_SPI1_MOSI_4|GPIO_SPEED_25MHZ) /* PE15 */
-
-#define GPIO_I2C1_SCL     GPIO_I2C1_SCL_2 | GPIO_SPEED_50MHZ | GPIO_OPENDRAIN
-#define GPIO_I2C1_SDA     GPIO_I2C1_SDA_2 | GPIO_SPEED_50MHZ | GPIO_OPENDRAIN
-
-#define GPIO_I2C2_SCL     GPIO_I2C2_SCL_4 | GPIO_SPEED_50MHZ | GPIO_OPENDRAIN
-#define GPIO_I2C2_SDA     GPIO_I2C2_SDA_4 | GPIO_SPEED_50MHZ | GPIO_OPENDRAIN
 
 /****************************************************************************
  * Public Data
