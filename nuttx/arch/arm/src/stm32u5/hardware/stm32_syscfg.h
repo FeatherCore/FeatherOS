@@ -30,7 +30,8 @@
 #include <nuttx/config.h>
 #include "chip.h"
 
-#if defined(CONFIG_STM32U5_STM32U585XX) || defined(CONFIG_STM32U5_STM32U5A5XX) || defined(CONFIG_STM32U5_STM32U5GXX)
+#if defined(CONFIG_STM32U5_STM32U585XX) || defined(CONFIG_STM32U5_STM32U5A5XX) || \
+    defined(CONFIG_STM32U5_STM32U5A9XX) || defined(CONFIG_STM32U5_STM32U5GXX)
 #  include "hardware/stm32u5xx_syscfg.h"
 #else
 #  error "Unsupported STM32U5 chip"

@@ -1,5 +1,5 @@
 /****************************************************************************
- * arch/arm/src/stm32u5/hardware/stm32_pinmap.h
+ * boards/arm/stm32u5/stm32u5a9j-dk/src/stm32_clockconfig.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -20,21 +20,31 @@
  *
  ****************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_STM32U5_HARDWARE_STM32_PINMAP_H
-#define __ARCH_ARM_SRC_STM32U5_HARDWARE_STM32_PINMAP_H
-
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include "chip.h"
 
-#if defined(CONFIG_STM32U5_STM32U585XX) || defined(CONFIG_STM32U5_STM32U5A5XX) || \
-    defined(CONFIG_STM32U5_STM32U5A9XX) || defined(CONFIG_STM32U5_STM32U5GXX)
-#  include "hardware/stm32u5xx_pinmap.h"
-#else
-#  error "Unsupported STM32U5 pin map"
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: stm32_board_clockconfig
+ *
+ * Description:
+ *   Currently the STM32U5A9J-DK board support is restricted to running
+ *   NuttX in the Non-Secure domain together with TrustedFirmware-M (TFM).
+ *   In this setup the clock configuration is done by TFM, not by NuttX.
+ *   Thus, the board's configuration sets
+ *   CONFIG_ARCH_BOARD_STM32L5_CUSTOM_CLOCKCONFIG to avoid the standard clock
+ *   config logic to run and instead do just nothing in this function.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_ARCH_BOARD_STM32U5_CUSTOM_CLOCKCONFIG)
+void stm32_board_clockconfig(void)
+{
+}
 #endif
-
-#endif /* __ARCH_ARM_SRC_STM32U5_HARDWARE_STM32_PINMAP_H */

@@ -55,7 +55,8 @@
 #  error "Unsupported STM32U5 chip"
 #endif
 
-#if defined(CONFIG_STM32U5_STM32U585XX) || defined(CONFIG_STM32U5_STM32U5A5XX) || defined(CONFIG_STM32U5_STM32U5GXX)
+#if defined(CONFIG_STM32U5_STM32U585XX) || defined(CONFIG_STM32U5_STM32U5A5XX) || \
+    defined(CONFIG_STM32U5_STM32U5A9XX) || defined(CONFIG_STM32U5_STM32U5GXX)
 #  define STM32_NFSMC                    1   /* Have FSMC memory controller */
 #  define STM32_NATIM                    2   /* Two advanced timers TIM1 and 8 */
 #  define STM32_NGTIM32                  2   /* 32-bit general timers TIM2 and 5 with DMA */
@@ -84,9 +85,10 @@
 #  define STM32_NCRC                     1   /* CRC */
 #  define STM32_NCOMP                    2   /* Comparators */
 #  define STM32_NOPAMP                   2   /* Operational Amplifiers */
-#endif /* CONFIG_STM32U5_STM32U585XX */
+#endif /* CONFIG_STM32U5_STM32U585XX || CONFIG_STM32U5_STM32U5A5XX ||
+        * CONFIG_STM32U5_STM32U5A9XX || CONFIG_STM32U5_STM32U5GXX */
 
-#if defined(CONFIG_STM32U5_STM32U5A5ZJT)
+#if defined(CONFIG_STM32U5_STM32U5A5ZJT) || defined(CONFIG_STM32U5_STM32U5A9NJH6Q) || defined(CONFIG_STM32U5_STM32U5GXX)
 #  define STM32_NUSBOTGHS                1   /* USB OTG HS */
 #endif
 

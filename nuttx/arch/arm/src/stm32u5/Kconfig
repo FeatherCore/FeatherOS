@@ -27,12 +27,19 @@ config ARCH_CHIP_STM32U5A5ZJT
 	---help---
 	STM32 U5 Cortex M33, 4096 Kb FLASH, 2514 Kb SRAM, tqfp144
 
+config ARCH_CHIP_STM32U5A9NJH6Q
+	bool "STM32U5A9NJH6Q"
+	select STM32U5_STM32U5A9XX
+	select STM32U5_IO_CONFIG_A
+	---help---
+	STM32 U5 Cortex M33, 4096 Kb FLASH, 2514 Kb SRAM, tfbga216
+
 config ARCH_CHIP_STM32U5G9NJH6Q
 	bool "STM32U5G9NJH6Q"
 	select STM32U5_STM32U5GXX
 	select STM32U5_IO_CONFIG_A
 	---help---
-	STM32 U5 Cortex M33, 4096 Kb FLASH, 3026 Kb SRAM, tfbga216 
+	STM32 U5 Cortex M33, 4096 Kb FLASH, 3026 Kb SRAM, tfbga216
 
 endchoice # STM32 U5 Chip Selection
 
@@ -52,6 +59,18 @@ config STM32U5_STM32U5GXX
 
 config STM32U5_STM32U5A5XX
 	# STM32U5A5 and STM32U595 devices documented in RM0456
+	bool
+	default n
+	select ARCH_HAVE_FPU
+	select STM32U5_HAVE_LPUART1
+	select STM32U5_HAVE_USART1
+	select STM32U5_HAVE_USART2
+	select STM32U5_HAVE_USART3
+	select STM32U5_HAVE_UART4
+	select STM32U5_HAVE_UART5
+
+config STM32U5_STM32U5A9XX
+	# STM32U5A9 devices documented in RM0456
 	bool
 	default n
 	select ARCH_HAVE_FPU
