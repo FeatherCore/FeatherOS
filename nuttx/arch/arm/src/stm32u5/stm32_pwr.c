@@ -94,6 +94,9 @@ bool stm32_pwr_enableclk(bool enable)
 
   /* Power interface clock enable. */
 
+  // RCC_AHB3ENR          RCC AHB3 peripheral clock enable register
+
+  // RCC_AHB3ENR[ 2]  -> PWREN: PWR clock enable
   if (wasenabled && !enable)
     {
       /* Disable power interface clock */

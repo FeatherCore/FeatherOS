@@ -711,6 +711,9 @@ void stm32_stdclockconfig(void)
 
       /* Select correct main regulator range */
 
+      // PWR_VOSR       PWR voltage scaling register
+
+      // PWR_VOSR[17:16]    -> VOS[ 1: 0]: Voltage scaling range selection
       regval = getreg32(STM32_PWR_VOSR);
       regval &= ~PWR_VOSR_VOS_MASK;
 
@@ -731,12 +734,14 @@ void stm32_stdclockconfig(void)
           regval |= PWR_VOSR_VOS_RANGE4;
         }
 
+      // PWR_VOSR[18]       -> BOOSTEN: EPOD booster enable
       regval |= PWR_VOSR_BOOSTEN;
 
       putreg32(regval, STM32_PWR_VOSR);
 
       /* Wait for voltage regulator to stabilize */
 
+      // PWR_VOSR[14]       -> BOOSTRDY: EPOD booster ready
       while ((getreg32(STM32_PWR_VOSR) &
               (PWR_VOSR_VOSRDY | PWR_VOSR_BOOSTRDY)) !=
              (PWR_VOSR_VOSRDY | PWR_VOSR_BOOSTRDY))
@@ -747,11 +752,20 @@ void stm32_stdclockconfig(void)
        * wait states must be computed based on SYSCLK frequency.
        */
 
+      // FLASH_ACR      FLASH access control register
+
+      // FLASH_ACR[ 3: 0]   ->  LATENCY[3:0]: Latency
+      // FLASH_ACR[ 8]      ->  PRFTEN: Prefetch enable
       regval = FLASH_ACR_LATENCY_4 | FLASH_ACR_PRFTEN;
       putreg32(regval, STM32_FLASH_ACR);
 
       /* Set the HCLK, PCLK1 and PCLK2 dividers */
 
+      // RCC_CFGR2      RCC clock configuration register 2
+
+      // RCC_CFGR2[ 3: 0]   ->  HPRE[ 3: 0]: AHB prescaler
+      // RCC_CFGR2[ 6: 4]   ->  PPRE1[ 2: 0]: APB1 prescaler
+      // RCC_CFGR2[10: 8]   ->  PPRE2[ 2: 0]: APB2 prescaler
       regval  = getreg32(STM32_RCC_CFGR2);
       regval &= ~(RCC_CFGR2_HPRE_MASK  |
                   RCC_CFGR2_PPRE1_MASK |
@@ -763,6 +777,9 @@ void stm32_stdclockconfig(void)
 
       /* Set the PCLK3 divider */
 
+      // RCC_CFGR3      RCC clock configuration register 3
+
+      // RCC_CFGR3[ 6: 4]   ->  PPRE3[ 2: 0]: APB3 prescaler
       regval  = getreg32(STM32_RCC_CFGR3);
       regval &= ~RCC_CFGR3_PPRE3_MASK;
       regval |= STM32_RCC_CFGR3_PPRE3;
@@ -775,6 +792,13 @@ void stm32_stdclockconfig(void)
 #endif
 
       /* Set the PLL1 source, dividers and multipliers */
+
+      // RCC_PLL1DIVR     RCC PLL1 dividers register
+
+      // RCC_PLL1DIVR[ 8: 0]  ->  PLL1N[ 8: 0]: Multiplication factor for PLL1 VCO
+      // RCC_PLL1DIVR[15: 9]  ->  PLL1P[ 6: 0]: PLL1 DIVP division factor
+      // RCC_PLL1DIVR[22:16]  ->  PLL1Q[ 6: 0]: PLL1 DIVQ division factor
+      // RCC_PLL1DIVR[30:24]  ->  PLL1R[ 6: 0]: PLL1 DIVR division factor
 
       regval = STM32_RCC_PLL1DIVR_PLL1N |
                STM32_RCC_PLL1DIVR_PLL1P |
@@ -800,11 +824,16 @@ void stm32_stdclockconfig(void)
 
       putreg32(regval, STM32_RCC_PLL1CFGR);
 #else
+
+      // RCC_PLL1CFGR     RCC PLL1 configuration register
+
       // RCC_PLL1CFGR[ 1: 0]  ->  PLL1SRC[ 1: 0]: PLL1 entry clock source
       // RCC_PLL1CFGR[ 3: 2]  ->  PLL1RGE[ 1: 0]: PLL1 input frequency range
       // RCC_PLL1CFGR[11: 8]  ->  PLL1M[ 3: 0]：Prescaler for PLL1
       // RCC_PLL1CFGR[15:12]  ->  PLL1MBOOST[3:0]: Prescaler for EPOD booster input clock
-
+      // RCC_PLL1CFGR[18]     ->  PLL1REN: PLL1 DIVR divider output enable
+      // RCC_PLL1CFGR[17]     ->  PLL1QEN: PLL1 DIVQ divider output enable
+      // RCC_PLL1CFGR[16]     ->  PLL1PEN: PLL1 DIVP divider output enable
       regval = RCC_PLL1CFGR_PLL1SRC_HSE         |
                RCC_PLL1CFGR_PLL1RGE_8_TO_16MHZ  |
                STM32_RCC_PLL1CFGR_PLL1M         |
@@ -824,12 +853,14 @@ void stm32_stdclockconfig(void)
 
       /* Enable PLL1 */
 
+      // RCC_CR[24]  ->  PLL1ON: PLL1 enable
       regval  = getreg32(STM32_RCC_CR);
       regval |= RCC_CR_PLL1ON;
       putreg32(regval, STM32_RCC_CR);
 
       /* Wait until PLL1 is ready */
 
+      // RCC_CR[25]  ->  PLL1RDY: PLL1 clock ready flag
       while ((getreg32(STM32_RCC_CR) & RCC_CR_PLL1RDY) == 0)
         {
         }

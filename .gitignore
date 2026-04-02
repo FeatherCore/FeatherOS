@@ -1,0 +1,74 @@
+# Build artifacts
+*.o
+*.a
+*.d
+*.dep
+*.bin
+*.hex
+*.map
+*.manifest
+*.lock
+
+# Build directories
+bin/
+staging/
+
+# NuttX specific build files
+nuttx/nuttx
+nuttx/.config
+nuttx/.config.*
+nuttx/.dirlinks
+nuttx/Make.defs
+nuttx/System.map
+nuttx/defconfig
+
+# Generated Kconfig files
+**/.kconfig
+**/Kconfig
+
+# Dependency files
+.depend
+Make.dep
+
+# Context files
+.context
+
+# Symbolic links (generated during build)
+board
+chip
+arch
+platform
+
+# Tools binaries
+nuttx/tools/cnvwindeps
+nuttx/tools/incdir
+nuttx/tools/mkconfig
+nuttx/tools/mkdeps
+nuttx/tools/mkversion
+
+# Downloaded packages
+apps/graphics/lvgl/*.zip
+
+# Generated headers
+nuttx/include/nuttx/config.h
+nuttx/include/nuttx/version.h
+
+# Library files
+apps/libapps.a
+
+# Built markers
+.built
+
+# Generated headers in apps
+apps/builtin/builtin_list.h
+apps/builtin/builtin_proto.h
+apps/builtin/registry/
+
+# Dirlinks
+.dirlinks
+
+# Downloaded libraries
+apps/graphics/lvgl/lvgl/
+
+# VSCode settings
+.vscode/

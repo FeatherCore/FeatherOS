@@ -93,9 +93,15 @@
  *         = 48,000,000
  */
 
+// RCC_PLLCFGR      RCC PLL configuration register
+
+// RCC_PLLCFGR[ 5: 0]  ->  PLLM[ 5: 0]：Prescaler for PLL, Division factor for the main PLL (PLL) and audio PLL (PLLI2S) input clock
 #define STM32_PLLCFG_PLLM       RCC_PLLCFG_PLLM(8)
+// RCC_PLLCFGR[14: 6]  ->  PLLN[ 8: 0]：Prescaler for PLL, Main PLL (PLL) multiplication factor for VCO
 #define STM32_PLLCFG_PLLN       RCC_PLLCFG_PLLN(336)
+// RCC_PLLCFGR[17:16]  ->  PLLP[ 1: 0]：Prescaler for PLL, Main PLL (PLL) division factor for main system clock
 #define STM32_PLLCFG_PLLP       RCC_PLLCFG_PLLP_2
+// RCC_PLLCFGR[21:18]  ->  PLLQ[ 3: 0]：Prescaler for PLL, Main PLL (PLL) division factor for USB OTG FS, SDIO and random number generator clocks
 #define STM32_PLLCFG_PLLQ       RCC_PLLCFG_PLLQ(7)
 
 #define STM32_SYSCLK_FREQUENCY  168000000ul

@@ -719,6 +719,8 @@ static void stm32_stdclockconfig(void)
   uint32_t regval;
   volatile int32_t timeout;
 
+// RCC_CR               RCC clock control register
+
 #ifdef STM32_BOARD_USEHSI
 
   /* Wait until the HSI is ready (or until a timeout elapsed) */
@@ -727,6 +729,7 @@ static void stm32_stdclockconfig(void)
     {
       /* Check if the HSIRDY flag is the set in the CR */
 
+      // RCC_CR[1]            ->  HSIRDY: Internal high-speed clock ready flag
       if ((getreg32(STM32_RCC_CR) & RCC_CR_HSIRDY) != 0)
         {
           /* If so, then break-out with timeout > 0 */
@@ -744,11 +747,13 @@ static void stm32_stdclockconfig(void)
    */
 
   regval  = getreg32(STM32_RCC_CR);
+  // RCC_CR[18]               ->  HSEBYP: HSE clock bypass
   regval |= RCC_CR_HSEBYP;
   putreg32(regval, STM32_RCC_CR);
 #endif
 
   regval  = getreg32(STM32_RCC_CR);
+  // RCC_CR[16]               ->  HSEON: HSE clock enable
   regval |= RCC_CR_HSEON;           /* Enable HSE */
   putreg32(regval, STM32_RCC_CR);
 
@@ -757,7 +762,7 @@ static void stm32_stdclockconfig(void)
   for (timeout = HSERDY_TIMEOUT; timeout > 0; timeout--)
     {
       /* Check if the HSERDY flag is the set in the CR */
-
+      // RCC_CR[17]               ->  HSERDY: HSE clock ready flag
       if ((getreg32(STM32_RCC_CR) & RCC_CR_HSERDY) != 0)
         {
           /* If so, then break-out with timeout > 0 */
@@ -778,7 +783,10 @@ static void stm32_stdclockconfig(void)
        * frequencies up to 168 MHz.
        */
 
+      // RCC_APB1ENR            RCC APB1 peripheral clock enable register
+
       regval  = getreg32(STM32_RCC_APB1ENR);
+      // RCC_APB1ENR[28]              ->  PWREN: Power interface clock enable
       regval |= RCC_APB1ENR_PWREN;
       putreg32(regval, STM32_RCC_APB1ENR);
 
@@ -786,16 +794,22 @@ static void stm32_stdclockconfig(void)
 #if defined(CONFIG_STM32_STM32F427) || defined(CONFIG_STM32_STM32F429) || \
     defined(CONFIG_STM32_STM32F446) || defined(CONFIG_STM32_STM32F469) || \
     defined(CONFIG_STM32_STM32F412)
+      // PWR_CR                 PWR power control register for STM32F42xxx and STM32F43xxx
+      // PWR_CR[15:14]        ->  VOS[ 1: 0]：Regulator voltage scaling output selection
       regval &= ~PWR_CR_VOS_MASK;
       regval |= PWR_CR_VOS_SCALE_1;
 #else
+      // PWR_CR                 PWR power control register for STM32F405xx/07xx and STM32F415xx/17xx
       regval |= PWR_CR_VOS;
 #endif
       putreg32(regval, STM32_PWR_CR);
 
       /* Set the HCLK source/divider */
 
+      // RCC_CFGR               RCC clock configuration register
+
       regval  = getreg32(STM32_RCC_CFGR);
+      // RCC_CFGR[ 7: 4]      ->  HPRE[ 3: 0]：Set and cleared by software to control AHB clock division factor.
       regval &= ~RCC_CFGR_HPRE_MASK;
       regval |= STM32_RCC_CFGR_HPRE;
       putreg32(regval, STM32_RCC_CFGR);
@@ -803,6 +817,7 @@ static void stm32_stdclockconfig(void)
       /* Set the PCLK2 divider */
 
       regval  = getreg32(STM32_RCC_CFGR);
+      // RCC_CFGR[15:13]      ->  PPRE2[ 2: 0]：Set and cleared by software to control APB high-speed clock division factor.
       regval &= ~RCC_CFGR_PPRE2_MASK;
       regval |= STM32_RCC_CFGR_PPRE2;
       putreg32(regval, STM32_RCC_CFGR);
@@ -810,6 +825,7 @@ static void stm32_stdclockconfig(void)
       /* Set the PCLK1 divider */
 
       regval  = getreg32(STM32_RCC_CFGR);
+      // RCC_CFGR[12:10]      ->  PPRE1[ 2: 0]：Set and cleared by software to control APB low-speed clock division factor.
       regval &= ~RCC_CFGR_PPRE1_MASK;
       regval |= STM32_RCC_CFGR_PPRE1;
       putreg32(regval, STM32_RCC_CFGR);
@@ -825,11 +841,19 @@ static void stm32_stdclockconfig(void)
 
       /* Set the PLL dividers and multipliers to configure the main PLL */
 
+      // RCC_PLLCFGR      RCC PLL configuration register
+
+      // RCC_PLLCFGR[ 5: 0]  ->  PLLM[ 5: 0]：Prescaler for PLL, Division factor for the main PLL (PLL) and audio PLL (PLLI2S) input clock
+      // RCC_PLLCFGR[14: 6]  ->  PLLN[ 8: 0]：Prescaler for PLL, Main PLL (PLL) multiplication factor for VCO
+      // RCC_PLLCFGR[17:16]  ->  PLLP[ 1: 0]：Prescaler for PLL, Main PLL (PLL) division factor for main system clock
+      // RCC_PLLCFGR[21:18]  ->  PLLQ[ 3: 0]：Prescaler for PLL, Main PLL (PLL) division factor for USB OTG FS, SDIO and random number generator clocks
+
       regval = (STM32_PLLCFG_PLLM | STM32_PLLCFG_PLLN | STM32_PLLCFG_PLLP
                 | STM32_PLLCFG_PLLQ
 #ifdef STM32_BOARD_USEHSI
                 | RCC_PLLCFG_PLLSRC_HSI
 #else /* if STM32_BOARD_USEHSE */
+      // RCC_PLLCFGR[22]     ->  PLLSRC: Main PLL(PLL) and audio PLL (PLLI2S) entry clock source
                 | RCC_PLLCFG_PLLSRC_HSE
 #endif
 #if defined(STM32_PLLCFG_PLLR)
@@ -841,11 +865,13 @@ static void stm32_stdclockconfig(void)
       /* Enable the main PLL */
 
       regval  = getreg32(STM32_RCC_CR);
+      // RCC_CR[24]               ->  PLLON: Main PLL (PLL) enable
       regval |= RCC_CR_PLLON;
       putreg32(regval, STM32_RCC_CR);
 
       /* Wait until the PLL is ready */
 
+      // RCC_CR[25]               ->  PLLRDY: Main PLL (PLL) enable
       while ((getreg32(STM32_RCC_CR) & RCC_CR_PLLRDY) == 0)
         {
         }
@@ -873,6 +899,12 @@ static void stm32_stdclockconfig(void)
        * and set FLASH wait states.
        */
 
+      // FLASH_ACR      Flash access control register for STM32F42xxx and STM32F43xxx
+
+      // FLASH_ACR[10]  ->  DCEN: Data cache enable
+      // FLASH_ACR[ 9]  ->  ICEN: Instruction cache enable
+      // FLASH_ACR[ 8]  ->  PRFTEN: Prefetch enable
+
       regval = (FLASH_ACR_LATENCY_SETTING
 #ifdef CONFIG_STM32_FLASH_ICACHE
                 | FLASH_ACR_ICEN
@@ -890,11 +922,13 @@ static void stm32_stdclockconfig(void)
 
       regval  = getreg32(STM32_RCC_CFGR);
       regval &= ~RCC_CFGR_SW_MASK;
+      // RCC_CFGR[ 1: 0]      ->  SW[ 1: 0]：System clock switch.
       regval |= RCC_CFGR_SW_PLL;
       putreg32(regval, STM32_RCC_CFGR);
 
       /* Wait until the PLL source is used as the system clock source */
 
+      // RCC_CFGR[ 3: 2]      ->  SWS[ 1: 0]：System clock switch status.
       while ((getreg32(STM32_RCC_CFGR) & RCC_CFGR_SWS_MASK)
               != RCC_CFGR_SWS_PLL)
         {
@@ -903,6 +937,8 @@ static void stm32_stdclockconfig(void)
 #if defined(CONFIG_STM32_LTDC) || defined(CONFIG_STM32_SAIPLL)
 
       /* Configure PLLSAI */
+
+      // RCC_PLLSAICFGR       RCC PLL configuration register
 
       regval  = getreg32(STM32_RCC_PLLSAICFGR);
 #  if defined(CONFIG_STM32_STM32F446)
@@ -927,11 +963,20 @@ static void stm32_stdclockconfig(void)
       regval &= ~(RCC_PLLSAICFGR_PLLSAIN_MASK
                  | RCC_PLLSAICFGR_PLLSAIQ_MASK
                  | RCC_PLLSAICFGR_PLLSAIR_MASK);
-      regval |= (STM32_RCC_PLLSAICFGR_PLLSAIN
+      
+                // RCC_PLLSAICFGR[14: 6]  ->  PLLSAIN[ 8: 0]：PLLSAI division factor for VCO
+                // RCC_PLLSAICFGR[27:24]  ->  PLLSAIQ[ 3: 0]：PLLSAI division factor for SAI1 clock
+                // RCC_PLLSAICFGR[30:28]  ->  PLLSAIR[ 2: 0]：PLLSAI division factor for LCD clock
+                // f(VCO clock) = f(PLLSAI clock input) × (PLLSAIN / PLLM)
+                // f(PLLSAI1 clock output) = f(VCO clock) / PLLSAIQ
+                // f(PLL LCD clock output) = f(VCO clock) / PLLSAIR
+                 regval |= (STM32_RCC_PLLSAICFGR_PLLSAIN
                 | STM32_RCC_PLLSAICFGR_PLLSAIQ
                 | STM32_RCC_PLLSAICFGR_PLLSAIR);
 #  endif
       putreg32(regval, STM32_RCC_PLLSAICFGR);
+
+      // RCC_DCKCFGR          RCC Dedicated Clock Configuration Register
 
       regval  = getreg32(STM32_RCC_DCKCFGR);
 #  if defined(CONFIG_STM32_STM32F446)
@@ -969,6 +1014,8 @@ static void stm32_stdclockconfig(void)
                 | STM32_RCC_DCKCFGR_SDMMCSEL
                 | STM32_RCC_DCKCFGR_DSISEL);
 #  else
+      // RCC_DCKCFGR[17:16]   ->  PLLSAIDIVR[ 1: 0]：division factor for LCD_CLK
+
       regval &= ~RCC_DCKCFGR_PLLSAIDIVR_MASK;
       regval |= STM32_RCC_DCKCFGR_PLLSAIDIVR;
 #  endif
@@ -976,12 +1023,14 @@ static void stm32_stdclockconfig(void)
 
       /* Enable PLLSAI */
 
+      // RCC_CR[28]               ->  PLLSAION: PLLSAI enable
       regval  = getreg32(STM32_RCC_CR);
       regval |= RCC_CR_PLLSAION;
       putreg32(regval, STM32_RCC_CR);
 
       /* Wait until the PLLSAI is ready */
 
+      // RCC_CR[29]               ->  PLLSAIRDY: PLLSAI clock ready flag
       while ((getreg32(STM32_RCC_CR) & RCC_CR_PLLSAIRDY) == 0)
         {
         }
