@@ -286,11 +286,35 @@ void up_allocate_heap(void **heap_start, size_t *heap_size)
   stm32_mpu_uheap((uintptr_t)ubase, usize);
 #else
 
+  /* SRAM1 + SRAM2 + SRAM3 + SRAM5 + SRAM6 are contiguous! */
+
+  uintptr_t sram_end = SRAM1_END;
+
+#ifdef STM32_SRAM6_SIZE
+  /* All SRAMs are contiguous:
+   * 0x20000000 - 0x200BFFFF (768KB SRAM1)
+   * 0x200C0000 - 0x200CFFFF (64KB SRAM2)
+   * 0x200D0000 - 0x2019FFFF (832KB SRAM3)
+   * 0x201A0000 - 0x2026FFFF (832KB SRAM5)
+   * 0x20270000 - 0x202EFFFF (512KB SRAM6)
+   */
+
+  sram_end = SRAM6_END;
+#elif defined(STM32_SRAM5_SIZE)
+  /* SRAM1 + SRAM2 + SRAM3 + SRAM5 are contiguous */
+
+  sram_end = SRAM5_END;
+#elif defined(STM32_SRAM3_SIZE)
+  /* SRAM1 + SRAM2 + SRAM3 are contiguous */
+
+  sram_end = SRAM3_END;
+#endif
+
   /* Return the heap settings */
 
   board_autoled_on(LED_HEAPALLOCATE);
   *heap_start = (void *)g_idle_topstack;
-  *heap_size  = SRAM1_END - g_idle_topstack;
+  *heap_size  = sram_end - g_idle_topstack;
 
   /* Colorize the heap for debug */
 
