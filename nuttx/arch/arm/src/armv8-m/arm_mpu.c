@@ -403,3 +403,41 @@ void mpu_early_reset(void)
   mpu_reset_internal();
 }
 #endif
+
+/****************************************************************************
+ * Name: mpu_log2regionfloor
+ *
+ * Description:
+ *   Determine the largest value of l2size (log base 2 size) such that the
+ *   following is true:
+ *
+ *   size >= (1 << l2size)
+ *
+ *   For ARMv8-M, we don't actually need this because the MPU supports
+ *   arbitrary sizes (aligned to 32 bytes). But we provide a simple
+ *   implementation for compatibility.
+ *
+ * Input Parameters:
+ *   size - The size of the region.
+ *
+ * Returned Value:
+ *   The logarithm base 2 of the floor value for the MPU region size.
+ *
+ ****************************************************************************/
+
+uint8_t mpu_log2regionfloor(size_t size)
+{
+  uint8_t l2size = 0;
+
+  /* Find the highest power of 2 that is <= size */
+
+  while (size > 1)
+    {
+      size >>= 1;
+      l2size++;
+    }
+
+  /* For ARMv8-M, return at least 5 (32 bytes alignment) */
+
+  return l2size < 5 ? 5 : l2size;
+}

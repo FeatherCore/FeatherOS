@@ -376,6 +376,11 @@ config STM32U5_SRAM5_HEAP
 	depends on STM32U5_SRAM5
 	default n
 
+config STM32U5_SRAM6_HEAP
+	bool "SRAM6 is used for heap"
+	depends on STM32U5_SRAM6
+	default n
+
 comment "AHB2 Peripherals"
 
 config STM32U5_ADC1

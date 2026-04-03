@@ -364,6 +364,25 @@ void mpu_initialize(const struct mpu_region_s *table, size_t count,
                     bool hfnmiena, bool privdefena);
 
 /****************************************************************************
+ * Name: mpu_log2regionfloor
+ *
+ * Description:
+ *   Determine the largest value of l2size (log base 2 size) such that the
+ *   following is true:
+ *
+ *   size >= (1 << l2size)
+ *
+ * Input Parameters:
+ *   size - The size of the region.
+ *
+ * Returned Value:
+ *   The logarithm base 2 of the floor value for the MPU region size.
+ *
+ ****************************************************************************/
+
+uint8_t mpu_log2regionfloor(size_t size);
+
+/****************************************************************************
  * Inline Functions
  ****************************************************************************/
 

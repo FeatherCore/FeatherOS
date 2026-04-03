@@ -226,21 +226,46 @@ void up_allocate_heap(void **heap_start, size_t *heap_size)
 
   uintptr_t ubase = (uintptr_t)USERSPACE->us_bssend +
                     CONFIG_MM_KERNEL_HEAPSIZE;
-  size_t    usize = SRAM1_END - ubase;
-  int       log2;
 
-  DEBUGASSERT(ubase < (uintptr_t)SRAM1_END);
+  /* SRAM1 + SRAM2 + SRAM3 + SRAM5 + SRAM6 are contiguous! */
 
-  /* Adjust that size to account for MPU alignment requirements.
-   * NOTE that there is an implicit assumption that the SRAM1_END
-   * is aligned to the MPU requirement.
+  uintptr_t sram_end = SRAM1_END;
+
+#ifdef STM32_SRAM6_SIZE
+  /* All SRAMs are contiguous:
+   * 0x20000000 - 0x200BFFFF (768KB SRAM1)
+   * 0x200C0000 - 0x200CFFFF (64KB SRAM2)
+   * 0x200D0000 - 0x2019FFFF (832KB SRAM3)
+   * 0x201A0000 - 0x2026FFFF (832KB SRAM5)
+   * 0x20270000 - 0x202EFFFF (512KB SRAM6)
    */
 
-  log2  = (int)mpu_log2regionfloor(usize);
-  DEBUGASSERT((SRAM1_END & ((1 << log2) - 1)) == 0);
+  sram_end = SRAM6_END;
+#elif defined(STM32_SRAM5_SIZE)
+  /* SRAM1 + SRAM2 + SRAM3 + SRAM5 are contiguous */
 
-  usize = (1 << log2);
-  ubase = SRAM1_END - usize;
+  sram_end = SRAM5_END;
+#elif defined(STM32_SRAM3_SIZE)
+  /* SRAM1 + SRAM2 + SRAM3 are contiguous */
+
+  sram_end = SRAM3_END;
+#endif
+
+  size_t usize = sram_end - ubase;
+
+  DEBUGASSERT(ubase < (uintptr_t)sram_end);
+
+  /* For ARMv8-M, we don't need power-of-2 alignment.
+   * Just ensure 32-byte alignment for ARMv8-M MPU.
+   * 
+   * IMPORTANT: The MPU region base address must be aligned to the region size.
+   * We align ubase UP to 32 bytes to ensure the heap starts at a valid boundary.
+   * We align usize DOWN to 32 bytes to ensure the heap size is valid.
+   */
+
+  ubase = (ubase + 31) & ~31;  /* 32-byte align up */
+  usize = sram_end - ubase;
+  usize = usize & ~31;          /* 32-byte align down */
 
   /* Return the user-space heap settings */
 
@@ -252,7 +277,11 @@ void up_allocate_heap(void **heap_start, size_t *heap_size)
 
   up_heap_color((void *)ubase, usize);
 
-  /* Allow user-mode access to the user heap memory */
+  /* Allow user-mode access to the user heap memory.
+   * Note: stm32_mpu_uheap uses mpu_user_intsram which aligns the base address
+   * down to 32 bytes. Since we've already aligned ubase up to 32 bytes,
+   * this should be safe.
+   */
 
   stm32_mpu_uheap((uintptr_t)ubase, usize);
 #else
@@ -289,21 +318,42 @@ void up_allocate_kheap(void **heap_start, size_t *heap_size)
 
   uintptr_t ubase = (uintptr_t)USERSPACE->us_bssend +
                     CONFIG_MM_KERNEL_HEAPSIZE;
-  size_t    usize = SRAM1_END - ubase;
-  int       log2;
 
-  DEBUGASSERT(ubase < (uintptr_t)SRAM1_END);
+  /* SRAM1 + SRAM2 + SRAM3 + SRAM5 + SRAM6 are contiguous! */
 
-  /* Adjust that size to account for MPU alignment requirements.
-   * NOTE that there is an implicit assumption that the SRAM1_END
-   * is aligned to the MPU requirement.
+  uintptr_t sram_end = SRAM1_END;
+
+#ifdef STM32_SRAM6_SIZE
+  /* All SRAMs are contiguous:
+   * 0x20000000 - 0x200BFFFF (768KB SRAM1)
+   * 0x200C0000 - 0x200CFFFF (64KB SRAM2)
+   * 0x200D0000 - 0x2019FFFF (832KB SRAM3)
+   * 0x201A0000 - 0x2026FFFF (832KB SRAM5)
+   * 0x20270000 - 0x202EFFFF (512KB SRAM6)
    */
 
-  log2  = (int)mpu_log2regionfloor(usize);
-  DEBUGASSERT((SRAM1_END & ((1 << log2) - 1)) == 0);
+  sram_end = SRAM6_END;
+#elif defined(STM32_SRAM5_SIZE)
+  /* SRAM1 + SRAM2 + SRAM3 + SRAM5 are contiguous */
 
-  usize = (1 << log2);
-  ubase = SRAM1_END - usize;
+  sram_end = SRAM5_END;
+#elif defined(STM32_SRAM3_SIZE)
+  /* SRAM1 + SRAM2 + SRAM3 are contiguous */
+
+  sram_end = SRAM3_END;
+#endif
+
+  size_t usize = sram_end - ubase;
+
+  DEBUGASSERT(ubase < (uintptr_t)sram_end);
+
+  /* For ARMv8-M, we don't need power-of-2 alignment.
+   * Just ensure 32-byte alignment for ARMv8-M MPU.
+   */
+
+  ubase = (ubase + 31) & ~31;  /* 32-byte align */
+  usize = sram_end - ubase;
+  usize = usize & ~31;          /* 32-byte align */
 
   /* Return the kernel heap settings (i.e., the part of the heap region
    * that was not dedicated to the user heap).
@@ -326,6 +376,30 @@ void up_allocate_kheap(void **heap_start, size_t *heap_size)
 #if CONFIG_MM_REGIONS > 1
 void arm_addregion(void)
 {
+  /* Determine which SRAMs are already included in the initial heap */
+
+#if defined(STM32_SRAM6_SIZE)
+  /* SRAM6 is available: SRAM1+2+3+5+6 are all contiguous and already
+   * included in the initial heap from up_allocate_heap()
+   */
+#  define SRAMS_ALREADY_INCLUDED 1
+#elif defined(STM32_SRAM5_SIZE)
+  /* SRAM5 is available but SRAM6 is not: SRAM1+2+3+5 are contiguous
+   * and already included in the initial heap from up_allocate_heap()
+   */
+#  define SRAMS_ALREADY_INCLUDED 1
+#elif defined(STM32_SRAM3_SIZE)
+  /* SRAM3 is available but SRAM5/6 are not: SRAM1+2+3 are contiguous
+   * and already included in the initial heap from up_allocate_heap()
+   */
+#  define SRAMS_ALREADY_INCLUDED 1
+#else
+  /* Only SRAM1 is available, or none of the above */
+#  define SRAMS_ALREADY_INCLUDED 0
+#endif
+
+#ifndef SRAMS_ALREADY_INCLUDED
+
 #ifdef CONFIG_STM32U5_SRAM2_HEAP
 
 #  if defined(CONFIG_BUILD_PROTECTED) && defined(CONFIG_MM_KERNEL_HEAP)
@@ -386,15 +460,19 @@ void arm_addregion(void)
 
 #endif /* SRAM5 */
 
+#endif /* !SRAMS_ALREADY_INCLUDED */
+
 #ifdef CONFIG_STM32U5_SRAM6_HEAP
 
-#  if defined(CONFIG_BUILD_PROTECTED) && defined(CONFIG_MM_KERNEL_HEAP)
+#  ifndef SRAMS_ALREADY_INCLUDED
+
+#    if defined(CONFIG_BUILD_PROTECTED) && defined(CONFIG_MM_KERNEL_HEAP)
 
   /* Allow user-mode access to the SRAM6 heap */
 
   stm32_mpu_uheap((uintptr_t)SRAM6_START, STM32_SRAM6_SIZE);
 
-#  endif
+#    endif
 
   /* Colorize the heap for debug */
 
@@ -403,6 +481,8 @@ void arm_addregion(void)
   /* Add the SRAM6 user heap region. */
 
   kumm_addregion((void *)SRAM6_START, STM32_SRAM6_SIZE);
+
+#  endif
 
 #endif /* SRAM6 */
 

@@ -273,6 +273,10 @@ static inline void rcc_enableahb2(void)
   regval |= RCC_AHB2ENR2_SRAM5EN;
 #endif
 
+#ifdef CONFIG_STM32U5_SRAM6
+  regval |= RCC_AHB2ENR2_SRAM6EN;
+#endif
+
   putreg32(regval, STM32_RCC_AHB2ENR2);
 }
 
