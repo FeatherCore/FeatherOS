@@ -33,12 +33,6 @@ Make.dep
 # Context files
 .context
 
-# Symbolic links (generated during build)
-board
-chip
-arch
-platform
-
 # Tools binaries
 nuttx/tools/cnvwindeps
 nuttx/tools/incdir
