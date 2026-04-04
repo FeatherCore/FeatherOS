@@ -167,6 +167,7 @@
 #define STM32_GPIOG_BASE        0x42021800
 #define STM32_GPIOH_BASE        0x42021c00
 #define STM32_GPIOI_BASE        0x42022000
+#define STM32_GPIOJ_BASE        0x42022400
 #define STM32_ADC1_BASE         0x42028000
 #define STM32_DCMI_BASE         0x4202c000
 #define STM32_PSSI_BASE         0x4202c400

@@ -197,6 +197,8 @@
 #  define GPIO_PORTF                  (5 << GPIO_PORT_SHIFT)     /*   GPIOF */
 #  define GPIO_PORTG                  (6 << GPIO_PORT_SHIFT)     /*   GPIOG */
 #  define GPIO_PORTH                  (7 << GPIO_PORT_SHIFT)     /*   GPIOH */
+#  define GPIO_PORTI                  (8 << GPIO_PORT_SHIFT)     /*   GPIOI */
+#  define GPIO_PORTJ                  (9 << GPIO_PORT_SHIFT)     /*   GPIOJ */
 
 /* This identifies the bit in the port:
  *

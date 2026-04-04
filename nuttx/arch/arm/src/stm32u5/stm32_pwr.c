@@ -189,15 +189,22 @@ void stm32_pwr_adjustvcore(unsigned sysclock)
 
   DEBUGASSERT(sysclock <= 160000000);
 
-  if (sysclock > 110000000)
+  /* According to STM32CubeU5 HAL:
+   *   - Range 1 (1.2V): up to 160 MHz (requires BOOSTEN)
+   *   - Range 2 (1.1V): up to 100 MHz (requires BOOSTEN)
+   *   - Range 3 (1.0V): up to 50 MHz
+   *   - Range 4 (0.9V): up to 24 MHz
+   */
+
+  if (sysclock > 100000000)
     {
       vos_range = PWR_VOSR_VOS_RANGE1 | PWR_VOSR_BOOSTEN;
     }
-  else if (sysclock > 55000000)
+  else if (sysclock > 50000000)
     {
       vos_range = PWR_VOSR_VOS_RANGE2 | PWR_VOSR_BOOSTEN;
     }
-  else if (sysclock > 25000000)
+  else if (sysclock > 24000000)
     {
       vos_range = PWR_VOSR_VOS_RANGE3;
     }
@@ -206,7 +213,8 @@ void stm32_pwr_adjustvcore(unsigned sysclock)
       vos_range = PWR_VOSR_VOS_RANGE4;
     }
 
-  modreg32(vos_range, PWR_VOSR_VOS_MASK | PWR_VOSR_BOOSTEN, STM32_PWR_VOSR);
+  /* Correct parameter order: modifyreg32(address, clearbits, setbits) */
+  modifyreg32(STM32_PWR_VOSR, PWR_VOSR_VOS_MASK | PWR_VOSR_BOOSTEN, vos_range);
 
   /* Wait until the new V_CORE voltage range has been applied. */
 
@@ -231,12 +239,12 @@ void stm32_pwr_adjustvcore(unsigned sysclock)
     }
 
   DEBUGASSERT(timeout > 0);
-#if 0
+
   /* Wait until the embedded power distribution (EPOD) booster has been
    * enabled, if applicable.
+   * According to RM0456 section 10.10.4, the system clock frequency
+   * can be switched higher than 55 MHz only after BOOSTRDY is set.
    */
-
-  DEBUGASSERT(timeout > 0);
 
   if (vos_range & PWR_VOSR_BOOSTEN)
     {
@@ -247,10 +255,9 @@ void stm32_pwr_adjustvcore(unsigned sysclock)
               break;
             }
         }
-    }
-#endif
 
-  DEBUGASSERT(timeout > 0);
+      DEBUGASSERT(timeout > 0);
+    }
 }
 
 /****************************************************************************
@@ -273,7 +280,8 @@ void stm32_pwr_enablesmps(bool enable)
 
   /* Select the respective regulator. */
 
-  modreg32(regsel, PWR_CR3_REGSEL, STM32_PWR_CR3);
+  /* Correct parameter order: modifyreg32(address, clearbits, setbits) */
+  modifyreg32(STM32_PWR_CR3, PWR_CR3_REGSEL, regsel);
 
   /* Wait until the respective regulator has been activated. */
 
