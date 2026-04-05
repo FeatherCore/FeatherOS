@@ -33,27 +33,10 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Alternate Pin Functions.  All members of the STM32U585xx family share the
- * same pin multiplexing (although they may differ in the pins physically
- * available).  See DB3734, Table 28 "Alternate Function AF0
- * to AF7" and Table 29 "Alternate Function AF8 to AF15".
- *
- * Alternative pin selections are provided with a numeric suffix like _1, _2,
- * etc.  Drivers, however, will use the pin selection without the numeric
- * suffix.  Additional definitions are required in the board.h file.  For
- * example, if FDCAN1_RX connects via PA11 on some board, then the following
- * definitions should appear in the board.h header file for that board:
- *
- * #define GPIO_FDCAN1_RX GPIO_FDCAN1_RX_1
- *
- * The driver will then automatically configure PA11 as the FDCAN1 RX pin.
- *
- * Note that this header file does not specify pull-up or -down resistors
- * (GPIO_FLOAT, GPIO_PULLUP, GPIO_PULLDOWN), output frequency
- * (GPIO_SPEED_2MHZ, GPIO_SPEED_25MHZ, GPIO_SPEED_50MHZ, GPIO_SPEED_100MHZ),
- * or whether the pin is to be operated in push-pull or open-drain mode
- * (GPIO_PUSHPULL, GPIO_OPENDRAIN).  As all of this is application specific,
- * it should be specified in corresponding board.h file.
+
+/* ========================================
+ * GPIO_ANALOG - Analog mode pins
+ * ========================================
  */
 
 /* ADC1 - Analog-to-digital converter */
@@ -118,6 +101,27 @@
 #define GPIO_ADC4_IN22_1        (GPIO_ANALOG|GPIO_PORTC|GPIO_PIN4)  // ADC4_IN22 -> PC4
 #define GPIO_ADC4_IN23_1        (GPIO_ANALOG|GPIO_PORTC|GPIO_PIN5)  // ADC4_IN23 -> PC5
 
+/* DAC1 - Digital-to-analog converter */
+
+#define GPIO_DAC1_OUT1_1        (GPIO_ANALOG|GPIO_PORTA|GPIO_PIN4)  // DAC1_OUT1 -> PA4
+#define GPIO_DAC1_OUT2_1        (GPIO_ANALOG|GPIO_PORTA|GPIO_PIN5)  // DAC1_OUT2 -> PA5
+
+/* OPAMP1 - Operational amplifier */
+
+#define GPIO_OPAMP1_VINP_1      (GPIO_ANALOG|GPIO_PORTA|GPIO_PIN0)  // OPAMP1_VINP -> PA0
+#define GPIO_OPAMP1_VOUT_1      (GPIO_ANALOG|GPIO_PORTA|GPIO_PIN3)  // OPAMP1_VOUT -> PA3
+
+/* OPAMP2 - Operational amplifier */
+
+#define GPIO_OPAMP2_VINP_1      (GPIO_ANALOG|GPIO_PORTA|GPIO_PIN6)  // OPAMP2_VINP -> PA6
+#define GPIO_OPAMP2_VOUT_1      (GPIO_ANALOG|GPIO_PORTB|GPIO_PIN0)  // OPAMP2_VOUT -> PB0
+
+
+/* ========================================
+ * GPIO_ALT - Alternate function mode pins
+ * ========================================
+ */
+
 /* ADF1 - Audio digital filter */
 
 #define GPIO_ADF1_CCK0_1        (GPIO_ALT|GPIO_AF3|GPIO_PORTB|GPIO_PIN3)  // ADF1_CCK0 -> PB3
@@ -148,11 +152,6 @@
 
 #define GPIO_CRS_SYNC_1         (GPIO_ALT|GPIO_AF0|GPIO_PORTA|GPIO_PIN10)  // CRS_SYNC -> PA10
 #define GPIO_CRS_SYNC_2         (GPIO_ALT|GPIO_AF10|GPIO_PORTB|GPIO_PIN3)  // CRS_SYNC -> PB3
-
-/* DAC1 - Digital-to-analog converter */
-
-#define GPIO_DAC1_OUT1_1        (GPIO_ANALOG|GPIO_PORTA|GPIO_PIN4)  // DAC1_OUT1 -> PA4
-#define GPIO_DAC1_OUT2_1        (GPIO_ANALOG|GPIO_PORTA|GPIO_PIN5)  // DAC1_OUT2 -> PA5
 
 /* DCMI - Digital camera interface */
 
@@ -863,16 +862,6 @@
 #define GPIO_OCTOSPIM_P2_NCS_4  (GPIO_ALT|GPIO_AF5|GPIO_PORTF|GPIO_PIN6)  // OCTOSPIM_P2_NCS -> PF6
 #define GPIO_OCTOSPIM_P2_NCS_5  (GPIO_ALT|GPIO_AF5|GPIO_PORTG|GPIO_PIN12)  // OCTOSPIM_P2_NCS -> PG12
 #define GPIO_OCTOSPIM_P2_NCS_6  (GPIO_ALT|GPIO_AF5|GPIO_PORTI|GPIO_PIN5)  // OCTOSPIM_P2_NCS -> PI5
-
-/* OPAMP1 - Operational amplifier */
-
-#define GPIO_OPAMP1_VINP_1      (GPIO_ANALOG|GPIO_PORTA|GPIO_PIN0)  // OPAMP1_VINP -> PA0
-#define GPIO_OPAMP1_VOUT_1      (GPIO_ANALOG|GPIO_PORTA|GPIO_PIN3)  // OPAMP1_VOUT -> PA3
-
-/* OPAMP2 - Operational amplifier */
-
-#define GPIO_OPAMP2_VINP_1      (GPIO_ANALOG|GPIO_PORTA|GPIO_PIN6)  // OPAMP2_VINP -> PA6
-#define GPIO_OPAMP2_VOUT_1      (GPIO_ANALOG|GPIO_PORTB|GPIO_PIN0)  // OPAMP2_VOUT -> PB0
 
 /* OTG_HS - USB on-the-go high-speed */
 
