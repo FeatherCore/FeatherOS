@@ -44,34 +44,37 @@
 #   Rust target triple (e.g. riscv32imac-unknown-nuttx-elf,
 #   thumbv7m-nuttx-eabi, thumbv7em-nuttx-eabihf)
 
+# Strip any +extentions from LLVM_ARCHTYPE (e.g., thumbv8m.main+dsp -> thumbv8m.main)
+RUST_ARCHTYPE := $(firstword $(subst +, ,$(LLVM_ARCHTYPE)))
+
 define RUST_TARGET_TRIPLE
 $(or \
-  $(and $(filter x86_64,$(LLVM_ARCHTYPE)), \
-    x86_64-unknown-nuttx \
+  $(and $(filter x86_64,$(RUST_ARCHTYPE)), \
+    x86_64-unknown-linux-gnu \
   ), \
-  $(and $(filter x86,$(LLVM_ARCHTYPE)), \
-    i686-unknown-nuttx \
+  $(and $(filter x86,$(RUST_ARCHTYPE)), \
+    i686-unknown-linux-gnu \
   ), \
-  $(and $(filter thumb%,$(LLVM_ARCHTYPE)), \
-    $(if $(filter thumbv8m%,$(LLVM_ARCHTYPE)), \
-      $(if $(filter cortex-m23,$(LLVM_CPUTYPE)),thumbv8m.base,thumbv8m.main)-nuttx-$(LLVM_ABITYPE), \
-      $(LLVM_ARCHTYPE)-nuttx-$(LLVM_ABITYPE) \
+  $(and $(filter thumb%,$(RUST_ARCHTYPE)), \
+    $(if $(filter thumbv8m%,$(RUST_ARCHTYPE)), \
+      $(if $(filter cortex-m23,$(LLVM_CPUTYPE)),thumbv8m.base-none-$(LLVM_ABITYPE),thumbv8m.main-none-$(LLVM_ABITYPE)), \
+      $(RUST_ARCHTYPE)-none-$(LLVM_ABITYPE) \
     ) \
   ), \
-  $(and $(filter riscv32,$(LLVM_ARCHTYPE)), \
+  $(and $(filter riscv32,$(RUST_ARCHTYPE)), \
     riscv32$(or \
       $(and $(filter sifive-e20,$(LLVM_CPUTYPE)),imc), \
       $(and $(filter sifive-e31,$(LLVM_CPUTYPE)),imac), \
       $(and $(filter sifive-e76,$(LLVM_CPUTYPE)),imafc), \
       imc \
-    )-unknown-nuttx-elf \
+    )-unknown-none-elf \
   ), \
-  $(and $(filter riscv64,$(LLVM_ARCHTYPE)), \
+  $(and $(filter riscv64,$(RUST_ARCHTYPE)), \
     riscv64$(or \
       $(and $(filter sifive-s51,$(LLVM_CPUTYPE)),imac), \
       $(and $(filter sifive-u54,$(LLVM_CPUTYPE)),imafdc), \
       imac \
-    )-unknown-nuttx-elf \
+    )-unknown-none-elf \
   ) \
 )
 endef
@@ -89,9 +92,9 @@ endef
 
 ifeq ($(CONFIG_DEBUG_FULLOPT),y)
 define RUST_CARGO_BUILD
+	@echo "Building Rust code with cargo..."
 	NUTTX_INCLUDE_DIR=$(TOPDIR)/include:$(TOPDIR)/include/arch \
-    cargo build --release -Zbuild-std=std,panic_abort \
-    -Zbuild-std-features=panic_immediate_abort \
+    cargo build --release \
 		--manifest-path $(2)/$(1)/Cargo.toml \
 		--target $(call RUST_TARGET_TRIPLE)
 endef
@@ -99,7 +102,7 @@ else
 define RUST_CARGO_BUILD
 	@echo "Building Rust code with cargo..."
 	NUTTX_INCLUDE_DIR=$(TOPDIR)/include:$(TOPDIR)/include/arch \
-    cargo build -Zbuild-std=std,panic_abort \
+    cargo build \
 		--manifest-path $(2)/$(1)/Cargo.toml \
 		--target $(call RUST_TARGET_TRIPLE)
 endef

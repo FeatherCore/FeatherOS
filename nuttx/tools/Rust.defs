@@ -75,5 +75,12 @@ else ifeq ($(CONFIG_ARCH_RISCV),y)
 else
   # For arm, but there are some other archs not support yet,
   # such as xtensa, x86 bare metal, etc.
-  RUSTFLAGS += --target $(LLVM_ARCHTYPE)-none-$(LLVM_ABITYPE)
+  # Strip any +extensions from LLVM_ARCHTYPE (e.g., thumbv8m.main+dsp -> thumbv8m.main)
+  RUST_ARCHTYPE := $(firstword $(subst +, ,$(LLVM_ARCHTYPE)))
+  # For thumbv8m, Rust only provides eabi target (not eabihf)
+  ifeq ($(filter thumbv8m%,$(RUST_ARCHTYPE)),)
+    RUSTFLAGS += --target $(RUST_ARCHTYPE)-none-$(LLVM_ABITYPE)
+  else
+    RUSTFLAGS += --target $(RUST_ARCHTYPE)-none-eabi
+  endif
 endif

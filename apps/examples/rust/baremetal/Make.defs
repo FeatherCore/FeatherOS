@@ -22,4 +22,14 @@
 
 ifneq ($(CONFIG_EXAMPLES_HELLO_RUST),)
 CONFIGURED_APPS += $(APPDIR)/examples/rust/baremetal
+
+# Include Rust.mk to get RUST_TARGET_TRIPLE macro
+include $(APPDIR)/tools/Rust.mk
+
+# Get target triple from NuttX configuration
+RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
+
+# Rust library path: target/<triple>/<profile>/lib<crate>.a
+# The path is dynamically determined by the target triple
+EXTRA_LIBS += $(APPDIR)/examples/rust/baremetal/target/$(RUST_TARGET)/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libhello_rust.a
 endif
