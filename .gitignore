@@ -66,3 +66,21 @@ apps/graphics/lvgl/lvgl/
 
 # VSCode settings
 .vscode/
+
+# Rust build files
+apps/examples/rust/baremetal/.cargo/
+apps/examples/rust/baremetal/target/
+
+# NuttX sim build files
+nuttx/arch/sim/include/board
+nuttx/arch/sim/include/chip
+nuttx/arch/sim/src/board
+nuttx/arch/sim/src/chip
+nuttx/arch/sim/src/config.h
+nuttx/arch/sim/src/hostfs.h
+nuttx/arch/sim/src/nuttx-names.dat
+nuttx/arch/sim/src/nuttx.ld
+nuttx/arch/sim/src/nuttx.rel
+nuttx/boards/sim/sim/sim/src/etctmp.c
+nuttx/boards/sim/sim/sim/src/etctmp/
+nuttx/nuttx.tgz
