@@ -1,0 +1,9 @@
+# Make.defs for FHRE examples
+
+ifeq ($(CONFIG_EXAMPLES_FHRE_C),y)
+CONFIGURED_APPS += examples/fhre/fhre-c
+endif
+
+ifeq ($(CONFIG_EXAMPLES_FHRE_RS),y)
+CONFIGURED_APPS += examples/fhre/fhre-rs
+endif

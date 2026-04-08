@@ -1,0 +1,5 @@
+# Make.defs for Feather Hybrid Render Engine (Rust version)
+
+ifeq ($(CONFIG_FHRE_RS),y)
+CONFIGURED_APPS += fhre-rs
+endif
