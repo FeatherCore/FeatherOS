@@ -1,8 +1,8 @@
-# Build artifacts - common
+# Common build artifacts (both apps and nuttx)
 *.a
-*.dbo
-*.dba
 *.adb
+*.dba
+*.dbo
 *.asm
 *.dSYM
 *.exe
@@ -30,17 +30,18 @@
 *.wsp
 *.ddc
 *.dds
+*.profraw
+*.pyc
 *.mapfile
 *.SystemMap
 *~
-*.pyc
-*.swn
-*.swo
+\#*\#
+.\#*
 
-# Build markers and generated files - common
+# Common build markers and generated files
 .built
 .context
-.context_*
+.context\ *
 .depend
 .kconfig
 *.lock
@@ -49,120 +50,104 @@ Make*.dep
 .dirlinks
 .fakelnk
 
-# VSCode and IDE settings - common
+# Common IDE and editor files
 .vscode/
 .idea/
 .DS_Store
 .ccls-cache/
 compile_commands.json
-.clang-format
 .aider*
+.clang-format
 
-# Cache files - common
+# Common cache files
 .cache/
-__pycache__/
 tools/gdb/__pycache__/
 
-# Cscope - common
+# Common cscope files
 cscope.out
 cscope.*
 
-# Build directories - apps
+# Common tags files
+**/tags
+/TAGS
+
+# Common core dump
+core
+
+# =============================================================================
+# Apps specific ignore rules (from third/Nuttx/apps/.gitignore)
+# =============================================================================
+
+apps/*.bin
+apps/*.d
+!apps/*.d/
+apps/.cache/
+apps/.vscode/
+apps/.DS_Store/
+apps/build/
+apps/cscope.out
+apps/Make.dep
+apps/.context
+apps/.dirlinks
+apps/.aider*
+apps/.clang-format
+apps/.cache/
 apps/bin/
 apps/bin_debug/
-apps/staging/
-apps/wasm/
+apps/boot_romfsimg.h
 apps/external/
 apps/Kconfig
 apps/romfs.img
-apps/boot_romfsimg.h
+apps/staging/
 apps/symtab_apps.c
-apps/builtin/builtin_list.h
-apps/builtin/builtin_proto.h
-apps/builtin/registry/
+apps/wasm/
 
-# Build directories - nuttx
-nuttx/bin/
-nuttx/staging/
-nuttx/external/
-nuttx/build/
+# =============================================================================
+# Nuttx specific ignore rules (from third/Nuttx/nuttx/.gitignore)
+# =============================================================================
+
+nuttx/*.bin
+nuttx/*.d
+!nuttx/*.d/
+nuttx/.cache/
 nuttx/.config
 nuttx/.config.*
 nuttx/.config-*
 nuttx/.config\ 
-nuttx/Make.defs
+nuttx/.cproject/
+nuttx/.gdbinit
+nuttx/.gdb_history
+nuttx/.project/
+nuttx/.version/
+nuttx/_SAVED_APPS_config
+nuttx/cscope.*
 nuttx/defconfig
+nuttx/Make.defs
 nuttx/nuttx
 nuttx/nuttx32
 nuttx/nuttx-*
 nuttx/nuttx.*
 nuttx/nuttx_user*
-nuttx/.version
-nuttx/.project
-nuttx/.cproject
-nuttx/.gdbinit
-nuttx/.gdb_history
-nuttx/_SAVED_APPS_config
+nuttx/staging/
+nuttx/core
+nuttx/Make*.dep
+nuttx/uImage
+nuttx/external/
+nuttx/.context
+nuttx/.context\ 
+nuttx/.dirlinks
+nuttx/.fakelnk
+nuttx/.vscode/
+nuttx/.idea/
+nuttx/.DS_Store/
+nuttx/tools/gdb/__pycache__/
+nuttx/build/
+nuttx/.ccls-cache/
+nuttx/compile_commands.json
+nuttx/imx9-sdimage.img
+nuttx/kwarning
 nuttx/SAVEMake.defs
 nuttx/SAVEconfig
-nuttx/config.txt
-nuttx/uImage
-nuttx/imx9-sdimage.img
+nuttx/.aider*
 nuttx/imx9-norimage.img
-nuttx/kwarning
-
-# Generated headers - apps
-apps/builtin/builtin_list.h
-apps/builtin/builtin_proto.h
-
-# Generated headers - nuttx
-nuttx/include/nuttx/config.h
-nuttx/include/nuttx/version.h
-
-# Tools binaries - nuttx
-nuttx/tools/cnvwindeps
-nuttx/tools/incdir
-nuttx/tools/mkconfig
-nuttx/tools/mkdeps
-nuttx/tools/mkversion
-
-# Downloaded packages - apps
-apps/graphics/lvgl/*.zip
-apps/graphics/lvgl/lvgl/
-
-# Rust build files - apps
-apps/examples/rust/baremetal/.cargo/
-apps/examples/rust/baremetal/target/
-
-# NuttX sim build files - nuttx
-nuttx/arch/sim/include/board
-nuttx/arch/sim/include/chip
-nuttx/arch/sim/src/board
-nuttx/arch/sim/src/chip
-nuttx/arch/sim/src/config.h
-nuttx/arch/sim/src/hostfs.h
-nuttx/arch/sim/src/nuttx-names.dat
-nuttx/arch/sim/src/nuttx.ld
-nuttx/arch/sim/src/nuttx.rel
-nuttx/boards/sim/sim/sim/src/etctmp.c
-nuttx/boards/sim/sim/sim/src/etctmp/
-nuttx/nuttx.tgz
-
-# Git files - common
-.gitignore
-.gitattributes
-.gitmodules
-
-# Backup files - common
-*.bak
-*.backup
-*.old
-
-# Log files - common
-*.log
-
-# Temporary files - common
-*.tmp
-*.temp
-*.swp
-*.swo
+nuttx/config.txt
