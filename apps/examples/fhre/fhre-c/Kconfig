@@ -1,0 +1,11 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+config EXAMPLES_FHRE_C
+	bool "FHRE C language demo"
+	default n
+	depends on FHRE_C
+	---help---
+		Enable FHRE C language demo

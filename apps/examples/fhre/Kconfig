@@ -1,0 +1,11 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+menu "FHRE (Feather Hybrid Render Engine) demos"
+
+source "$(APPDIR)/examples/fhre/fhre-c/Kconfig"
+source "$(APPDIR)/examples/fhre/fhre-rs/Kconfig"
+
+endmenu

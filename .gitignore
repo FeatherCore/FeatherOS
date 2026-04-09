@@ -1,77 +1,140 @@
-# Build artifacts
-*.o
+# Build artifacts - common
 *.a
-*.d
-*.dep
-*.bin
-*.hex
+*.dbo
+*.dba
+*.adb
+*.asm
+*.dSYM
+*.exe
+*.gcno
+*.gcda
+*.hobj
+*.i
+*.inf
+*.lib
+*.lst
+*.o
+*.wo
+*.obj
+*.rel
+*.src
+*.swp
+*.sym
+*.su
 *.map
-*.manifest
+*.elf
+*.hex
+*.ihx
+*.lod
+*.srec
+*.wsp
+*.ddc
+*.dds
+*.mapfile
+*.SystemMap
+*~
+*.pyc
+*.swn
+*.swo
+
+# Build markers and generated files - common
+.built
+.context
+.context_*
+.depend
+.kconfig
 *.lock
+Make.dep
+Make*.dep
+.dirlinks
+.fakelnk
 
-# Build directories
-bin/
-staging/
+# VSCode and IDE settings - common
+.vscode/
+.idea/
+.DS_Store
+.ccls-cache/
+compile_commands.json
+.clang-format
+.aider*
 
-# NuttX specific build files
-nuttx/nuttx
+# Cache files - common
+.cache/
+__pycache__/
+tools/gdb/__pycache__/
+
+# Cscope - common
+cscope.out
+cscope.*
+
+# Build directories - apps
+apps/bin/
+apps/bin_debug/
+apps/staging/
+apps/wasm/
+apps/external/
+apps/Kconfig
+apps/romfs.img
+apps/boot_romfsimg.h
+apps/symtab_apps.c
+apps/builtin/builtin_list.h
+apps/builtin/builtin_proto.h
+apps/builtin/registry/
+
+# Build directories - nuttx
+nuttx/bin/
+nuttx/staging/
+nuttx/external/
+nuttx/build/
 nuttx/.config
 nuttx/.config.*
-nuttx/.dirlinks
+nuttx/.config-*
+nuttx/.config\ 
 nuttx/Make.defs
-nuttx/System.map
 nuttx/defconfig
+nuttx/nuttx
+nuttx/nuttx32
+nuttx/nuttx-*
+nuttx/nuttx.*
+nuttx/nuttx_user*
+nuttx/.version
+nuttx/.project
+nuttx/.cproject
+nuttx/.gdbinit
+nuttx/.gdb_history
+nuttx/_SAVED_APPS_config
+nuttx/SAVEMake.defs
+nuttx/SAVEconfig
+nuttx/config.txt
+nuttx/uImage
+nuttx/imx9-sdimage.img
+nuttx/imx9-norimage.img
+nuttx/kwarning
 
-# Generated Kconfig files
-**/.kconfig
-**/Kconfig
+# Generated headers - apps
+apps/builtin/builtin_list.h
+apps/builtin/builtin_proto.h
 
-# Dependency files
-.depend
-Make.dep
+# Generated headers - nuttx
+nuttx/include/nuttx/config.h
+nuttx/include/nuttx/version.h
 
-# Context files
-.context
-
-# Tools binaries
+# Tools binaries - nuttx
 nuttx/tools/cnvwindeps
 nuttx/tools/incdir
 nuttx/tools/mkconfig
 nuttx/tools/mkdeps
 nuttx/tools/mkversion
 
-# Downloaded packages
+# Downloaded packages - apps
 apps/graphics/lvgl/*.zip
-
-# Generated headers
-nuttx/include/nuttx/config.h
-nuttx/include/nuttx/version.h
-
-# Library files
-apps/libapps.a
-
-# Built markers
-.built
-
-# Generated headers in apps
-apps/builtin/builtin_list.h
-apps/builtin/builtin_proto.h
-apps/builtin/registry/
-
-# Dirlinks
-.dirlinks
-
-# Downloaded libraries
 apps/graphics/lvgl/lvgl/
 
-# VSCode settings
-.vscode/
-
-# Rust build files
+# Rust build files - apps
 apps/examples/rust/baremetal/.cargo/
 apps/examples/rust/baremetal/target/
 
-# NuttX sim build files
+# NuttX sim build files - nuttx
 nuttx/arch/sim/include/board
 nuttx/arch/sim/include/chip
 nuttx/arch/sim/src/board
@@ -84,3 +147,22 @@ nuttx/arch/sim/src/nuttx.rel
 nuttx/boards/sim/sim/sim/src/etctmp.c
 nuttx/boards/sim/sim/sim/src/etctmp/
 nuttx/nuttx.tgz
+
+# Git files - common
+.gitignore
+.gitattributes
+.gitmodules
+
+# Backup files - common
+*.bak
+*.backup
+*.old
+
+# Log files - common
+*.log
+
+# Temporary files - common
+*.tmp
+*.temp
+*.swp
+*.swo
