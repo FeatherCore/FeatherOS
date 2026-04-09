@@ -4,8 +4,26 @@
 #
 
 config EXAMPLES_FHRE_C
-	bool "FHRE C language demo"
+	tristate "FHRE C language demo"
 	default n
-	depends on FHRE_C
 	---help---
-		Enable FHRE C language demo
+		Enable the FHRE C language demo
+
+if EXAMPLES_FHRE_C
+
+config EXAMPLES_FHRE_C_PROGNAME
+	string "Program name"
+	default "fhre_c"
+	---help---
+		This is the name of the program that will be used when the
+		program is installed.
+
+config EXAMPLES_FHRE_C_PRIORITY
+	int "FHRE C task priority"
+	default 100
+
+config EXAMPLES_FHRE_C_STACKSIZE
+	int "FHRE C stack size"
+	default DEFAULT_TASK_STACKSIZE
+
+endif

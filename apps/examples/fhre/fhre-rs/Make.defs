@@ -1,5 +1,5 @@
 ############################################################################
-# apps/examples/fhre/Make.defs
+# apps/examples/fhre/fhre-rs/Make.defs
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,4 +20,9 @@
 #
 ############################################################################
 
-include $(wildcard $(APPDIR)/examples/fhre/*/Make.defs)
+include $(APPDIR)/tools/Rust.mk
+
+ifneq ($(CONFIG_EXAMPLES_FHRE_RS),)
+CONFIGURED_APPS += $(APPDIR)/examples/fhre/fhre-rs
+EXTRA_LIBS += $(call RUST_GET_BINDIR,fhre-rs,$(APPDIR)/examples/fhre)
+endif

@@ -1,5 +1,5 @@
 ############################################################################
-# apps/examples/fhre/Make.defs
+# apps/examples/fhre/Makefile
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,4 +20,6 @@
 #
 ############################################################################
 
-include $(wildcard $(APPDIR)/examples/fhre/*/Make.defs)
+MENUDESC = "FHRE Examples"
+
+include $(APPDIR)/Directory.mk
