@@ -6,6 +6,7 @@
 config EXAMPLES_FHRE_C
 	tristate "FHRE C language demo"
 	default n
+	depends on FHRE_CLANG
 	---help---
 		Enable the FHRE C language demo
 

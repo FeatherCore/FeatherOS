@@ -6,6 +6,7 @@
 config EXAMPLES_FHRE_RS_CARGO
 	tristate "FHRE Rust language demo with Cargo"
 	default n
+	depends on FHRE_RUST
 	---help---
 		Enable the FHRE Rust language demo using Cargo to build.
 

@@ -9,7 +9,7 @@
 #include <stdbool.h>
 
 /* Include FHRE header */
-#include "../../../fhre-c/fhre.h"
+#include "../../../fhre/clang/fhre.h"
 
 int main(int argc, char *argv[])
 {

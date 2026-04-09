@@ -1,5 +1,5 @@
 ############################################################################
-# apps/examples/fhre/fhre-c/Makefile
+# apps/fhre/Makefile
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,9 +20,6 @@
 #
 ############################################################################
 
-include $(APPDIR)/Make.defs
+MENUDESC = "Feather Hybrid Render Engine (FHRE)"
 
-CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/fhre/clang
-CSRCS = fhre_demo.c
-
-include $(APPDIR)/Application.mk
+include $(APPDIR)/Directory.mk
