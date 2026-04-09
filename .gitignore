@@ -50,6 +50,12 @@ Make*.dep
 .dirlinks
 .fakelnk
 
+# Symlinks created by dirlinks mechanism
+arch/*/include/board
+arch/*/include/chip
+arch/*/src/board
+arch/*/src/chip
+
 # Common IDE and editor files
 .vscode/
 .idea/
