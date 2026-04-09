@@ -22,7 +22,12 @@
 
 include $(APPDIR)/Make.defs
 
+PROGNAME = fhre_demo
+PRIORITY = $(CONFIG_EXAMPLES_FHRE_CLANG_PRIORITY)
+STACKSIZE = $(CONFIG_EXAMPLES_FHRE_CLANG_STACKSIZE)
+MODULE = $(CONFIG_EXAMPLES_FHRE_CLANG)
+
 CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/fhre/clang
-CSRCS = fhre_demo.c
+MAINSRC = fhre_demo.c
 
 include $(APPDIR)/Application.mk

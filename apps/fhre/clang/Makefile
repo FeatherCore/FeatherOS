@@ -24,6 +24,7 @@ include $(APPDIR)/Make.defs
 
 # Feather Hybrid Render Engine (Clang version)
 
+MODULE = $(CONFIG_FHRE_CLANG)
 CSRCS = fhre.c
 
 include $(APPDIR)/Application.mk

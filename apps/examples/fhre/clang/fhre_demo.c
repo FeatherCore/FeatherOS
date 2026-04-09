@@ -7,11 +7,18 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <string.h>
 
 /* Include FHRE header */
 #include "../../../fhre/clang/fhre.h"
 
-int main(int argc, char *argv[])
+/* Include framebuffer header */
+#include <nuttx/video/fb.h>
+
+int fhre_demo_main(int argc, char *argv[])
 {
     printf("FHRE C language demo\n");
     printf("Version: %s\n", fhre_version());
@@ -54,8 +61,52 @@ int main(int argc, char *argv[])
     void *fb = fhre_get_framebuffer(ctx);
     if (fb) {
         printf("Framebuffer address: %p\n", fb);
-        // Here you could write code to display the framebuffer
-        // For example, copy it to a display device
+        
+        // Open framebuffer device
+        int fb_fd = open("/dev/fb0", O_RDWR);
+        if (fb_fd >= 0) {
+            printf("Opened framebuffer device: /dev/fb0\n");
+            
+            // Get framebuffer information
+            struct fb_videoinfo_s vinfo;
+            if (ioctl(fb_fd, FBIOGET_VIDEOINFO, &vinfo) == 0) {
+                printf("Framebuffer info: %dx%d, format: %d\n", 
+                       vinfo.xres, vinfo.yres, vinfo.fmt);
+                
+                // Get plane information
+                struct fb_planeinfo_s pinfo;
+                if (ioctl(fb_fd, FBIOGET_PLANEINFO, &pinfo) == 0) {
+                    printf("Plane info: fbmem=%p, fblen=%zu, stride=%u\n", 
+                           pinfo.fbmem, pinfo.fblen, pinfo.stride);
+                    
+                    // Copy FHRE framebuffer to display
+                    size_t copy_size = ctx->width * ctx->height * 4; // RGBA
+                    if (copy_size <= pinfo.fblen) {
+                        memcpy(pinfo.fbmem, fb, copy_size);
+                        printf("Copied FHRE framebuffer to display\n");
+                        
+                        // Update display
+#ifdef CONFIG_FB_UPDATE
+                        struct fb_area_s area = { 0, 0, ctx->width, ctx->height };
+                        ioctl(fb_fd, FBIO_UPDATE, &area);
+                        printf("Updated display\n");
+#endif
+                    } else {
+                        printf("Framebuffer size too large\n");
+                    }
+                } else {
+                    printf("Failed to get plane info\n");
+                }
+            } else {
+                printf("Failed to get video info\n");
+            }
+            
+            // Close framebuffer device
+            close(fb_fd);
+            printf("Closed framebuffer device\n");
+        } else {
+            printf("Failed to open framebuffer device\n");
+        }
     }
     
     // Cleanup

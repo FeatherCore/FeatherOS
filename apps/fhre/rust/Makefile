@@ -22,6 +22,7 @@
 
 include $(APPDIR)/Make.defs
 
+MODULE = $(CONFIG_FHRE_RUST)
 RUSTSRC = src/lib.rs
 
 include $(APPDIR)/Application.mk

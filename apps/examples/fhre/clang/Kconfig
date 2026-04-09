@@ -14,7 +14,7 @@ if EXAMPLES_FHRE_CLANG
 
 config EXAMPLES_FHRE_CLANG_PROGNAME
 	string "Program name"
-	default "fhre_clang"
+	default "fhre_demo"
 	---help---
 		This is the name of the program that will be used when the
 		program is installed.
