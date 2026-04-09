@@ -3,27 +3,27 @@
 # see the file kconfig-language.txt in the NuttX tools repository.
 #
 
-config EXAMPLES_FHRE_RS_CARGO
-	tristate "FHRE Rust language demo with Cargo"
+config EXAMPLES_FHRE_RUST
+	tristate "FHRE Rust language demo"
 	default n
 	depends on FHRE_RUST
 	---help---
-		Enable the FHRE Rust language demo using Cargo to build.
+		Enable the FHRE Rust language demo
 
-if EXAMPLES_FHRE_RS_CARGO
+if EXAMPLES_FHRE_RUST
 
-config EXAMPLES_FHRE_RS_CARGO_PROGNAME
+config EXAMPLES_FHRE_RUST_PROGNAME
 	string "Program name"
-	default "fhre_rs"
+	default "fhre_rust"
 	---help---
 		This is the name of the program that will be used when the
 		program is installed.
 
-config EXAMPLES_FHRE_RS_CARGO_PRIORITY
+config EXAMPLES_FHRE_RUST_PRIORITY
 	int "FHRE Rust task priority"
 	default 100
 
-config EXAMPLES_FHRE_RS_CARGO_STACKSIZE
+config EXAMPLES_FHRE_RUST_STACKSIZE
 	int "FHRE Rust stack size"
 	default DEFAULT_TASK_STACKSIZE
 

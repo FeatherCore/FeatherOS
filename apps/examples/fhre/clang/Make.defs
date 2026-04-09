@@ -1,5 +1,5 @@
 ############################################################################
-# apps/examples/fhre/fhre-rs/Makefile
+# apps/examples/fhre/clang/Make.defs
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,8 +20,6 @@
 #
 ############################################################################
 
-include $(APPDIR)/Make.defs
-
-RUSTSRC = src/main.rs
-
-include $(APPDIR)/Application.mk
+ifneq ($(CONFIG_EXAMPLES_FHRE_CLANG),)
+CONFIGURED_APPS += $(APPDIR)/examples/fhre/clang
+endif

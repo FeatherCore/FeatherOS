@@ -1,5 +1,5 @@
 ############################################################################
-# apps/examples/fhre/fhre-c/Make.defs
+# apps/fhre/rust/Makefile
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,6 +20,8 @@
 #
 ############################################################################
 
-ifneq ($(CONFIG_EXAMPLES_FHRE_C),)
-CONFIGURED_APPS += $(APPDIR)/examples/fhre/fhre-c
-endif
+include $(APPDIR)/Make.defs
+
+RUSTSRC = src/lib.rs
+
+include $(APPDIR)/Application.mk

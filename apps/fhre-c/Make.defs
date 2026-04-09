@@ -1,5 +1,0 @@
-# Make.defs for Feather Hybrid Render Engine (C version)
-
-ifeq ($(CONFIG_FHRE_C),y)
-CONFIGURED_APPS += fhre-c
-endif

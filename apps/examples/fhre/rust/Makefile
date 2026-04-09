@@ -1,5 +1,5 @@
 ############################################################################
-# apps/examples/fhre/fhre-c/Makefile
+# apps/examples/fhre/rust/Makefile
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -22,7 +22,6 @@
 
 include $(APPDIR)/Make.defs
 
-CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/fhre/clang
-CSRCS = fhre_demo.c
+RUSTSRC = src/main.rs
 
 include $(APPDIR)/Application.mk
