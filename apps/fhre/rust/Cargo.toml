@@ -1,12 +1,22 @@
 [package]
-name = "fhre-rs"
+name = "fhre"
 version = "1.0.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
-
 [lib]
 name = "fhre"
 path = "src/lib.rs"
+crate-type = ["staticlib", "rlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+opt-level = 'z'
+
+[dependencies]

@@ -21,17 +21,17 @@ CONFIG_START_MONTH=11
 CONFIG_START_YEAR=2008
 
 # FHRE Configuration
-# Default to Clang version
-CONFIG_FHRE=y
-CONFIG_FHRE_CLANG=y
+# Default to Rust version
+# CONFIG_FHRE=y
+# CONFIG_FHRE_CLANG=y
 # Uncomment the following line to use Rust version instead
-# CONFIG_FHRE_RUST=y
+CONFIG_FHRE_RUST=y
 
 # FHRE Example Configuration
-CONFIG_EXAMPLES_FHRE=y
-CONFIG_EXAMPLES_FHRE_CLANG=y
+# CONFIG_EXAMPLES_FHRE=y
+# CONFIG_EXAMPLES_FHRE_CLANG=y
 # Uncomment the following line to use Rust example instead
-# CONFIG_EXAMPLES_FHRE_RUST=y
+CONFIG_EXAMPLES_FHRE_RUST=y
 
 # Set entry point to NSH shell
 CONFIG_INIT_ENTRYPOINT="nsh_main"

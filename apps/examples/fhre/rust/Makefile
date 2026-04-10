@@ -22,6 +22,58 @@
 
 include $(APPDIR)/Make.defs
 
-RUSTSRC = src/main.rs
+# FHRE Rust built-in application info
+
+PROGNAME  = $(CONFIG_EXAMPLES_FHRE_RUST_PROGNAME)
+PRIORITY  = $(CONFIG_EXAMPLES_FHRE_RUST_PRIORITY)
+STACKSIZE = $(CONFIG_EXAMPLES_FHRE_RUST_STACKSIZE)
+MODULE    = $(CONFIG_EXAMPLES_FHRE_RUST)
+
+# Rust build configuration
+RUST_CRATE_NAME := fhre_rs_demo
+RUST_CARGO_PATH := $(APPDIR)/examples/fhre/rust
+
+# Get target triple from NuttX configuration
+# This supports multiple architectures: thumbv6m, thumbv7m, thumbv8m, riscv32, riscv64, x86_64, etc.
+RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
+
+# Generate .cargo/config.toml dynamically based on target
+CARGO_CONFIG := $(RUST_CARGO_PATH)/.cargo/config.toml
+
+# Ensure FHRE library is built before the example
+FHRE_LIB := $(APPDIR)/fhre/rust/target/$(RUST_TARGET)/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libfhre.a
+
+context:: $(CARGO_CONFIG) $(FHRE_LIB)
+	@echo "Building Rust code with cargo..."
+	@echo "Target: $(RUST_TARGET)"
+	NUTTX_INCLUDE_DIR=$(TOPDIR)/include:$(TOPDIR)/include/arch \
+	RUST_TARGET=$(RUST_TARGET) \
+	cargo build \
+		--manifest-path $(RUST_CARGO_PATH)/Cargo.toml \
+		--target $(RUST_TARGET)
+
+# Build FHRE library first
+$(FHRE_LIB):
+	@echo "Building FHRE library..."
+	$(MAKE) -C $(APPDIR)/fhre/rust context
+
+# Dynamically generate Cargo config based on NuttX target
+$(CARGO_CONFIG):
+	@echo "Generating Cargo config for target: $(RUST_TARGET)"
+	@mkdir -p $(dir $@)
+	@echo '[build]' > $@
+	@echo 'target = "$(RUST_TARGET)"' >> $@
+	@echo '' >> $@
+	@echo '[target.$(RUST_TARGET)]' >> $@
+	@echo 'rustflags = [' >> $@
+	@echo '  "-C", "link-arg=-Tlink.x",' >> $@
+	@echo '  "-C", "linker=rust-lld",' >> $@
+	@echo ']' >> $@
+
+clean::
+	cargo clean --manifest-path $(RUST_CARGO_PATH)/Cargo.toml
+
+distclean::
+	$(call DELFILE, $(CARGO_CONFIG))
 
 include $(APPDIR)/Application.mk
