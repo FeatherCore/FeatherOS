@@ -147,6 +147,7 @@ nuttx/.vscode/
 nuttx/.idea/
 nuttx/.DS_Store/
 nuttx/tools/gdb/__pycache__/
+nuttx/tools/genromfs
 nuttx/build/
 nuttx/.ccls-cache/
 nuttx/compile_commands.json
