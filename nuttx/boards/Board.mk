@@ -18,6 +18,20 @@
 #
 ############################################################################
 
+# Detect genromfs version and set appropriate command format
+GENROMFS := $(shell which genromfs 2>/dev/null || echo "$(TOPDIR)/tools/genromfs")
+
+# Test genromfs to determine command format
+GENROMFS_TEST := $(shell $(GENROMFS) test_dir test.img 2>&1 || echo "FAILED")
+
+ifneq ($(findstring "Unexpected number of arguments",$(GENROMFS_TEST)),)
+# Standard genromfs with -f and -d options
+GENROMFS_CMD = $(GENROMFS) -f romfs.img -d
+else
+# Custom genromfs with positional arguments
+GENROMFS_CMD = $(GENROMFS)
+endif
+
 ifneq ($(RCSRCS)$(RCRAWS),)
 ETCDIR := etctmp
 ETCSRC := $(ETCDIR:%=%.c)
@@ -35,7 +49,7 @@ $(ETCSRC): $(foreach raw,$(RCRAWS), $(if $(wildcard $(BOARD_DIR)$(DELIM)src$(DEL
 	  $(shell rm -rf $(ETCDIR)$(DELIM)$(raw)) \
 	  $(shell mkdir -p $(dir $(ETCDIR)$(DELIM)$(raw))) \
 	  $(shell cp -rfp $(if $(wildcard $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw), $(if $(wildcard $(BOARD_COMMON_DIR)$(DELIM)$(raw)), $(BOARD_COMMON_DIR)$(DELIM)$(raw), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw))) $(ETCDIR)$(DELIM)$(raw)))
-	$(Q) genromfs -f romfs.img -d $(ETCDIR)$(DELIM)$(CONFIG_ETC_ROMFSMOUNTPT)
+	$(Q) $(GENROMFS_CMD) $(ETCDIR)$(DELIM)$(CONFIG_ETC_ROMFSMOUNTPT) romfs.img
 	$(Q) echo "#include <nuttx/compiler.h>" > $@
 	$(Q) xxd -i romfs.img | sed -e "s/^unsigned char/const unsigned char aligned_data(4)/g" >> $@
 	$(Q) rm romfs.img
