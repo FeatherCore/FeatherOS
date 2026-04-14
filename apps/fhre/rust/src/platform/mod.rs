@@ -2,6 +2,9 @@
 //!
 //! Provides platform-specific implementations for different targets.
 
+// Framebuffer abstraction (common across all platforms)
+pub mod framebuffer;
+
 // Platform-specific modules
 #[cfg(feature = "sim")]
 pub mod sim;
@@ -10,6 +13,9 @@ pub mod sim;
 pub mod nuttx;
 
 pub mod default;
+
+// Re-export framebuffer types
+pub use framebuffer::{Framebuffer, SimpleFramebuffer};
 
 // Re-export platform types based on feature flags
 #[cfg(feature = "sim")]

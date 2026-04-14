@@ -74,9 +74,8 @@ pub mod schedule;      // System execution scheduling (PreUpdate, Update, PostUp
 pub mod pipeline;      // GPU/CPU hybrid rendering pipeline and batch processing
 pub mod animation;     // Animation system (inspired by Bevy's animation)
 pub mod resources;
-pub mod renderer;
 pub mod math;
-pub mod platform;
+pub mod platform;      // Platform abstraction (includes framebuffer)
 
 // Re-export main types
 pub use app::{App, AppBuilder, AppConfig, RunMode, FHRE_VERSION};
@@ -90,7 +89,7 @@ pub use animation::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex, An
 pub use animation::{AnimationCurve, KeyframeCurve, Keyframe, Easing, AnimationProperty, AnimationTargetId};
 pub use animation::{AnimationPlugin, AnimationResources, animate_system, transition_system};
 pub use resources::{Resources, Resource, Time, RenderConfig, WindowConfig};
-pub use renderer::{Renderer, Framebuffer};
+pub use platform::{Framebuffer, SimpleFramebuffer};
 pub use math::{Vec2, Vec3, Color, Rect};
 
 // Platform-specific exports - conditionally compiled

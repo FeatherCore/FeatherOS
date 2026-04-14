@@ -9,7 +9,6 @@ use alloc::vec::Vec;
 use crate::main_world::{MainWorld, IntoSystem};
 use crate::render_world::RenderWorld;
 use crate::extract::extract_system;
-use crate::renderer::Renderer;
 use crate::resources::{Time, RenderConfig, WindowConfig};
 use crate::schedule::{Schedules, ScheduleLabel};
 use super::AppConfig;
@@ -33,7 +32,6 @@ pub const FHRE_VERSION: &str = "2.0.0";
 pub struct App {
     pub main_world: MainWorld,
     pub render_world: RenderWorld,
-    pub renderer: Renderer,
     pub schedules: Schedules,
     pub config: AppConfig,
     #[cfg(feature = "sim")]
@@ -67,7 +65,6 @@ impl App {
         let mut app = Self {
             main_world: MainWorld::new(),
             render_world: RenderWorld::new(width, height),
-            renderer: Renderer::new(width, height),
             schedules: Schedules::new(),
             config,
             sim_display,
@@ -124,10 +121,7 @@ impl App {
         // 3. Extract phase - sync Main World to Render World
         extract_system(&self.main_world, &mut self.render_world);
 
-        // 4. Render the world
-        self.renderer.render(&mut self.render_world);
-
-        // 5. Present to SIM display if available (NuttX SIM platform)
+        // 4. Present to SIM display if available (NuttX SIM platform)
         // Similar to LVGL's flush_cb calling FBIO_UPDATE
         #[cfg(feature = "sim")]
         {

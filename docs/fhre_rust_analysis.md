@@ -564,36 +564,6 @@ pub struct RenderConfig {
     pub vsync: bool,
     pub clear_color: Color,
 }
-```
-
-### 5.8 renderer 模块
-
-**文件**: `renderer/mod.rs` (衔接) + `renderer.rs` + `framebuffer.rs` + `target.rs`
-
-```rust
-// renderer/mod.rs - 仅作为衔接
-mod renderer;
-mod framebuffer;
-mod target;
-
-pub use renderer::Renderer;
-pub use framebuffer::Framebuffer;
-pub use target::RenderTarget;
-
-// renderer/renderer.rs - Renderer 实现
-pub struct Renderer {
-    scissor: Option<Rect>,
-    stats: RenderStats,
-}
-
-// renderer/framebuffer.rs - Framebuffer 实现
-pub struct Framebuffer {
-    width: u32,
-    height: u32,
-    data: Vec<u32>,
-}
-
-// renderer/target.rs - RenderTarget trait
 pub trait RenderTarget {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
@@ -603,7 +573,7 @@ pub trait RenderTarget {
 }
 ```
 
-### 5.9 extract 模块
+### 5.8 extract 模块
 
 **文件**: `extract/mod.rs` (衔接) + `extract.rs`
 
@@ -627,7 +597,7 @@ pub fn extract_sprites(main_world: &MainWorld, render_world: &mut RenderWorld) {
 }
 ```
 
-### 5.10 platform/sim 模块
+### 5.9 platform/sim 模块
 
 **文件**: `platform/mod.rs` (衔接) + `sim.rs` + `nuttx.rs` + `default.rs`
 
@@ -658,7 +628,7 @@ pub fn create_display() -> Option<SimDisplay>
 pub fn refresh_loop<F>(render_fn: F)  // Legacy function, use App::run() instead
 ```
 
-### 5.11 Integrated Refresh Loop (New in v2.0)
+### 5.10 Integrated Refresh Loop (New in v2.0)
 
 **Similar to LVGL's `lv_nuttx_run()`**, FHRE v2.0 provides integrated refresh loop management:
 
