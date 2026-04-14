@@ -14,6 +14,14 @@ use crate::resources::{Time, RenderConfig, WindowConfig};
 use crate::schedule::{Schedules, ScheduleLabel};
 use super::AppConfig;
 
+// External C functions for timing
+extern "C" {
+    fn clock() -> i64;
+    fn usleep(usec: u32) -> i32;
+}
+
+const CLOCKS_PER_SEC: i64 = 1000000; // Standard POSIX value
+
 // Platform-specific imports
 #[cfg(feature = "sim")]
 use crate::platform::sim::SimDisplay;
@@ -59,7 +67,7 @@ impl App {
         let mut app = Self {
             main_world: MainWorld::new(),
             render_world: RenderWorld::new(width, height),
-            renderer: Renderer::new(),
+            renderer: Renderer::new(width, height),
             schedules: Schedules::new(),
             config,
             sim_display,
@@ -129,16 +137,44 @@ impl App {
         }
     }
 
-    /// Run the application
+    /// Run the application with integrated refresh loop
+    /// Similar to LVGL's lv_nuttx_run() - manages the main loop internally
     pub fn run(&mut self) {
+        self.run_with_callback(|| {});
+    }
+    
+    /// Run the application with a custom update callback
+    /// The callback is called before each frame update, allowing custom game logic
+    pub fn run_with_callback<F>(&mut self, mut callback: F)
+    where
+        F: FnMut(),
+    {
         self.running = true;
         
         // Run startup
         self.startup();
 
-        // Main loop
+        // Main loop with frame rate control (similar to LVGL)
+        // Default to 60 FPS with usleep for CPU yield
         while self.running {
+            let start_time = unsafe { clock() };
+            
+            // Call custom callback (e.g., game logic updates)
+            callback();
+            
+            // Update one frame
             self.update();
+            
+            // Calculate elapsed time and sleep to maintain frame rate
+            let elapsed = unsafe { clock() } - start_time;
+            let elapsed_ms = (elapsed * 1000 / CLOCKS_PER_SEC) as u64;
+            
+            // Target 16ms per frame (~60 FPS)
+            if elapsed_ms < 16 {
+                unsafe {
+                    usleep(((16 - elapsed_ms) * 1000) as u32);
+                }
+            }
         }
     }
 

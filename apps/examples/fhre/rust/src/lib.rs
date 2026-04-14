@@ -344,7 +344,8 @@ impl Drop for DemoApp {
     }
 }
 
-/// Main entry point
+/// Main entry point - Similar to LVGL's lv_nuttx_run()
+/// Uses integrated refresh loop in the FHRE library
 #[no_mangle]
 pub extern "C" fn fhre_rust_main(_argc: i32, _argv: *const *const u8) -> i32 {
     // Print version info
@@ -357,8 +358,8 @@ pub extern "C" fn fhre_rust_main(_argc: i32, _argv: *const *const u8) -> i32 {
         printf(b"  - Main World: Game logic, entities, components\n\0".as_ptr());
         printf(b"  - Render World: Extracted data, draw commands\n\0".as_ptr());
         printf(b"  - Extract Phase: Sync Main World -> Render World\n\0".as_ptr());
-        printf(b"  - mmap: Direct framebuffer memory access\n\0".as_ptr());
-        printf(b"  - usleep: Yield CPU to allow X11 refresh\n\n\0".as_ptr());
+        printf(b"  - Integrated refresh loop (like LVGL)\n\0".as_ptr());
+        printf(b"  - Frame rate control: 60 FPS with CPU yield\n\n\0".as_ptr());
     }
 
     // Create demo application
@@ -372,26 +373,23 @@ pub extern "C" fn fhre_rust_main(_argc: i32, _argv: *const *const u8) -> i32 {
         }
     };
 
-    // Run infinite loop - demo never exits unless killed
+    // Use integrated refresh loop - similar to LVGL's lv_nuttx_run()
+    // The loop is now managed internally by the FHRE library
+    // Pass custom update callback for game logic
     unsafe {
-        printf(b"[DEBUG] Starting main loop (infinite)\n\0".as_ptr());
+        printf(b"[DEBUG] Starting integrated refresh loop with callback\n\0".as_ptr());
     }
-
-    let mut frame: u32 = 0;
-    loop {
-        demo.render();
-
-        // Print every 60 frames (about once per second)
-        if frame % 60 == 0 {
-            unsafe {
-                printf(b"[DEBUG] Rendered frame %d\n\0".as_ptr(), frame);
-            }
-        }
-        frame += 1;
-
-        // IMPORTANT: Yield CPU time to allow NuttX idle thread to run sim_x11loop()
+    
+    // Create a raw pointer to demo for use in callback
+    // This is safe because the callback is called synchronously within run_with_callback
+    let demo_ptr: *mut DemoApp = &mut demo;
+    
+    demo.app.run_with_callback(|| {
+        // Custom game logic - called before each frame
         unsafe {
-            usleep(16000); // ~16ms for 60 FPS
+            (*demo_ptr).update();
         }
-    }
+    });
+    
+    0
 }

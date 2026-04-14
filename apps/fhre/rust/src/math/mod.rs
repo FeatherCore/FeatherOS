@@ -11,3 +11,14 @@ pub use vec2::Vec2;
 pub use vec3::Vec3;
 pub use color::Color;
 pub use rect::Rect;
+
+/// Clamp a value between min and max
+pub fn clamp<T: PartialOrd>(value: T, min: T, max: T) -> T {
+    if value < min {
+        min
+    } else if value > max {
+        max
+    } else {
+        value
+    }
+}

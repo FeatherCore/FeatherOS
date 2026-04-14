@@ -70,7 +70,9 @@ pub mod app;
 pub mod main_world;
 pub mod render_world;
 pub mod extract;
-pub mod schedule;
+pub mod schedule;      // System execution scheduling (PreUpdate, Update, PostUpdate, Extract, Render)
+pub mod pipeline;      // GPU/CPU hybrid rendering pipeline and batch processing
+pub mod animation;     // Animation system (inspired by Bevy's animation)
 pub mod resources;
 pub mod renderer;
 pub mod math;
@@ -79,12 +81,17 @@ pub mod platform;
 // Re-export main types
 pub use app::{App, AppBuilder, AppConfig, RunMode, FHRE_VERSION};
 pub use main_world::{MainWorld, Entity, Component, System, IntoSystem, Transform, Sprite, Velocity};
-pub use render_world::{RenderWorld, RenderCommand, DrawCall, RenderObject, ExtractedTransform, ExtractedSprite};
+pub use render_world::{RenderWorld, RenderCommand, DrawCall, RenderObject, ExtractedTransform, ExtractedSprite, Vertex, PrimitiveType};
 pub use extract::{Extract, ExtractSchedule, extract_system};
 pub use schedule::{Schedule, ScheduleLabel, SystemSet, Schedules};
+pub use pipeline::{HybridScheduler, GpuTaskCollector, RenderBatch, BatchStats};
+pub use animation::{AnimationClip, AnimationClipHandle, AnimationPlayer, ActiveAnimation, RepeatAnimation, AnimationState};
+pub use animation::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex, AnimationTransitions};
+pub use animation::{AnimationCurve, KeyframeCurve, Keyframe, Easing, AnimationProperty, AnimationTargetId};
+pub use animation::{AnimationPlugin, AnimationResources, animate_system, transition_system};
 pub use resources::{Resources, Resource, Time, RenderConfig, WindowConfig};
-pub use math::{Vec2, Vec3, Color, Rect};
 pub use renderer::{Renderer, Framebuffer};
+pub use math::{Vec2, Vec3, Color, Rect};
 
 // Platform-specific exports - conditionally compiled
 #[cfg(feature = "sim")]

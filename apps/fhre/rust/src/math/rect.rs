@@ -64,4 +64,21 @@ impl Rect {
         self.y < other.bottom() &&
         self.bottom() > other.y
     }
+
+    /// Empty rectangle (for initialization)
+    pub const EMPTY: Self = Self::new(0.0, 0.0, 0.0, 0.0);
+
+    /// Expand rectangle to include a point
+    pub fn expand_to_include(&self, point: Vec2) -> Self {
+        if self.width == 0.0 && self.height == 0.0 {
+            // Empty rect, start from point
+            Self::new(point.x, point.y, 0.0, 0.0)
+        } else {
+            let min_x = self.x.min(point.x);
+            let min_y = self.y.min(point.y);
+            let max_x = (self.x + self.width).max(point.x);
+            let max_y = (self.y + self.height).max(point.y);
+            Self::new(min_x, min_y, max_x - min_x, max_y - min_y)
+        }
+    }
 }

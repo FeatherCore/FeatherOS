@@ -67,6 +67,15 @@ FeatherOS/
 │   │           │   ├── vec3.rs
 │   │           │   ├── color.rs
 │   │           │   └── rect.rs
+│   │           ├── animation/         # Animation 模块（动画系统）
+│   │           │   ├── mod.rs         # 衔接：导出 animation 子模块
+│   │           │   ├── clip.rs        # AnimationClip 动画剪辑
+│   │           │   ├── curve.rs       # 动画曲线和插值
+│   │           │   ├── easing.rs      # 缓动函数（30+种）
+│   │           │   ├── player.rs      # AnimationPlayer 组件
+│   │           │   ├── graph.rs       # 动画图（混合）
+│   │           │   ├── transition.rs  # 动画过渡
+│   │           │   └── property.rs    # 动画属性
 │   │           └── platform/          # Platform 模块
 │   │               ├── mod.rs         # 衔接：导出 sim, nuttx, default
 │   │               ├── sim.rs         # NuttX SIM 平台支持
@@ -417,7 +426,7 @@ mod command;
 mod object;
 
 pub use world::RenderWorld;
-pub use command::{RenderCommand, DrawCall};
+pub use command::{RenderCommand, DrawCall, Vertex, PrimitiveType};
 pub use object::{RenderObject, ExtractedTransform, ExtractedSprite};
 
 // render_world/world.rs - RenderWorld 实现
@@ -435,7 +444,27 @@ pub enum RenderCommand {
     Clear { color: Color },
     DrawRect { rect: Rect, color: Color },
     DrawLine { start: Vec2, end: Vec2, color: Color, thickness: f32 },
-    // ...
+    DrawTriangle { p0: Vec2, p1: Vec2, p2: Vec2, color: Color },
+    DrawText { position: Vec2, text: &'static str, color: Color, size: f32 },
+    SetScissor { rect: Rect },
+    DisableScissor,
+}
+
+// DrawCall - GPU batching unit
+pub struct DrawCall {
+    pub primitive: PrimitiveType,
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u16>,
+    pub transform: [f32; 16],
+    pub color: Color,
+}
+
+pub enum PrimitiveType {
+    Points,
+    Lines,
+    LineStrip,
+    Triangles,
+    TriangleStrip,
 }
 
 // render_world/object.rs - 渲染对象
@@ -450,7 +479,8 @@ pub struct RenderObject {
 }
 ```
 
-### 5.4 schedule 模块
+
+### 5.6 schedule 模块
 
 **文件**: `schedule/mod.rs` (衔接) + `schedule.rs` + `label.rs` + `set.rs`
 
@@ -495,7 +525,7 @@ pub struct SystemSet {
 }
 ```
 
-### 5.5 resources 模块
+### 5.7 resources 模块
 
 **文件**: `resources/mod.rs` (衔接) + `resources.rs` + `time.rs` + `config.rs`
 
@@ -536,7 +566,7 @@ pub struct RenderConfig {
 }
 ```
 
-### 5.6 renderer 模块
+### 5.8 renderer 模块
 
 **文件**: `renderer/mod.rs` (衔接) + `renderer.rs` + `framebuffer.rs` + `target.rs`
 
@@ -573,7 +603,7 @@ pub trait RenderTarget {
 }
 ```
 
-### 5.7 extract 模块
+### 5.9 extract 模块
 
 **文件**: `extract/mod.rs` (衔接) + `extract.rs`
 
@@ -597,7 +627,7 @@ pub fn extract_sprites(main_world: &MainWorld, render_world: &mut RenderWorld) {
 }
 ```
 
-### 5.8 platform/sim 模块
+### 5.10 platform/sim 模块
 
 **文件**: `platform/mod.rs` (衔接) + `sim.rs` + `nuttx.rs` + `default.rs`
 
@@ -625,57 +655,117 @@ impl SimDisplay {
 }
 
 pub fn create_display() -> Option<SimDisplay>
-pub fn refresh_loop<F>(render_fn: F)
+pub fn refresh_loop<F>(render_fn: F)  // Legacy function, use App::run() instead
 ```
+
+### 5.11 Integrated Refresh Loop (New in v2.0)
+
+**Similar to LVGL's `lv_nuttx_run()`**, FHRE v2.0 provides integrated refresh loop management:
+
+```rust
+impl App {
+    /// Run with integrated refresh loop (60 FPS with CPU yield)
+    pub fn run(&mut self)
+    
+    /// Run with custom callback for game logic
+    pub fn run_with_callback<F>(&mut self, callback: F)
+    where F: FnMut()
+}
+```
+
+**Usage:**
+
+```rust
+// Simple usage - integrated loop
+let mut app = App::new();
+app.run();  // Blocks until exit, manages 60 FPS internally
+
+// With custom game logic callback
+let mut app = App::new();
+app.run_with_callback(|| {
+    // Custom update logic here
+    update_entities(&mut app);
+});
+```
+
+**Benefits:**
+- Single entry point like LVGL's `lv_nuttx_run()`
+- Automatic frame rate control (60 FPS)
+- CPU yield via `usleep()` for cooperative multitasking
+- No need for manual loop management in applications
 
 ***
 
 ## 6. 示例代码
 
-### 6.1 使用 SIM 平台显示
+### 6.1 使用 SIM 平台显示 (New API v2.0)
 
 ```rust
 #![no_std]
 #![no_main]
 
 use fhre::{
-    App, SimDisplay, create_display, FB_DEVICE_PATH,
+    App, FHRE_VERSION,
     main_world::{Transform, Sprite, Velocity},
     math::{Color, Vec2},
 };
 
+/// Custom application with game logic
+struct DemoApp {
+    app: App,
+    frame_count: u32,
+}
+
+impl DemoApp {
+    fn new() -> Self {
+        let mut app = App::new();
+        
+        // Spawn entities
+        let entity = app.main_world.spawn();
+        app.main_world.insert_component(entity, Transform::from_2d(100.0, 100.0));
+        app.main_world.insert_component(entity, Sprite::rect(50.0, 50.0, Color::RED));
+        app.main_world.insert_component(entity, Velocity::new(2.0, 1.5));
+        
+        Self { app, frame_count: 0 }
+    }
+    
+    /// Custom game logic - called before each frame
+    fn update(&mut self) {
+        self.frame_count += 1;
+        
+        // Update entity positions, handle input, etc.
+        for (entity, velocity) in self.app.main_world.query::<Velocity>() {
+            if let Some(transform) = self.app.main_world.get_component_mut::<Transform>(entity) {
+                transform.position.x += velocity.linear.x;
+                transform.position.y += velocity.linear.y;
+            }
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn fhre_rust_main(_argc: i32, _argv: *const *const u8) -> i32 {
-    // Create app with SIM display support
-    let mut app = App::new();
+    printf("FHRE Rust Demo - Version: %s\n", FHRE_VERSION);
     
-    // Check if SIM display is available
-    if app.sim_display.is_some() {
-        printf("SIM display initialized: %s\n", FB_DEVICE_PATH);
-    }
+    // Create demo application
+    let mut demo = DemoApp::new();
     
-    // Spawn entities
-    let entity = app.main_world.spawn();
-    app.main_world.insert_component(entity, Transform::from_2d(100.0, 100.0));
-    app.main_world.insert_component(entity, Sprite::rect(50.0, 50.0, Color::RED));
-    app.main_world.insert_component(entity, Velocity::new(2.0, 1.5));
-    
-    // Main loop
-    for frame in 0..300 {
-        // Update game logic
-        update_entities(&mut app);
-        
-        // Render and present
-        // Automatically calls SimDisplay::present() which:
-        // 1. Copies to backbuffer
-        // 2. Copies to hardware framebuffer
-        // 3. Calls ioctl(FBIO_UPDATE) to trigger X11 refresh
-        app.update();
-    }
+    // Use integrated refresh loop (similar to LVGL's lv_nuttx_run())
+    // The loop is managed internally by FHRE with 60 FPS frame rate control
+    demo.app.run_with_callback(|| {
+        // Custom game logic - called before each frame
+        demo.update();
+    });
     
     0
 }
 ```
+
+**Key Changes in v2.0:**
+- `app.run()` - Simple integrated loop, no manual frame management
+- `app.run_with_callback()` - Loop with custom game logic callback
+- Automatic 60 FPS frame rate control with CPU yield
+- No need for manual `usleep()` calls in application code
 
 ***
 
