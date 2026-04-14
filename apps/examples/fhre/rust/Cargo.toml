@@ -21,4 +21,5 @@ opt-level = 'z'
 
 [dependencies]
 fhre = { path = "../../../../apps/fhre/rust", default-features = false }
+libm = "0.2"
 

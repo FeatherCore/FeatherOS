@@ -1492,7 +1492,168 @@ void fre_skeleton_update(fre_entity_id_t entity, float delta_time);
 
 ---
 
-**文档版本**: v1.0  
-**创建日期**: 2026-04-08  
+## 12. FHRE Rust v2.0 实现 (NuttX SIM 平台)
+
+### 12.1 架构概述
+
+FHRE (Feather Hybrid Render Engine) Rust v2.0 是基于声明式双世界架构的轻量级渲染引擎，专为 NuttX 嵌入式系统设计。
+
+**核心特性：**
+- 声明式双世界架构 (Main World + Render World)
+- ECS (Entity-Component-System) 设计
+- 模块化的系统调度
+- 嵌入式友好的无标准库实现 (`#![no_std]`)
+- NuttX SIM 平台支持 (类似 LVGL 的 framebuffer 对接)
+- 文件夹/mod.rs 模块化结构
+
+### 12.2 双世界架构
+
+```
+┌─────────────────────────────┐        ┌─────────────────────────────┐
+│       Main World            │        │       Render World          │
+│      (游戏逻辑世界)          │        │       (渲染世界)             │
+│                             │        │                             │
+│  ┌─────────────────────┐    │        │  ┌─────────────────────┐    │
+│  │ Entities            │    │        │  │ RenderObjects       │    │
+│  │ - Transform         │    │        │  │ - ExtractedTransform│    │
+│  │ - Sprite            │    │        │  │ - ExtractedSprite   │    │
+│  │ - Velocity          │    │        │  │ - z_order           │    │
+│  └─────────────────────┘    │        │  └─────────────────────┘    │
+│                             │        │                             │
+│  ┌─────────────────────┐    │        │  ┌─────────────────────┐    │
+│  │ Systems             │    │        │  │ Draw Commands       │    │
+│  │ - PreUpdate         │    │        │  │ - Clear             │    │
+│  │ - Update            │    │        │  │ - DrawRect          │    │
+│  │ - PostUpdate        │    │        │  │ - DrawCircle        │    │
+│  └─────────────────────┘    │        │  └─────────────────────┘    │
+└─────────────┬───────────────┘        └─────────────┬───────────────┘
+              │                                      │
+              │          ExtractSchedule             │
+              │         (数据提取阶段)                │
+              └──────────────────────────────────────▶
+```
+
+### 12.3 NuttX SIM 平台实现细节
+
+#### 12.3.1 IOCTL 命令码
+
+**重要**: NuttX 使用 `_FBIOCBASE (0x2800)` 作为 framebuffer ioctl 的基础命令码，与 Linux 不同。
+
+| 命令 | 值 | 功能 |
+|------|-----|------|
+| `FBIOGET_VIDEOINFO` | **0x2801** | 获取视频信息（分辨率、格式等） |
+| `FBIOGET_PLANEINFO` | **0x2802** | 获取平面信息（内存地址、stride等） |
+| `FBIO_UPDATE` | **0x2803** | 更新显示区域（触发 X11 刷新） |
+
+**注意**: 早期版本错误地使用了 Linux 的 ioctl 命令码 (0x4600+)，这在 NuttX 中会导致 `ENOTTY` 错误。
+
+#### 12.3.2 结构体定义
+
+Rust 结构体必须与 NuttX C 结构体完全匹配：
+
+```rust
+/// Framebuffer video info structure (matches NuttX struct fb_videoinfo_s)
+#[repr(C)]
+struct FbVideoInfo {
+    fmt: u8,        /* see FB_FMT_* */
+    xres: u16,      /* Horizontal resolution */
+    yres: u16,      /* Vertical resolution */
+    nplanes: u8,    /* Number of color planes */
+}
+
+/// Framebuffer plane info structure (matches NuttX struct fb_planeinfo_s)
+#[repr(C)]
+struct FbPlaneInfo {
+    fbmem: *mut u8,     /* Start of frame buffer memory */
+    fblen: usize,       /* Length of frame buffer memory */
+    stride: u16,        /* Length of a line in bytes */
+    display: u8,        /* Display number */
+    bpp: u8,            /* Bits per pixel */
+    xres_virtual: u32,  /* Virtual Horizontal resolution */
+    yres_virtual: u32,  /* Virtual Vertical resolution */
+    xoffset: u32,       /* Offset from virtual to visible */
+    yoffset: u32,       /* Offset from virtual to visible */
+}
+```
+
+#### 12.3.3 关键实现要点
+
+1. **不要使用 mmap()**: 在 NuttX SIM 平台中，`mmap()` 系统调用会直接传递给主机的 Linux 内核，导致返回 `MAP_FAILED (0xffffffffffffffff)`。应该直接使用 `FBIOGET_PLANEINFO` 返回的 `fbmem` 地址。
+
+2. **使用 usleep() 让出 CPU**: NuttX SIM 平台的 X11 刷新依赖于 `sim_x11loop()` 在 idle 线程中运行。主循环中必须使用 `usleep()` 让出 CPU 时间，否则 X11 窗口不会更新。
+
+3. **无限循环模式**: Demo 应该使用无限循环 (`loop {}`)，不会主动退出，除非用户手动关闭。
+
+### 12.4 项目结构
+
+```
+FeatherOS/apps/fhre/rust/src/
+├── lib.rs              # 库入口
+├── app/                # App 模块
+│   ├── mod.rs          # 衔接：导出 app, config
+│   ├── app.rs          # App 实现
+│   └── config.rs       # App 配置
+├── main_world/         # Main World 模块
+│   ├── mod.rs          # 衔接：导出 world, entity, component, system
+│   ├── world.rs        # MainWorld 实现
+│   ├── entity.rs       # Entity 实现
+│   ├── component.rs    # Component 实现
+│   └── system.rs       # System 实现
+├── render_world/       # Render World 模块
+│   ├── mod.rs          # 衔接：导出 world, command, object
+│   ├── world.rs        # RenderWorld 实现
+│   ├── command.rs      # RenderCommand 实现
+│   └── object.rs       # RenderObject 实现
+├── extract/            # Extract 模块
+│   ├── mod.rs          # 衔接：导出 extract
+│   └── extract.rs      # Extract 实现
+├── schedule/           # Schedule 模块
+│   ├── mod.rs          # 衔接：导出 schedule, label, set
+│   ├── schedule.rs     # Schedule 实现
+│   ├── label.rs        # Label 实现
+│   └── set.rs          # SystemSet 实现
+├── resources/          # Resources 模块
+│   ├── mod.rs          # 衔接：导出 resources, time, config
+│   ├── resources.rs    # Resources 实现
+│   ├── time.rs         # Time 实现
+│   └── config.rs       # Config 实现
+├── renderer/           # Renderer 模块
+│   ├── mod.rs          # 衔接：导出 renderer, framebuffer, target
+│   ├── renderer.rs     # Renderer 实现
+│   ├── framebuffer.rs  # Framebuffer 实现
+│   └── target.rs       # RenderTarget 实现
+├── math/               # Math 模块
+│   ├── mod.rs
+│   ├── vec2.rs
+│   ├── vec3.rs
+│   ├── color.rs
+│   └── rect.rs
+└── platform/           # Platform 模块
+    ├── mod.rs          # 衔接：导出 sim, nuttx, default
+    ├── sim.rs          # NuttX SIM 平台支持
+    ├── nuttx.rs        # NuttX 平台支持
+    └── default.rs      # 默认平台支持
+```
+
+### 12.5 编译和运行
+
+```bash
+# 清理并重新配置
+cd /home/uan/develop/FeatherOS-code/FeatherOS/nuttx
+make distclean
+./tools/configure.sh -l sim:fhre
+
+# 编译
+make -j
+
+# 运行
+./nuttx
+nsh> fhre_rust
+```
+
+---
+
+**文档版本**: v1.1  
+**更新日期**: 2026-04-14  
 **作者**: FeatherRender Team  
-**适用范围**: FeatherOS 图形引擎开发
+**适用范围**: FeatherOS 图形引擎开发 (C + Rust)
