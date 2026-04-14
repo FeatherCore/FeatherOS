@@ -56,9 +56,6 @@ FeatherOS/
 │   │           │   ├── resources.rs   # Resources 实现
 │   │           │   ├── time.rs        # Time 实现
 │   │           │   └── config.rs      # Config 实现
-│   │           ├── renderer/          # Renderer 模块
-│   │           │   ├── mod.rs         # 衔接：导出 renderer, framebuffer, target
-│   │           │   ├── renderer.rs    # Renderer 实现
 │   │           │   ├── framebuffer.rs # Framebuffer 实现
 │   │           │   └── target.rs      # RenderTarget 实现
 │   │           ├── math/              # Math 模块
@@ -348,7 +345,7 @@ pub use config::AppConfig;
 pub struct App {
     pub main_world: MainWorld,
     pub render_world: RenderWorld,
-    pub renderer: Renderer,
+
     pub schedules: Schedules,
     pub config: AppConfig,
     pub sim_display: Option<SimDisplay>,  // SIM platform display
