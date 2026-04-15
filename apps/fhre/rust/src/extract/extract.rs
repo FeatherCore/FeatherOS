@@ -10,7 +10,7 @@ use crate::render_world::{ViewBundle, View, ClearConfig, ViewTarget};
 use crate::main_world::{Transform, Sprite};
 use crate::node::Transform2D;
 use crate::node::Transform3D;
-use crate::ui::{Button, Cube};
+use crate::ui::{Button, Cube, Dodecahedron, SoccerBall};
 use crate::resources::{Time, PrimaryScreen};
 use crate::math::{Vec2, Vec3, Mat4, Color, Rect};
 use alloc::vec::Vec;
@@ -48,95 +48,73 @@ impl ExtractSchedule {
     }
 }
 
-impl Default for ExtractSchedule {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Extract sprites
+/// Extract sprites from Main World to Render World
 pub fn extract_sprites(main_world: &MainWorld, render_world: &mut RenderWorld) {
+    // Get PrimaryScreen for default view
+    let screen = main_world.resources().get::<PrimaryScreen>();
+    let (width, height) = screen.map(|s| (s.width as f32, s.height as f32)).unwrap_or((800.0, 600.0));
+
+    // Create default orthographic view
+    let view_bundle = create_default_view(width, height);
+    let view_idx = render_world.add_view(view_bundle);
+    render_world.set_current_view(Some(view_idx));
+
+    // Query all entities with Transform and Sprite
     let transforms: Vec<_> = main_world.query::<Transform>().collect();
 
-    for (transform_entity, transform) in transforms {
-        if let Some(sprite) = main_world.get_component::<Sprite>(transform_entity) {
-            if sprite.visible {
-                let render_object = RenderObject {
-                    position: transform.position,
-                    rotation: transform.rotation,
-                    scale: transform.scale,
-                    color: sprite.color,
-                    size: Vec2::new(sprite.width, sprite.height),
-                    visible: sprite.visible,
-                    z_order: 0,
-                };
-                render_world.add_object(render_object);
-            }
+    for (entity, transform) in transforms {
+        if let Some(sprite) = main_world.get_component::<Sprite>(entity) {
+            // Create render object
+            let render_obj = RenderObject::new()
+                .with_position(transform.position.x, transform.position.y, transform.position.z)
+                .with_size(sprite.width, sprite.height)
+                .with_color(sprite.color);
+
+            render_world.add_object(render_obj);
         }
     }
 }
 
-/// Extract buttons - simple 2D rendering
+/// Extract buttons from Main World to Render World
 pub fn extract_buttons(main_world: &MainWorld, render_world: &mut RenderWorld) {
+    // Get PrimaryScreen for default view
+    let screen = main_world.resources().get::<PrimaryScreen>();
+    let (width, height) = screen.map(|s| (s.width as f32, s.height as f32)).unwrap_or((800.0, 600.0));
+
+    // Create default orthographic view
+    let view_bundle = create_default_view(width, height);
+    let view_idx = render_world.add_view(view_bundle);
+    render_world.set_current_view(Some(view_idx));
+
     // Query all entities with Transform2D and Button
     let transforms: Vec<_> = main_world.query::<Transform2D>().collect();
 
     for (entity, transform) in transforms {
         if let Some(button) = main_world.get_component::<Button>(entity) {
-            let pos = Vec2::new(transform.position.x, transform.position.y);
-            let (tl, tr, bl, br) = button.get_rect(pos);
+            // Get button color based on state
             let color = button.current_color();
 
-            // Draw button as two triangles (quad)
-            // Triangle 1: tl, tr, br
-            render_world.add_command(RenderCommand::DrawTriangle {
-                p0: tl,
-                p1: tr,
-                p2: br,
-                color,
-            });
-            // Triangle 2: tl, br, bl
-            render_world.add_command(RenderCommand::DrawTriangle {
-                p0: tl,
-                p1: br,
-                p2: bl,
-                color,
-            });
+            // Create render command for button background
+            let rect = Rect::new(
+                transform.position.x,
+                transform.position.y,
+                button.width,
+                button.height,
+            );
 
-            // Draw border if needed
-            if button.border_width > 0.0 {
-                let border_color = button.border_color;
-                let thickness = button.border_width;
+            render_world.add_command(RenderCommand::DrawRect { rect, color });
 
-                // Top border
-                render_world.add_command(RenderCommand::DrawLine {
-                    start: tl,
-                    end: tr,
-                    color: border_color,
-                    thickness,
-                });
-                // Right border
-                render_world.add_command(RenderCommand::DrawLine {
-                    start: tr,
-                    end: br,
-                    color: border_color,
-                    thickness,
-                });
-                // Bottom border
-                render_world.add_command(RenderCommand::DrawLine {
-                    start: br,
-                    end: bl,
-                    color: border_color,
-                    thickness,
-                });
-                // Left border
-                render_world.add_command(RenderCommand::DrawLine {
-                    start: bl,
-                    end: tl,
-                    color: border_color,
-                    thickness,
-                });
-            }
+            // Draw button text (simplified as a smaller rect for now)
+            let text_rect = Rect::new(
+                transform.position.x + button.width * 0.2,
+                transform.position.y + button.height * 0.3,
+                button.width * 0.6,
+                button.height * 0.4,
+            );
+            render_world.add_command(RenderCommand::DrawRect {
+                rect: text_rect,
+                color: Color::WHITE,
+            });
         }
     }
 }
@@ -213,8 +191,10 @@ pub fn extract_cubes(main_world: &MainWorld, render_world: &mut RenderWorld) {
                 let edge2 = v3 - v0;
                 let cross_z = edge1.x * edge2.y - edge1.y * edge2.x;
 
-                // 如果 cross_z > 0，面朝向相机（逆时针 winding）
-                if cross_z > 0.0 {
+                // 背面剔除：不启用
+                // 原因：前面的面可能带透明度，需要绘制背面才能正确显示
+                // 画家算法（按深度排序）已足够处理遮挡关系
+                if true {
                     // 计算面的平均 view-space Z（用于排序）
                     // view-space Z 越小表示越近（相机在 +Z 看向 -Z）
                     let avg_view_z = (view_z[face[0]] 
@@ -226,9 +206,11 @@ pub fn extract_cubes(main_world: &MainWorld, render_world: &mut RenderWorld) {
                 }
             }
 
-            // 按 view-space Z 排序（远的先画，Z 值大的先画）
-            // 在 view space 中，Z 越大表示离相机越远
-            visible_faces.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            // 按 view-space Z 排序（远的先画，Z 值小的先画）
+            // 在右手坐标系 view space 中，相机看向 -Z
+            // Z 值越小（越负）表示越近，Z 值越大（越接近 0）表示越远
+            // 画家算法：先画远的（Z 值大的），后画近的（Z 值小的）
+            visible_faces.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
             // 绘制可见的面（从远到近）
             for (face_idx, _, [v0, v1, v2, v3]) in visible_faces {
@@ -254,7 +236,6 @@ pub fn extract_cubes(main_world: &MainWorld, render_world: &mut RenderWorld) {
                     let wf_color = cube.wireframe_color;
                     let thickness = 1.0;
 
-                    // Draw face edges
                     render_world.add_command(RenderCommand::DrawLine {
                         start: v0,
                         end: v1,
@@ -285,6 +266,178 @@ pub fn extract_cubes(main_world: &MainWorld, render_world: &mut RenderWorld) {
     }
 }
 
+/// Extract soccer ball components (truncated icosahedron)
+/// 
+/// 足球（截角二十面体）有32个面：
+/// - 12个五边形面，每个分解为3个三角形
+/// - 20个六边形面，每个分解为4个三角形
+pub fn extract_soccer_balls(main_world: &MainWorld, render_world: &mut RenderWorld) {
+    // Query all entities with Transform3D and SoccerBall
+    let transforms: Vec<_> = main_world.query::<Transform3D>().collect();
+
+    for (entity, transform) in transforms {
+        if let Some(soccer_ball) = main_world.get_component::<SoccerBall>(entity) {
+            // Get current view for 3D projection
+            let view = match render_world.current_view() {
+                Some(v) => v,
+                None => continue,
+            };
+
+            // Get soccer ball vertices in local space (60 vertices)
+            let vertices = soccer_ball.get_vertices();
+            let pentagons = soccer_ball.get_pentagon_faces();
+            let hexagons = soccer_ball.get_hexagon_faces();
+
+            // DEBUG: Print first few vertices
+            unsafe {
+                extern "C" {
+                    fn printf(format: *const u8, ...);
+                }
+                printf(b"[DEBUG] SoccerBall vertices[0]: (%f, %f, %f)\n\0".as_ptr(),
+                    vertices[0].x as f64, vertices[0].y as f64, vertices[0].z as f64);
+                printf(b"[DEBUG] SoccerBall vertices[1]: (%f, %f, %f)\n\0".as_ptr(),
+                    vertices[1].x as f64, vertices[1].y as f64, vertices[1].z as f64);
+                printf(b"[DEBUG] SoccerBall pentagon[0]: [%d, %d, %d, %d, %d]\n\0".as_ptr(),
+                    pentagons[0][0], pentagons[0][1], pentagons[0][2], pentagons[0][3], pentagons[0][4]);
+                printf(b"[DEBUG] SoccerBall hexagon[0]: [%d, %d, %d, %d, %d, %d]\n\0".as_ptr(),
+                    hexagons[0][0], hexagons[0][1], hexagons[0][2], hexagons[0][3], hexagons[0][4], hexagons[0][5]);
+            }
+
+            // Build rotation matrix from euler angles (in degrees)
+            let rot_x = Mat4::from_rotation_x(soccer_ball.rotation.x.to_radians());
+            let rot_y = Mat4::from_rotation_y(soccer_ball.rotation.y.to_radians());
+            let rot_z = Mat4::from_rotation_z(soccer_ball.rotation.z.to_radians());
+            let rotation = rot_z.mul(&rot_y).mul(&rot_x);
+
+            // Transform vertices to world space
+            let mut world_vertices: Vec<Vec3> = Vec::with_capacity(60);
+            for v in &vertices {
+                let rotated = rotation.mul_vec3(*v);
+                let world_pos = rotated + transform.position;
+                world_vertices.push(world_pos);
+            }
+
+            // Project vertices to screen space and calculate view-space Z
+            let mut screen_vertices: Vec<Vec2> = Vec::with_capacity(60);
+            let mut view_z: Vec<f32> = Vec::with_capacity(60);
+            
+            for world_pos in &world_vertices {
+                // Transform to view space (camera-relative) using view matrix
+                let view_pos = view.view.view.mul_vec3(*world_pos);
+                view_z.push(view_pos.z);
+                
+                if let Some((x, y)) = view.view.world_to_screen(*world_pos) {
+                    screen_vertices.push(Vec2::new(x, y));
+                } else {
+                    // Vertex behind camera, skip this soccer ball
+                    screen_vertices.clear();
+                    break;
+                }
+            }
+
+            if screen_vertices.len() != 60 {
+                continue;
+            }
+
+            // Collect all faces with depth for sorting
+            // 五边形: (face_index, is_pentagon, avg_z, vertices)
+            let mut all_faces: Vec<(usize, bool, f32, Vec<Vec2>)> = Vec::new();
+
+            // Process 12 pentagon faces
+            for (face_idx, face) in pentagons.iter().enumerate() {
+                let verts: Vec<Vec2> = face.iter()
+                    .map(|&idx| screen_vertices[idx])
+                    .collect();
+                let avg_z: f32 = face.iter()
+                    .map(|&idx| view_z[idx])
+                    .sum::<f32>() / 5.0;
+                all_faces.push((face_idx, true, avg_z, verts));
+            }
+
+            // Process 20 hexagon faces
+            for (face_idx, face) in hexagons.iter().enumerate() {
+                let verts: Vec<Vec2> = face.iter()
+                    .map(|&idx| screen_vertices[idx])
+                    .collect();
+                let avg_z: f32 = face.iter()
+                    .map(|&idx| view_z[idx])
+                    .sum::<f32>() / 6.0;
+                all_faces.push((face_idx, false, avg_z, verts));
+            }
+
+            // Sort by view-space Z (far to near) - Painter's algorithm
+            // 在右手坐标系 view space 中，相机看向 -Z
+            // Z 值越小（越负）表示越近，Z 值越大（越接近 0）表示越远
+            // 画家算法：先画远的（Z 值大的），后画近的（Z 值小的）
+            all_faces.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+
+            // Draw all faces
+            for (face_idx, is_pentagon, _, verts) in all_faces {
+                if is_pentagon {
+                    // Draw pentagon (5 vertices -> 3 triangles)
+                    let color = soccer_ball.pentagon_colors[face_idx];
+                    let v = &verts;
+                    
+                    // Pentagon triangulation (fan from v0)
+                    render_world.add_command(RenderCommand::DrawTriangle {
+                        p0: v[0], p1: v[1], p2: v[2], color,
+                    });
+                    render_world.add_command(RenderCommand::DrawTriangle {
+                        p0: v[0], p1: v[2], p2: v[3], color,
+                    });
+                    render_world.add_command(RenderCommand::DrawTriangle {
+                        p0: v[0], p1: v[3], p2: v[4], color,
+                    });
+
+                    // Draw wireframe for pentagon (5 edges)
+                    if soccer_ball.wireframe {
+                        let wf_color = soccer_ball.wireframe_color;
+                        for i in 0..5 {
+                            render_world.add_command(RenderCommand::DrawLine {
+                                start: v[i],
+                                end: v[(i + 1) % 5],
+                                color: wf_color,
+                                thickness: 1.0,
+                            });
+                        }
+                    }
+                } else {
+                    // Draw hexagon (6 vertices -> 4 triangles)
+                    let color = soccer_ball.hexagon_colors[face_idx];
+                    let v = &verts;
+                    
+                    // Hexagon triangulation (fan from v0)
+                    render_world.add_command(RenderCommand::DrawTriangle {
+                        p0: v[0], p1: v[1], p2: v[2], color,
+                    });
+                    render_world.add_command(RenderCommand::DrawTriangle {
+                        p0: v[0], p1: v[2], p2: v[3], color,
+                    });
+                    render_world.add_command(RenderCommand::DrawTriangle {
+                        p0: v[0], p1: v[3], p2: v[4], color,
+                    });
+                    render_world.add_command(RenderCommand::DrawTriangle {
+                        p0: v[0], p1: v[4], p2: v[5], color,
+                    });
+
+                    // Draw wireframe for hexagon (6 edges)
+                    if soccer_ball.wireframe {
+                        let wf_color = soccer_ball.wireframe_color;
+                        for i in 0..6 {
+                            render_world.add_command(RenderCommand::DrawLine {
+                                start: v[i],
+                                end: v[(i + 1) % 6],
+                                color: wf_color,
+                                thickness: 1.0,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Extract time resource
 pub fn extract_time(main_world: &MainWorld, _render_world: &mut RenderWorld) {
     if let Some(time) = main_world.resources().get::<Time>() {
@@ -297,6 +450,8 @@ pub fn default_extract_schedule() -> ExtractSchedule {
     let mut schedule = ExtractSchedule::new();
     schedule.add_extractor(extract_sprites);
     schedule.add_extractor(extract_buttons);
+    schedule.add_extractor(extract_cubes);
+    schedule.add_extractor(extract_soccer_balls);
     schedule.add_extractor(extract_time);
     schedule
 }
@@ -341,18 +496,21 @@ fn create_default_view(width: f32, height: f32) -> ViewBundle {
 /// Create perspective view for 3D rendering
 fn create_perspective_view(width: f32, height: f32) -> ViewBundle {
     let viewport = Rect::new(0.0, 0.0, width, height);
-    // Perspective projection for 3D
+    // Perspective projection for 3D - use wider FOV for better 3D effect
     let projection = Mat4::perspective_rh(
-        60.0_f32.to_radians(),
+        45.0_f32.to_radians(),
         width / height,
         0.1,
         1000.0,
     );
-    // Camera looking at origin from positive Z
+
+    // Camera positioned to look at the object
+    let camera_pos = Vec3::new(width / 2.0, height / 2.0, 600.0);
+    let target_pos = Vec3::new(width / 2.0, height / 3.0, 0.0);
     let view = Mat4::look_at_rh(
-        Vec3::new(width / 2.0, height / 2.0, 400.0),
-        Vec3::new(width / 2.0, height / 2.0, 0.0),
-        Vec3::new(0.0, -1.0, 0.0),
+        camera_pos,
+        target_pos,
+        Vec3::new(0.0, 1.0, 0.0), // Y is up
     );
     let vp_matrix = projection * view;
 
@@ -360,7 +518,7 @@ fn create_perspective_view(width: f32, height: f32) -> ViewBundle {
         projection,
         view,
         view_projection: vp_matrix,
-        camera_position: Vec3::new(width / 2.0, height / 2.0, 400.0),
+        camera_position: camera_pos,
         near: 0.1,
         far: 1000.0,
         orthographic: false,
@@ -371,54 +529,5 @@ fn create_perspective_view(width: f32, height: f32) -> ViewBundle {
         view,
         target: ViewTarget::Screen,
         clear: ClearConfig::color(Color::BLACK),
-    }
-}
-
-/// Extract system - Runs all extraction
-pub fn extract_system(main_world: &MainWorld, render_world: &mut RenderWorld) {
-    render_world.reset();
-
-    // Get screen dimensions
-    let (width, height) = if let Some(screen) = main_world.resources().get::<PrimaryScreen>() {
-        screen.dimensions()
-    } else {
-        (800, 600)
-    };
-
-    // Create perspective view for 3D cube rendering
-    let default_view = create_perspective_view(width as f32, height as f32);
-    let view_idx = render_world.add_view(default_view);
-    render_world.set_current_view(Some(view_idx));
-
-    // Extract sprites
-    extract_sprites(main_world, render_world);
-
-    // Extract buttons
-    extract_buttons(main_world, render_world);
-
-    // Extract cubes
-    extract_cubes(main_world, render_world);
-}
-
-/// Plugin trait for extract systems
-pub trait ExtractPlugin {
-    fn register(&self, schedule: &mut ExtractSchedule);
-}
-
-/// Built-in sprite extractor plugin
-pub struct SpriteExtractor;
-
-impl ExtractPlugin for SpriteExtractor {
-    fn register(&self, schedule: &mut ExtractSchedule) {
-        schedule.add_extractor(extract_sprites);
-    }
-}
-
-/// Button extractor plugin
-pub struct ButtonExtractor;
-
-impl ExtractPlugin for ButtonExtractor {
-    fn register(&self, schedule: &mut ExtractSchedule) {
-        schedule.add_extractor(extract_buttons);
     }
 }

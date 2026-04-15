@@ -83,7 +83,7 @@ pub mod ui;            // UI components - buttons, labels, panels, etc.
 pub use app::{App, AppBuilder, AppConfig, RunMode, FHRE_VERSION};
 pub use main_world::{MainWorld, Entity, Component, System, IntoSystem, Transform, Sprite, Velocity};
 pub use render_world::{RenderWorld, RenderCommand, DrawCall, RenderObject, ExtractedTransform, ExtractedSprite, Vertex, PrimitiveType};
-pub use extract::{Extract, ExtractSchedule, extract_system};
+pub use extract::{Extract, ExtractSchedule, default_extract_schedule, extract_sprites, extract_buttons, extract_cubes, extract_soccer_balls, extract_time};
 pub use schedule::{Schedule, ScheduleLabel, SystemSet, Schedules};
 pub use pipeline::{HybridScheduler, GpuTaskCollector, RenderBatch, BatchStats};
 pub use animation::{AnimationClip, AnimationClipHandle, AnimationPlayer, ActiveAnimation, RepeatAnimation, AnimationState};

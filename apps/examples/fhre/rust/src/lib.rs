@@ -1,9 +1,10 @@
 #![no_std]
 #![no_main]
 
-//! FHRE 立方体旋转 Demo
+//! FHRE 3D Demo
 //!
-//! 展示基于顶角立起来的旋转立方体，底部有三个按钮
+//! 展示旋转立方体或足球（截角二十面体），底部有三个按钮
+//! 通过宏 FEATURE_CUBE 选择绘制对象
 
 extern crate alloc;
 
@@ -61,11 +62,23 @@ struct FbPlaneInfo {
     yoffset: u32,
 }
 
+// 宏定义：选择绘制对象
+// 默认绘制足球，定义 FEATURE_CUBE 则绘制立方体
+#[cfg(feature = "cube")]
+const USE_CUBE: bool = true;
+#[cfg(not(feature = "cube"))]
+const USE_CUBE: bool = false;
+
 // Import FHRE modules
+#[cfg(not(feature = "cube"))]
+use fhre::ui::SoccerBall;
+#[cfg(feature = "cube")]
+use fhre::ui::Cube;
+
 use fhre::{
     App, FHRE_VERSION,
     node::{Node, NodeType, Transform2D, Transform3D},
-    ui::{Button, Cube},
+    ui::Button,
     math::{Color, Vec3},
 };
 
@@ -78,7 +91,7 @@ struct DemoApp {
     width: u32,
     height: u32,
     frame_count: u32,
-    cube_entity: Option<fhre::main_world::Entity>,
+    object_entity: Option<fhre::main_world::Entity>,
     rotation_y: f32,
     is_rotating: bool,
 }
@@ -87,7 +100,11 @@ impl DemoApp {
     /// 创建新的 demo 应用
     fn new() -> Option<Self> {
         unsafe {
-            printf(b"[DEBUG] Starting FHRE Cube Demo\n\0".as_ptr());
+            if USE_CUBE {
+                printf(b"[DEBUG] Starting FHRE Cube Demo\n\0".as_ptr());
+            } else {
+                printf(b"[DEBUG] Starting FHRE Dodecahedron Demo\n\0".as_ptr());
+            }
         }
 
         // 初始化 framebuffer
@@ -97,7 +114,7 @@ impl DemoApp {
         let mut app = App::new();
 
         // 设置场景
-        let cube_entity = Self::setup_scene(&mut app, width, height);
+        let object_entity = Self::setup_scene(&mut app, width, height);
 
         Some(Self {
             app,
@@ -107,7 +124,7 @@ impl DemoApp {
             width,
             height,
             frame_count: 0,
-            cube_entity,
+            object_entity,
             rotation_y: 0.0,
             is_rotating: true,
         })
@@ -156,38 +173,55 @@ impl DemoApp {
         }
     }
 
-    /// 设置场景 - 立方体和按钮
+    /// 设置场景 - 3D 对象和按钮
     fn setup_scene(app: &mut App, width: u32, height: u32) -> Option<fhre::main_world::Entity> {
         unsafe {
-            printf(b"[DEBUG] Setting up scene...\n\0".as_ptr());
+            if USE_CUBE {
+                printf(b"[DEBUG] Setting up cube scene...\n\0".as_ptr());
+            } else {
+                printf(b"[DEBUG] Setting up soccer ball scene...\n\0".as_ptr());
+            }
         }
 
-        // 创建立方体 - 基于顶角立起来
-        let cube_entity = app.main_world.spawn();
-        app.main_world.insert_component(cube_entity, Node::game_entity(NodeType::Empty));
-        
-        // 立方体位置在屏幕中央偏上
-        let cube_x = width as f32 / 2.0;
-        let cube_y = height as f32 / 3.0;
-        let cube_z = 0.0;
-        
-        app.main_world.insert_component(cube_entity, Transform3D::from_position(cube_x, cube_y, cube_z));
-        
-        // 创建立方体组件 - 基于顶角立起来的旋转
-        // 初始旋转 45 度 around X 和 Z 轴，让一个顶角朝下
-        let cube = Cube::new(120.0)
-            .with_face_colors([
-                Color::rgb(255, 100, 100), // Front - red
-                Color::rgb(100, 255, 100), // Back - green
-                Color::rgb(100, 100, 255), // Top - blue
-                Color::rgb(255, 255, 100), // Bottom - yellow
-                Color::rgb(255, 100, 255), // Left - magenta
-                Color::rgb(100, 255, 255), // Right - cyan
-            ])
-            .with_rotation(Vec3::new(45.0, 0.0, 45.0)) // 基于顶角立起来
-            .with_wireframe(true, Color::WHITE);
-        
-        app.main_world.insert_component(cube_entity, cube);
+        // 创建 3D 对象
+        let object_entity = app.main_world.spawn();
+        app.main_world.insert_component(object_entity, Node::game_entity(NodeType::Empty));
+
+        // 对象位置在屏幕中央偏上
+        let obj_x = width as f32 / 2.0;
+        let obj_y = height as f32 / 3.0;
+        let obj_z = 0.0;
+
+        app.main_world.insert_component(object_entity, Transform3D::from_position(obj_x, obj_y, obj_z));
+
+        #[cfg(feature = "cube")]
+        {
+            // 创建立方体组件 - 基于顶角立起来的旋转
+            // 初始旋转 45 度 around X 和 Z 轴，让一个顶角朝下
+            let cube = Cube::new(120.0)
+                .with_face_colors([
+                    Color::rgb(255, 100, 100), // Front - red
+                    Color::rgb(100, 255, 100), // Back - green
+                    Color::rgb(100, 100, 255), // Top - blue
+                    Color::rgb(255, 255, 100), // Bottom - yellow
+                    Color::rgb(255, 255, 255), // Left - white
+                    Color::rgb(100, 255, 255), // Right - cyan
+                ])
+                .with_rotation(Vec3::new(45.0, 0.0, 45.0)) // 基于顶角立起来
+                .with_wireframe(true, Color::WHITE);
+
+            app.main_world.insert_component(object_entity, cube);
+        }
+
+        #[cfg(not(feature = "cube"))]
+        {
+            // 创建足球组件（截角二十面体：12个五边形 + 20个六边形）
+            let soccer_ball = SoccerBall::new(120.0)
+                .with_rotation(Vec3::new(0.0, 0.0, 0.0))
+                .with_wireframe(true, Color::WHITE);
+
+            app.main_world.insert_component(object_entity, soccer_ball);
+        }
 
         // 底部三个按钮
         let button_y = height as f32 - 80.0;
@@ -231,14 +265,18 @@ impl DemoApp {
             ));
 
         unsafe {
-            printf(b"[DEBUG] Scene setup complete: cube + 3 buttons\n\0".as_ptr());
+            if USE_CUBE {
+                printf(b"[DEBUG] Cube scene setup complete\n\0".as_ptr());
+            } else {
+                printf(b"[DEBUG] Soccer ball scene setup complete\n\0".as_ptr());
+            }
         }
 
-        Some(cube_entity)
+        Some(object_entity)
     }
 
-    /// 更新立方体旋转
-    fn update_cube(&mut self) {
+    /// 更新对象旋转
+    fn update_object(&mut self) {
         if !self.is_rotating {
             return;
         }
@@ -249,83 +287,81 @@ impl DemoApp {
             self.rotation_y = 0.0;
         }
 
-        // 更新立方体的旋转
-        if let Some(cube_entity) = self.cube_entity {
-            if let Some(cube) = self.app.main_world.get_component_mut::<Cube>(cube_entity) {
-                // 保持 X 和 Z 轴 45 度（顶角朝下），Y 轴持续旋转
-                cube.rotation = Vec3::new(45.0, self.rotation_y, 45.0);
+        // 更新对象的旋转
+        if let Some(entity) = self.object_entity {
+            #[cfg(feature = "cube")]
+            {
+                if let Some(cube) = self.app.main_world.get_component_mut::<Cube>(entity) {
+                    cube.rotation.y = self.rotation_y;
+                    // 保持 X 和 Z 轴的初始旋转（基于顶角立起来）
+                    cube.rotation.x = 45.0;
+                    cube.rotation.z = 45.0;
+                }
+            }
+
+            #[cfg(not(feature = "cube"))]
+            {
+                if let Some(soccer_ball) = self.app.main_world.get_component_mut::<SoccerBall>(entity) {
+                    soccer_ball.rotation.y = self.rotation_y;
+                }
             }
         }
     }
 
-    /// 渲染一帧
-    fn render(&mut self) {
-        self.frame_count += 1;
-
-        // 更新立方体旋转
-        self.update_cube();
-
-        // 运行 FHRE 更新
-        self.app.update();
-
-        // 复制 framebuffer 到硬件
-        let fb = self.app.get_framebuffer();
-        let size = fb.len().min(self.fb_size / 4);
-
+    /// 运行 demo 主循环
+    fn run(&mut self) {
         unsafe {
-            // 每 60 帧打印一次状态
-            if self.frame_count % 60 == 0 {
-                let mut non_zero = 0;
-                for i in 0..fb.len() {
-                    if fb[i] != 0 {
-                        non_zero += 1;
-                    }
-                }
-                printf(
-                    b"[DEBUG] Frame %d: pixels=%d/%d, rotation=%.1f\n\0".as_ptr(),
-                    self.frame_count, non_zero, fb.len(), self.rotation_y as f64
+            printf(b"[INFO] FHRE Demo started - Entering main loop\n\0".as_ptr());
+        }
+
+        loop {
+            // 更新对象旋转
+            self.update_object();
+
+            // 更新 FHRE App
+            self.app.update();
+
+            // 获取 framebuffer 数据
+            let framebuffer = self.app.render_world.framebuffer();
+
+            // 复制到 NuttX framebuffer
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    framebuffer.as_ptr(),
+                    self.fb_mem,
+                    (self.width * self.height) as usize,
                 );
             }
 
-            core::ptr::copy_nonoverlapping(fb.as_ptr(), self.fb_mem, size);
-        }
-    }
-
-    /// 运行主循环
-    fn run(&mut self) {
-        unsafe {
-            printf(b"\n========================================\n\0".as_ptr());
-            printf(b"FHRE Cube Demo\n\0".as_ptr());
-            printf(b"Version: %s\n\0".as_ptr(), FHRE_VERSION.as_ptr());
-            printf(b"========================================\n\0".as_ptr());
-            printf(b"\nCube standing on corner, rotating...\n\0".as_ptr());
-            printf(b"Bottom: [Reset] [Pause] [Exit]\n\n\0".as_ptr());
-        }
-
-        // 主循环
-        loop {
-            self.render();
-
-            // 60 FPS 帧率控制
+            // 刷新 framebuffer
             unsafe {
-                usleep(16_667);
+                ioctl(self.fb_fd, 0x2803, 0); // FBIO_UPDATE
+            }
+
+            self.frame_count += 1;
+
+            // 控制帧率约 60 FPS
+            unsafe {
+                usleep(16_667); // 16.67ms = 60 FPS
             }
         }
     }
 }
 
-impl Drop for DemoApp {
-    fn drop(&mut self) {
-        unsafe {
-            printf(b"[DEBUG] Cleaning up DemoApp\n\0".as_ptr());
-            close(self.fb_fd);
-        }
-    }
-}
-
-/// 主入口点
+/// Demo 入口函数
 #[no_mangle]
-pub extern "C" fn fhre_rust_main(_argc: i32, _argv: *const *const u8) -> i32 {
+pub extern "C" fn fhre_rust_main() -> i32 {
+    unsafe {
+        printf(b"\n========================================\n\0".as_ptr());
+        printf(b"  FHRE %s Demo\n\0".as_ptr(), FHRE_VERSION.as_ptr());
+        if USE_CUBE {
+            printf(b"  Mode: Cube (6 faces)\n\0".as_ptr());
+        } else {
+            printf(b"  Mode: Soccer Ball (12 pentagons + 20 hexagons)\n\0".as_ptr());
+        }
+        printf(b"========================================\n\n\0".as_ptr());
+    }
+
     match DemoApp::new() {
         Some(mut demo) => {
             demo.run();
@@ -333,9 +369,15 @@ pub extern "C" fn fhre_rust_main(_argc: i32, _argv: *const *const u8) -> i32 {
         }
         None => {
             unsafe {
-                printf(b"[ERROR] Failed to create demo application\n\0".as_ptr());
+                printf(b"[ERROR] Failed to create demo app\n\0".as_ptr());
             }
             -1
         }
     }
+}
+
+/// 模块初始化
+#[no_mangle]
+pub extern "C" fn rust_fhre_demo_init() {
+    // 模块初始化代码
 }

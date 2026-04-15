@@ -509,7 +509,62 @@ pipeline/
 ├── mod.rs           # 模块导出
 ├── backend.rs       # SoftwareBackend (CPU 软件渲染)
 ├── renderer.rs      # Renderer trait (抽象接口)
-└── batch.rs         # 批处理逻辑
+├── batch.rs         # 批处理逻辑
+└── backend.rs       # 软件渲染后端（三角形光栅化）
+```
+
+#### 5.4.2 3D 渲染与背面剔除
+
+FHRE 支持简单的 3D 渲染，使用画家算法（Painter's Algorithm）进行深度排序：
+
+```
+3D 渲染流程:
+
+1. Transform (变换)
+   - 本地坐标 → 世界坐标 (Transform3D)
+   - 世界坐标 → 视图坐标 (View Matrix)
+   - 视图坐标 → 裁剪坐标 (Projection Matrix)
+   - 裁剪坐标 → 屏幕坐标 (Viewport Transform)
+
+2. Backface Culling (背面剔除)
+   - 在屏幕空间计算叉积判断面的朝向
+   - cross_z < 0: 面朝向相机（可见）
+   - cross_z >= 0: 面背向相机（剔除）
+   - 注意：屏幕坐标系 Y 轴向下，叉积符号与标准坐标系相反
+
+3. Painter's Algorithm (画家算法)
+   - 按 view-space Z 排序（远的先画）
+   - 右手坐标系：Z 值越小（越负）越近，Z 值越大（越接近 0）越远
+   - 先画远的面，后画近的面，近的面覆盖远的面
+
+4. Triangle Rasterization (三角形光栅化)
+   - 使用叉积法判断点是否在三角形内
+   - 支持边界框裁剪和视口裁剪
+```
+
+**背面剔除实现：**
+
+```rust
+// 在屏幕空间计算叉积
+let edge1 = v1 - v0;
+let edge2 = v3 - v0;
+let cross_z = edge1.x * edge2.y - edge1.y * edge2.x;
+
+// 屏幕坐标系 Y 轴向下，所以 cross_z < 0 表示面朝向相机
+if cross_z < 0.0 {
+    // 面朝向相机，保留
+}
+```
+
+**深度排序实现：**
+
+```rust
+// 计算面的平均 view-space Z
+let avg_view_z = (view_z[v0] + view_z[v1] + view_z[v2] + view_z[v3]) / 4.0;
+
+// 按 Z 升序排列（Z 小的在前，即远的先画）
+// 右手坐标系：Z 越小（越负）表示离相机越近
+visible_faces.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 ```
 
 #### 5.4.2 SoftwareBackend (CPU 软件渲染)

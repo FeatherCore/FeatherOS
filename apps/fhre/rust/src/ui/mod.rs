@@ -4,6 +4,10 @@
 
 pub mod button;
 pub mod cube;
+pub mod dodecahedron;
+pub mod soccer_ball;
 
 pub use button::{Button, ButtonState};
 pub use cube::{Cube, CubeFace, RotatingCube};
+pub use dodecahedron::{Dodecahedron, RotatingDodecahedron};
+pub use soccer_ball::{SoccerBall, RotatingSoccerBall};
