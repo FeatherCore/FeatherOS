@@ -24,7 +24,7 @@ GENROMFS := $(shell which genromfs 2>/dev/null || echo "$(TOPDIR)/tools/genromfs
 # Test genromfs to determine command format
 GENROMFS_TEST := $(shell $(GENROMFS) test_dir test.img 2>&1 || echo "FAILED")
 
-ifneq ($(findstring "Unexpected number of arguments",$(GENROMFS_TEST)),)
+ifeq ($(findstring "you must specify the destination file",$(GENROMFS_TEST)),)
 # Standard genromfs with -f and -d options
 GENROMFS_CMD = $(GENROMFS) -f romfs.img -d
 else

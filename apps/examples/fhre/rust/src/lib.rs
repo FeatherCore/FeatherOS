@@ -1,19 +1,15 @@
 #![no_std]
 #![no_main]
 
-//! FHRE Rust Demo
+//! FHRE 立方体旋转 Demo
 //!
-//! Demonstrates the declarative dual-world architecture:
-//! - Main World: Game logic, entity spawning, component updates
-//! - Render World: Extracted data, draw commands, framebuffer output
-//! - Extract Phase: Syncs data from Main World to Render World
-//!
-//! This version uses mmap to directly write to the framebuffer memory.
-//! Includes usleep() to allow NuttX idle thread to run sim_x11loop().
+//! 展示基于顶角立起来的旋转立方体，底部有三个按钮
 
 extern crate alloc;
 
-// Import libc functions
+use alloc::vec::Vec;
+
+// Import libc functions for NuttX platform
 extern "C" {
     fn printf(format: *const u8, ...) -> i32;
     fn open(path: *const u8, flags: i32) -> i32;
@@ -38,50 +34,42 @@ const PROT_READ: i32 = 1;
 const PROT_WRITE: i32 = 2;
 const MAP_SHARED: i32 = 1;
 
-// Import FHRE modules
-use fhre::{
-    App, FHRE_VERSION,
-    main_world::{Transform, Sprite, Velocity},
-    math::{Color, Vec2},
-};
-
-/// Framebuffer video info structure
-/// Matches NuttX struct fb_videoinfo_s
-#[repr(C)]
-struct FbVideoInfo {
-    fmt: u8,        /* see FB_FMT_* */
-    xres: u16,      /* Horizontal resolution in pixel columns */
-    yres: u16,      /* Vertical resolution in pixel rows */
-    nplanes: u8,    /* Number of color planes supported */
-}
-
-/// Framebuffer plane info structure
-/// Matches NuttX struct fb_planeinfo_s
-#[repr(C)]
-struct FbPlaneInfo {
-    fbmem: *mut u8,     /* Start of frame buffer memory */
-    fblen: usize,       /* Length of frame buffer memory in bytes */
-    stride: u16,        /* Length of a line in bytes */
-    display: u8,        /* Display number */
-    bpp: u8,            /* Bits per pixel */
-    xres_virtual: u32,  /* Virtual Horizontal resolution */
-    yres_virtual: u32,  /* Virtual Vertical resolution */
-    xoffset: u32,       /* Offset from virtual to visible */
-    yoffset: u32,       /* Offset from virtual to visible */
-}
-
-/// IOCTL commands
-/// NuttX uses _FBIOCBASE (0x2800) as the base for framebuffer ioctls
-/// FBIOGET_VIDEOINFO = _FBIOC(0x0001) = 0x2800 | 0x0001 = 0x2801
-/// FBIOGET_PLANEINFO = _FBIOC(0x0002) = 0x2800 | 0x0002 = 0x2802
+// Framebuffer IOCTL commands
 const FBIOGET_VIDEOINFO: u32 = 0x2801;
 const FBIOGET_PLANEINFO: u32 = 0x2802;
 
-/// Error codes from NuttX
-const ENOENT: i32 = 2;    // No such file or directory
-const ENOTTY: i32 = 25;   // Not a typewriter (inappropriate ioctl)
+/// Framebuffer video info structure
+#[repr(C)]
+struct FbVideoInfo {
+    fmt: u8,
+    xres: u16,
+    yres: u16,
+    nplanes: u8,
+}
 
-/// Demo application state
+/// Framebuffer plane info structure
+#[repr(C)]
+struct FbPlaneInfo {
+    fbmem: *mut u8,
+    fblen: usize,
+    stride: u16,
+    display: u8,
+    bpp: u8,
+    xres_virtual: u32,
+    yres_virtual: u32,
+    xoffset: u32,
+    yoffset: u32,
+}
+
+// Import FHRE modules
+use fhre::{
+    App, FHRE_VERSION,
+    node::{Node, NodeType, Transform2D, Transform3D},
+    ui::{Button, Cube},
+    math::{Color, Vec3},
+};
+
+/// Demo 应用状态
 struct DemoApp {
     app: App,
     fb_fd: i32,
@@ -90,111 +78,26 @@ struct DemoApp {
     width: u32,
     height: u32,
     frame_count: u32,
+    cube_entity: Option<fhre::main_world::Entity>,
+    rotation_y: f32,
+    is_rotating: bool,
 }
 
 impl DemoApp {
-    /// Create a new demo application
+    /// 创建新的 demo 应用
     fn new() -> Option<Self> {
         unsafe {
-            printf(b"[DEBUG] Starting DemoApp::new()\n\0".as_ptr());
-            printf(b"[DEBUG] PID=%d\n\0".as_ptr(), getpid());
+            printf(b"[DEBUG] Starting FHRE Cube Demo\n\0".as_ptr());
         }
 
-        // Open framebuffer device
-        let fb_fd = unsafe { open(b"/dev/fb0\0".as_ptr(), O_RDWR) };
-        if fb_fd < 0 {
-            unsafe {
-                printf(b"[ERROR] Failed to open /dev/fb0, fd=%d\n\0".as_ptr(), fb_fd);
-            }
-            return None;
-        }
-        unsafe {
-            printf(b"[DEBUG] Opened /dev/fb0, fd=%d\n\0".as_ptr(), fb_fd);
-        }
+        // 初始化 framebuffer
+        let (fb_fd, fb_mem, fb_size, width, height) = Self::init_framebuffer()?;
 
-        // Get video info
-        unsafe {
-            printf(b"[DEBUG] FBIOGET_VIDEOINFO = 0x%x\n\0".as_ptr(), FBIOGET_VIDEOINFO);
-        }
-        let mut vinfo: FbVideoInfo = unsafe { core::mem::zeroed() };
-        let ret = unsafe { ioctl(fb_fd, FBIOGET_VIDEOINFO, &mut vinfo as *mut _) };
-        if ret < 0 {
-            unsafe {
-                let errno = *__errno();
-                printf(b"[ERROR] Failed to get video info, ret=%d, errno=%d\n\0".as_ptr(), ret, errno);
-                if errno == ENOTTY {
-                    printf(b"[ERROR] ENOTTY: Driver doesn't support this ioctl\n\0".as_ptr());
-                }
-                close(fb_fd);
-            }
-            return None;
-        }
-
-        // Get plane info
-        let mut pinfo: FbPlaneInfo = unsafe { core::mem::zeroed() };
-        let ret = unsafe { ioctl(fb_fd, FBIOGET_PLANEINFO, &mut pinfo as *mut _) };
-        if ret < 0 {
-            unsafe {
-                let errno = *__errno();
-                printf(b"[ERROR] Failed to get plane info, ret=%d, errno=%d\n\0".as_ptr(), ret, errno);
-                close(fb_fd);
-            }
-            return None;
-        }
-
-        unsafe {
-            printf(
-                b"[DEBUG] Video info: %dx%d, fmt=%d, nplanes=%d\n\0".as_ptr(),
-                vinfo.xres as u32,
-                vinfo.yres as u32,
-                vinfo.fmt as u32,
-                vinfo.nplanes as u32,
-            );
-            printf(
-                b"[DEBUG] Plane info: fbmem=%p, fblen=%d, stride=%d, bpp=%d\n\0".as_ptr(),
-                pinfo.fbmem,
-                pinfo.fblen,
-                pinfo.stride as u32,
-                pinfo.bpp as u32,
-            );
-        }
-
-        // Use framebuffer memory directly from plane info
-        // Note: In NuttX SIM platform, mmap() doesn't work as expected because
-        // the system calls are passed through to the host Linux kernel.
-        // Instead, we use the fbmem address directly provided by the driver.
-        let width = vinfo.xres as u32;
-        let height = vinfo.yres as u32;
-        let fb_size = (width * height * 4) as usize; // 4 bytes per pixel (RGBA32)
-        
-        unsafe {
-            printf(b"[DEBUG] Using driver-provided framebuffer memory\n\0".as_ptr());
-            printf(b"[DEBUG] fbmem=%p, fblen=%d, requested size=%d\n\0".as_ptr(),
-                pinfo.fbmem, pinfo.fblen, fb_size);
-        }
-
-        // Use the framebuffer memory address directly from the driver
-        let fb_mem = pinfo.fbmem as *mut u32;
-
-        if fb_mem.is_null() {
-            unsafe {
-                printf(b"[ERROR] Driver returned null framebuffer address\n\0".as_ptr());
-                close(fb_fd);
-            }
-            return None;
-        }
-
-        unsafe {
-            printf(
-                b"[DEBUG] Using framebuffer at: %p\n\0".as_ptr(),
-                fb_mem as *const u8,
-            );
-        }
-
+        // 创建 FHRE App
         let mut app = App::new();
 
-        // Spawn some entities in the Main World
-        Self::spawn_entities(&mut app);
+        // 设置场景
+        let cube_entity = Self::setup_scene(&mut app, width, height);
 
         Some(Self {
             app,
@@ -204,133 +107,210 @@ impl DemoApp {
             width,
             height,
             frame_count: 0,
+            cube_entity,
+            rotation_y: 0.0,
+            is_rotating: true,
         })
     }
 
-    /// Spawn demo entities
-    fn spawn_entities(app: &mut App) {
+    /// 初始化 framebuffer
+    fn init_framebuffer() -> Option<(i32, *mut u32, usize, u32, u32)> {
         unsafe {
-            printf(b"[DEBUG] Spawning entities...\n\0".as_ptr());
-        }
+            let fb_fd = open(b"/dev/fb0\0".as_ptr(), O_RDWR);
+            if fb_fd < 0 {
+                printf(b"[ERROR] Failed to open /dev/fb0\n\0".as_ptr());
+                return None;
+            }
 
-        // Entity 1: Red square that moves
-        let entity1 = app.main_world.spawn();
-        app.main_world.insert_component(entity1, Transform::from_position(100.0, 100.0));
-        app.main_world.insert_component(entity1, Sprite::new_with_color(50.0, 50.0, Color::RED));
-        app.main_world.insert_component(entity1, Velocity::from_xy(2.0, 1.5));
+            let mut vinfo: FbVideoInfo = core::mem::zeroed();
+            if ioctl(fb_fd, FBIOGET_VIDEOINFO, &mut vinfo as *mut _) < 0 {
+                printf(b"[ERROR] Failed to get video info\n\0".as_ptr());
+                close(fb_fd);
+                return None;
+            }
 
-        // Entity 2: Green rectangle
-        let entity2 = app.main_world.spawn();
-        app.main_world.insert_component(entity2, Transform::from_position(300.0, 200.0));
-        app.main_world.insert_component(entity2, Sprite::new_with_color(100.0, 60.0, Color::GREEN));
+            let mut pinfo: FbPlaneInfo = core::mem::zeroed();
+            if ioctl(fb_fd, FBIOGET_PLANEINFO, &mut pinfo as *mut _) < 0 {
+                printf(b"[ERROR] Failed to get plane info\n\0".as_ptr());
+                close(fb_fd);
+                return None;
+            }
 
-        // Entity 3: Blue square
-        let entity3 = app.main_world.spawn();
-        app.main_world.insert_component(entity3, Transform::from_position(500.0, 300.0));
-        app.main_world.insert_component(entity3, Sprite::new_with_color(80.0, 80.0, Color::BLUE));
+            let width = vinfo.xres as u32;
+            let height = vinfo.yres as u32;
+            let fb_size = (width * height * 4) as usize;
 
-        // Entity 4: Yellow circle (represented as square for now)
-        let entity4 = app.main_world.spawn();
-        app.main_world.insert_component(entity4, Transform::from_position(200.0, 350.0));
-        app.main_world.insert_component(entity4, Sprite::new_with_color(60.0, 60.0, Color::YELLOW));
+            printf(
+                b"[INFO] Framebuffer: %dx%d, bpp=%d\n\0".as_ptr(),
+                width, height, pinfo.bpp as u32,
+            );
 
-        unsafe {
-            printf(b"[DEBUG] Spawned 4 entities\n\0".as_ptr());
+            let fb_mem = pinfo.fbmem as *mut u32;
+            if fb_mem.is_null() {
+                printf(b"[ERROR] Null framebuffer address\n\0".as_ptr());
+                close(fb_fd);
+                return None;
+            }
+
+            Some((fb_fd, fb_mem, fb_size, width, height))
         }
     }
 
-    /// Update game logic in Main World
-    fn update(&mut self) {
-        self.frame_count += 1;
-
-        // Collect entity IDs and velocities first to avoid borrow issues
-        let mut updates: alloc::vec::Vec<(u64, f32, f32)> = alloc::vec::Vec::new();
-
-        for (entity, velocity) in self.app.main_world.query::<Velocity>() {
-            updates.push((entity.id(), velocity.linear.x, velocity.linear.y));
+    /// 设置场景 - 立方体和按钮
+    fn setup_scene(app: &mut App, width: u32, height: u32) -> Option<fhre::main_world::Entity> {
+        unsafe {
+            printf(b"[DEBUG] Setting up scene...\n\0".as_ptr());
         }
 
-        // Now apply updates
-        for (entity_id, vx, vy) in updates {
-            let entity = fhre::main_world::Entity::new(entity_id);
-            if let Some(transform) = self.app.main_world.get_component_mut::<Transform>(entity) {
-                transform.position.x += vx;
-                transform.position.y += vy;
+        // 创建立方体 - 基于顶角立起来
+        let cube_entity = app.main_world.spawn();
+        app.main_world.insert_component(cube_entity, Node::game_entity(NodeType::Empty));
+        
+        // 立方体位置在屏幕中央偏上
+        let cube_x = width as f32 / 2.0;
+        let cube_y = height as f32 / 3.0;
+        let cube_z = 0.0;
+        
+        app.main_world.insert_component(cube_entity, Transform3D::from_position(cube_x, cube_y, cube_z));
+        
+        // 创建立方体组件 - 基于顶角立起来的旋转
+        // 初始旋转 45 度 around X 和 Z 轴，让一个顶角朝下
+        let cube = Cube::new(120.0)
+            .with_face_colors([
+                Color::rgb(255, 100, 100), // Front - red
+                Color::rgb(100, 255, 100), // Back - green
+                Color::rgb(100, 100, 255), // Top - blue
+                Color::rgb(255, 255, 100), // Bottom - yellow
+                Color::rgb(255, 100, 255), // Left - magenta
+                Color::rgb(100, 255, 255), // Right - cyan
+            ])
+            .with_rotation(Vec3::new(45.0, 0.0, 45.0)) // 基于顶角立起来
+            .with_wireframe(true, Color::WHITE);
+        
+        app.main_world.insert_component(cube_entity, cube);
 
-                // Simple boundary bounce - modify velocity through component
-                let mut new_vx = vx;
-                let mut new_vy = vy;
+        // 底部三个按钮
+        let button_y = height as f32 - 80.0;
+        let button_spacing = 140.0;
+        let center_x = width as f32 / 2.0;
 
-                if transform.position.x > 600.0 || transform.position.x < 0.0 {
-                    new_vx = -vx;
-                }
-                if transform.position.y > 440.0 || transform.position.y < 0.0 {
-                    new_vy = -vy;
-                }
+        // 按钮 1 - 重置
+        let btn1 = app.main_world.spawn();
+        app.main_world.insert_component(btn1, Node::ui_control(NodeType::Button));
+        app.main_world.insert_component(btn1, Transform2D::from_position(center_x - button_spacing, button_y));
+        app.main_world.insert_component(btn1, Button::new(100.0, 40.0)
+            .with_text("Reset")
+            .with_colors(
+                Color::rgb(70, 130, 180),   // normal - steel blue
+                Color::rgb(100, 160, 210),  // hover
+                Color::rgb(50, 100, 150),   // pressed
+            ));
 
-                // Update velocity if changed
-                if new_vx != vx || new_vy != vy {
-                    if let Some(velocity) = self.app.main_world.get_component_mut::<Velocity>(entity)
-                    {
-                        velocity.linear.x = new_vx;
-                        velocity.linear.y = new_vy;
-                    }
-                }
+        // 按钮 2 - 暂停/继续
+        let btn2 = app.main_world.spawn();
+        app.main_world.insert_component(btn2, Node::ui_control(NodeType::Button));
+        app.main_world.insert_component(btn2, Transform2D::from_position(center_x, button_y));
+        app.main_world.insert_component(btn2, Button::new(100.0, 40.0)
+            .with_text("Pause")
+            .with_colors(
+                Color::rgb(60, 150, 80),    // normal - green
+                Color::rgb(90, 180, 110),   // hover
+                Color::rgb(40, 120, 60),    // pressed
+            ));
+
+        // 按钮 3 - 退出
+        let btn3 = app.main_world.spawn();
+        app.main_world.insert_component(btn3, Node::ui_control(NodeType::Button));
+        app.main_world.insert_component(btn3, Transform2D::from_position(center_x + button_spacing, button_y));
+        app.main_world.insert_component(btn3, Button::new(100.0, 40.0)
+            .with_text("Exit")
+            .with_colors(
+                Color::rgb(180, 70, 70),    // normal - red
+                Color::rgb(210, 100, 100),  // hover
+                Color::rgb(150, 50, 50),    // pressed
+            ));
+
+        unsafe {
+            printf(b"[DEBUG] Scene setup complete: cube + 3 buttons\n\0".as_ptr());
+        }
+
+        Some(cube_entity)
+    }
+
+    /// 更新立方体旋转
+    fn update_cube(&mut self) {
+        if !self.is_rotating {
+            return;
+        }
+
+        // 每帧增加 Y 轴旋转
+        self.rotation_y += 1.0;
+        if self.rotation_y >= 360.0 {
+            self.rotation_y = 0.0;
+        }
+
+        // 更新立方体的旋转
+        if let Some(cube_entity) = self.cube_entity {
+            if let Some(cube) = self.app.main_world.get_component_mut::<Cube>(cube_entity) {
+                // 保持 X 和 Z 轴 45 度（顶角朝下），Y 轴持续旋转
+                cube.rotation = Vec3::new(45.0, self.rotation_y, 45.0);
             }
         }
-
-        // Animate the yellow entity (rotation effect)
-        let yellow_entity = fhre::main_world::Entity::new(3);
-        if let Some(transform) = self.app.main_world.get_component_mut::<Transform>(yellow_entity)
-        {
-            transform.rotation += 0.05;
-            // Add some vertical oscillation
-            transform.position.y = 350.0 + libm::sinf(self.frame_count as f32 * 0.05) * 50.0;
-        }
     }
 
-    /// Render one frame and present to display
+    /// 渲染一帧
     fn render(&mut self) {
-        // First run our game logic
-        self.update();
+        self.frame_count += 1;
 
-        // Then let the app handle the rendering pipeline
+        // 更新立方体旋转
+        self.update_cube();
+
+        // 运行 FHRE 更新
         self.app.update();
 
-        // Copy render world framebuffer to hardware framebuffer
+        // 复制 framebuffer 到硬件
         let fb = self.app.get_framebuffer();
         let size = fb.len().min(self.fb_size / 4);
 
         unsafe {
-            // Print debug info every 30 frames
-            if self.frame_count % 30 == 0 {
+            // 每 60 帧打印一次状态
+            if self.frame_count % 60 == 0 {
+                let mut non_zero = 0;
+                for i in 0..fb.len() {
+                    if fb[i] != 0 {
+                        non_zero += 1;
+                    }
+                }
                 printf(
-                    b"[DEBUG] Frame %d: fb=%p, fb_mem=%p, size=%d, first_pixel=0x%x\n\0".as_ptr(),
-                    self.frame_count,
-                    fb.as_ptr(),
-                    self.fb_mem,
-                    size,
-                    *fb.as_ptr(),
+                    b"[DEBUG] Frame %d: pixels=%d/%d, rotation=%.1f\n\0".as_ptr(),
+                    self.frame_count, non_zero, fb.len(), self.rotation_y as f64
                 );
             }
 
-            // Copy to mmap'd framebuffer
             core::ptr::copy_nonoverlapping(fb.as_ptr(), self.fb_mem, size);
-
-            // Verify write
-            if self.frame_count % 30 == 0 {
-                let first_pixel = *self.fb_mem;
-                printf(
-                    b"[DEBUG] After copy: first_pixel=0x%x\n\0".as_ptr(),
-                    first_pixel,
-                );
-            }
         }
     }
 
-    /// Get the framebuffer for output
-    fn get_framebuffer(&self) -> &[u32] {
-        self.app.get_framebuffer()
+    /// 运行主循环
+    fn run(&mut self) {
+        unsafe {
+            printf(b"\n========================================\n\0".as_ptr());
+            printf(b"FHRE Cube Demo\n\0".as_ptr());
+            printf(b"Version: %s\n\0".as_ptr(), FHRE_VERSION.as_ptr());
+            printf(b"========================================\n\0".as_ptr());
+            printf(b"\nCube standing on corner, rotating...\n\0".as_ptr());
+            printf(b"Bottom: [Reset] [Pause] [Exit]\n\n\0".as_ptr());
+        }
+
+        // 主循环
+        loop {
+            self.render();
+
+            // 60 FPS 帧率控制
+            unsafe {
+                usleep(16_667);
+            }
+        }
     }
 }
 
@@ -338,58 +318,24 @@ impl Drop for DemoApp {
     fn drop(&mut self) {
         unsafe {
             printf(b"[DEBUG] Cleaning up DemoApp\n\0".as_ptr());
-            // Note: We don't munmap because we didn't mmap - we used driver's fbmem directly
             close(self.fb_fd);
         }
     }
 }
 
-/// Main entry point - Similar to LVGL's lv_nuttx_run()
-/// Uses integrated refresh loop in the FHRE library
+/// 主入口点
 #[no_mangle]
 pub extern "C" fn fhre_rust_main(_argc: i32, _argv: *const *const u8) -> i32 {
-    // Print version info
-    unsafe {
-        printf(b"\n========================================\n\0".as_ptr());
-        printf(b"FHRE Rust Demo - Dual World Architecture\n\0".as_ptr());
-        printf(b"Version: %s\n\0".as_ptr(), FHRE_VERSION.as_ptr());
-        printf(b"========================================\n\0".as_ptr());
-        printf(b"\nArchitecture:\n\0".as_ptr());
-        printf(b"  - Main World: Game logic, entities, components\n\0".as_ptr());
-        printf(b"  - Render World: Extracted data, draw commands\n\0".as_ptr());
-        printf(b"  - Extract Phase: Sync Main World -> Render World\n\0".as_ptr());
-        printf(b"  - Integrated refresh loop (like LVGL)\n\0".as_ptr());
-        printf(b"  - Frame rate control: 60 FPS with CPU yield\n\n\0".as_ptr());
-    }
-
-    // Create demo application
-    let mut demo = match DemoApp::new() {
-        Some(demo) => demo,
+    match DemoApp::new() {
+        Some(mut demo) => {
+            demo.run();
+            0
+        }
         None => {
             unsafe {
                 printf(b"[ERROR] Failed to create demo application\n\0".as_ptr());
             }
-            return -1;
+            -1
         }
-    };
-
-    // Use integrated refresh loop - similar to LVGL's lv_nuttx_run()
-    // The loop is now managed internally by the FHRE library
-    // Pass custom update callback for game logic
-    unsafe {
-        printf(b"[DEBUG] Starting integrated refresh loop with callback\n\0".as_ptr());
     }
-    
-    // Create a raw pointer to demo for use in callback
-    // This is safe because the callback is called synchronously within run_with_callback
-    let demo_ptr: *mut DemoApp = &mut demo;
-    
-    demo.app.run_with_callback(|| {
-        // Custom game logic - called before each frame
-        unsafe {
-            (*demo_ptr).update();
-        }
-    });
-    
-    0
 }

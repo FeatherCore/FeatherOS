@@ -20,14 +20,24 @@ impl Color {
         Self::new(r, g, b, 255)
     }
 
-    /// Convert to RGBA32 format
+    /// Convert to RGBA32 format (ARGB with Alpha in highest byte)
     pub const fn to_rgba32(self) -> u32 {
         ((self.a as u32) << 24) | ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32)
     }
 
-    /// Convert to u32 format (alias for to_rgba32)
+    /// Convert to XRGB32 format for NuttX framebuffer (no Alpha, X in highest byte)
+    pub const fn to_xrgb32(self) -> u32 {
+        ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32)
+    }
+
+    /// Convert to BGRA32 format for X11 (Blue, Green, Red, Alpha - little endian)
+    pub const fn to_bgra32(self) -> u32 {
+        ((self.a as u32) << 24) | ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32)
+    }
+
+    /// Convert to u32 format for framebuffer (BGRA32 for X11)
     pub const fn to_u32(self) -> u32 {
-        self.to_rgba32()
+        self.to_bgra32()
     }
 
     /// Create from u32 RGBA value
@@ -49,4 +59,11 @@ impl Color {
     pub const YELLOW: Self = Self::rgb(255, 255, 0);
     pub const CYAN: Self = Self::rgb(0, 255, 255);
     pub const MAGENTA: Self = Self::rgb(255, 0, 255);
+    pub const TRANSPARENT: Self = Self::new(0, 0, 0, 0);
+    pub const DARK_GRAY: Self = Self::rgb(64, 64, 64);
+
+    /// Create a color with modified alpha
+    pub const fn with_alpha(self, alpha: u8) -> Self {
+        Self::new(self.r, self.g, self.b, alpha)
+    }
 }

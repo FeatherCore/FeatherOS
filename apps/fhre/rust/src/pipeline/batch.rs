@@ -10,7 +10,7 @@
 //!
 //! This is part of the render_graph module, called during the Render schedule phase.
 
-use crate::render_world::{DrawCall, PrimitiveType, RenderCommand, Vertex, RenderWorld};
+use crate::render_world::{DrawCall, PrimitiveType, RenderCommand, Vertex};
 use crate::math::{Color, Rect, Vec2};
 use alloc::vec::Vec;
 use libm::sqrtf;

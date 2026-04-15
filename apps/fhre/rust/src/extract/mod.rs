@@ -5,4 +5,4 @@
 
 mod extract;
 
-pub use extract::{Extract, ExtractSchedule, ExtractResource, ExtractFn, extract_system};
+pub use extract::{Extract, ExtractSchedule, extract_system};

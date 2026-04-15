@@ -286,4 +286,8 @@ impl AnimationPlayer {
     }
 }
 
-impl Component for AnimationPlayer {}
+impl Component for AnimationPlayer {
+    fn type_name() -> &'static str {
+        "AnimationPlayer"
+    }
+}

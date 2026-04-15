@@ -17,6 +17,19 @@ impl Rect {
         Self { x, y, width, height }
     }
 
+    /// Zero rectangle (all zeros)
+    pub const ZERO: Self = Self::new(0.0, 0.0, 0.0, 0.0);
+
+    /// Create a rectangle from center and size
+    pub fn from_center_size(center: Vec2, size: Vec2) -> Self {
+        Self::new(
+            center.x - size.x / 2.0,
+            center.y - size.y / 2.0,
+            size.x,
+            size.y,
+        )
+    }
+
     /// Get position
     pub fn pos(self) -> Vec2 {
         Vec2::new(self.x, self.y)
@@ -35,6 +48,21 @@ impl Rect {
     /// Get bottom edge
     pub fn bottom(&self) -> f32 {
         self.y + self.height
+    }
+
+    /// Get center point
+    pub fn center(&self) -> Vec2 {
+        Vec2::new(self.x + self.width / 2.0, self.y + self.height / 2.0)
+    }
+
+    /// Get top-left corner
+    pub fn min(&self) -> Vec2 {
+        Vec2::new(self.x, self.y)
+    }
+
+    /// Get bottom-right corner
+    pub fn max(&self) -> Vec2 {
+        Vec2::new(self.right(), self.bottom())
     }
 
     /// Check if point is inside rectangle
@@ -80,5 +108,24 @@ impl Rect {
             let max_y = (self.y + self.height).max(point.y);
             Self::new(min_x, min_y, max_x - min_x, max_y - min_y)
         }
+    }
+
+    /// Inset the rectangle by given amounts
+    pub fn inset(&self, horizontal: f32, vertical: f32) -> Self {
+        Self::new(
+            self.x + horizontal,
+            self.y + vertical,
+            self.width - horizontal * 2.0,
+            self.height - vertical * 2.0,
+        )
+    }
+
+    /// Scale the rectangle by a factor
+    pub fn scale(&self, factor: f32) -> Self {
+        let new_width = self.width * factor;
+        let new_height = self.height * factor;
+        let dx = (self.width - new_width) / 2.0;
+        let dy = (self.height - new_height) / 2.0;
+        Self::new(self.x + dx, self.y + dy, new_width, new_height)
     }
 }

@@ -1,17 +1,21 @@
 //! Pipeline Module
 //!
-//! Manages GPU/CPU hybrid rendering and batch processing.
+//! Manages rendering backends and execution.
 //!
 //! This module implements the rendering pipeline:
 //! 1. Collect render commands from RenderWorld
-//! 2. Build batches (merge compatible draw calls)
-//! 3. Submit to GPU or execute on CPU
+//! 2. Route to appropriate backend (Software/GPU/Hybrid)
+//! 3. Execute and output to framebuffer
 //!
 //! Architecture:
 //! ```
-//! RenderCommand → BatchBuilder → RenderBatch → GPU/CPU Execution
+//! RenderCommand → Pipeline → Backend (Software/GPU/Hybrid) → Framebuffer
 //! ```
 
+pub mod backend;
 pub mod batch;
+pub mod renderer;
 
+pub use backend::SoftwareBackend;
+pub use renderer::{Renderer, RendererType};
 pub use batch::{GpuTaskCollector, HybridScheduler, RenderBatch, BatchStats, TaskType};

@@ -138,4 +138,8 @@ impl AnimationTransitions {
     }
 }
 
-impl Component for AnimationTransitions {}
+impl Component for AnimationTransitions {
+    fn type_name() -> &'static str {
+        "AnimationTransitions"
+    }
+}

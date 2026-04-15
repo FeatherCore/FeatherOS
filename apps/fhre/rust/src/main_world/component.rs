@@ -9,7 +9,12 @@ use crate::math::{Vec2, Vec3, Color};
 /// 
 /// All component types must implement this trait.
 /// Components should be simple data structures.
-pub trait Component: 'static + Send + Sync {}
+pub trait Component: 'static + Send + Sync {
+    /// Get the type name of this component
+    fn type_name() -> &'static str
+    where
+        Self: Sized;
+}
 
 /// Transform component - Position, rotation, and scale
 #[derive(Clone, Debug, PartialEq)]
@@ -91,7 +96,11 @@ impl Default for Transform {
     }
 }
 
-impl Component for Transform {}
+impl Component for Transform {
+    fn type_name() -> &'static str {
+        "Transform"
+    }
+}
 
 /// Sprite component - Visual representation
 #[derive(Clone, Debug, PartialEq)]
@@ -166,7 +175,11 @@ impl Default for Sprite {
     }
 }
 
-impl Component for Sprite {}
+impl Component for Sprite {
+    fn type_name() -> &'static str {
+        "Sprite"
+    }
+}
 
 /// Velocity component - For physics/movement
 #[derive(Clone, Debug, PartialEq)]
@@ -219,4 +232,8 @@ impl Default for Velocity {
     }
 }
 
-impl Component for Velocity {}
+impl Component for Velocity {
+    fn type_name() -> &'static str {
+        "Velocity"
+    }
+}

@@ -6,7 +6,9 @@
 mod resources;
 mod time;
 mod config;
+mod screen;
 
-pub use resources::{Resources, Resource};
+pub use resources::{Resources, Resource, Res, ResMut};
 pub use time::Time;
 pub use config::{RenderConfig, WindowConfig};
+pub use screen::{PrimaryScreen, ScreenCoordinate, ViewportConfig};

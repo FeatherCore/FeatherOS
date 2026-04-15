@@ -76,6 +76,8 @@ pub mod animation;     // Animation system (inspired by Bevy's animation)
 pub mod resources;
 pub mod math;
 pub mod platform;      // Platform abstraction (includes framebuffer)
+pub mod node;          // Node system - unified minimum unit for game entities and UI controls
+pub mod ui;            // UI components - buttons, labels, panels, etc.
 
 // Re-export main types
 pub use app::{App, AppBuilder, AppConfig, RunMode, FHRE_VERSION};

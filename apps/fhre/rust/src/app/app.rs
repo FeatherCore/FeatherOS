@@ -2,15 +2,24 @@
 //!
 //! Provides the main App struct and lifecycle management.
 //! Integrates with NuttX SIM platform framebuffer similar to LVGL.
+//!
+//! # Default Setup
+//!
+//! FHRE provides default built-in resources:
+//! - **PrimaryScreen**: The main render target with global resolution
+//! - **Default UI Camera**: Orthographic camera for UI rendering
+//!
+//! These are automatically created when App is initialized.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::main_world::{MainWorld, IntoSystem};
+use crate::main_world::{MainWorld, IntoSystem, Entity};
 use crate::render_world::RenderWorld;
 use crate::extract::extract_system;
-use crate::resources::{Time, RenderConfig, WindowConfig};
+use crate::resources::{Time, RenderConfig, WindowConfig, PrimaryScreen};
 use crate::schedule::{Schedules, ScheduleLabel};
+use crate::node::{Node, NodeType, Transform3D, Camera3D};
 use super::AppConfig;
 
 // External C functions for timing
@@ -28,6 +37,21 @@ use crate::platform::sim::SimDisplay;
 /// FHRE version
 pub const FHRE_VERSION: &str = "2.0.0";
 
+/// Resource to store the default UI camera entity
+#[derive(Clone, Copy, Debug)]
+pub struct DefaultUiCamera {
+    pub entity: Entity,
+}
+
+/// Resource to store the default game camera entity (if any)
+#[derive(Clone, Copy, Debug)]
+pub struct DefaultGameCamera {
+    pub entity: Entity,
+}
+
+impl crate::resources::Resource for DefaultUiCamera {}
+impl crate::resources::Resource for DefaultGameCamera {}
+
 /// The main Application struct
 pub struct App {
     pub main_world: MainWorld,
@@ -42,7 +66,11 @@ pub struct App {
 }
 
 impl App {
-    /// Create a new application
+    /// Create a new application with default screen and camera
+    ///
+    /// This automatically sets up:
+    /// 1. PrimaryScreen - the main render target
+    /// 2. Default UI Camera - orthographic camera for UI rendering
     pub fn new() -> Self {
         let config = AppConfig::default();
         let (width, height) = (config.width, config.height);
@@ -71,10 +99,129 @@ impl App {
             running: false,
         };
 
+        // Setup default resources
+        app.setup_primary_screen(width, height);
+        app.setup_default_ui_camera(width, height);
+        
         // Initialize default schedules
         app.init_schedules();
 
         app
+    }
+
+    /// Setup the primary screen resource
+    ///
+    /// The primary screen is the default render target for FHRE.
+    /// All rendering happens to this screen by default.
+    fn setup_primary_screen(&mut self, width: u32, height: u32) {
+        let primary_screen = PrimaryScreen::new(width, height);
+        self.main_world.resources_mut().insert(primary_screen);
+    }
+
+    /// Setup the default UI camera
+    ///
+    /// Creates a perspective camera for 3D UI rendering (including book flip effect).
+    /// This camera is positioned to show 3D effects like page flipping.
+    fn setup_default_ui_camera(&mut self, width: u32, height: u32) {
+        let camera_entity = self.main_world.spawn();
+        
+        // Create UI camera node
+        self.main_world.insert_component(
+            camera_entity,
+            Node::ui_control(NodeType::Camera)
+        );
+        
+        // Position camera for 3D perspective view
+        // Positioned to see the book flip effect clearly
+        let camera_x = width as f32 / 2.0;
+        let camera_y = height as f32 / 2.0;
+        let camera_z = 400.0; // Distance for good perspective view
+        
+        self.main_world.insert_component(
+            camera_entity,
+            Transform3D::from_position(camera_x, camera_y, camera_z)
+        );
+        
+        // Perspective camera for 3D book flip effect
+        self.main_world.insert_component(
+            camera_entity,
+            Camera3D {
+                fov: 60.0,
+                near: 0.1,
+                far: 2000.0,
+                background_color: crate::math::Color::BLACK,
+                orthographic: false,  // Use perspective for 3D effect
+                orthographic_size: height as f32 / 2.0,
+                viewport: crate::math::Rect::new(0.0, 0.0, 1.0, 1.0),
+                culling_mask: 0xFFFFFFFF,
+                depth: -100,  // Render first (lowest depth)
+            }
+        );
+        
+        // Store as default UI camera resource
+        self.main_world.resources_mut().insert(DefaultUiCamera {
+            entity: camera_entity,
+        });
+    }
+
+    /// Get the primary screen dimensions
+    pub fn screen_dimensions(&self) -> (u32, u32) {
+        if let Some(screen) = self.main_world.resources().get::<PrimaryScreen>() {
+            screen.dimensions()
+        } else {
+            (self.config.width, self.config.height)
+        }
+    }
+
+    /// Get the default UI camera entity
+    pub fn default_ui_camera(&self) -> Option<Entity> {
+        self.main_world.resources()
+            .get::<DefaultUiCamera>()
+            .map(|cam| cam.entity)
+    }
+
+    /// Create a new camera for game rendering
+    ///
+    /// This creates a perspective camera that can be used for 3D game rendering.
+    /// The camera is positioned at the given location and looks at the target.
+    pub fn create_game_camera(
+        &mut self,
+        position: crate::math::Vec3,
+        target: crate::math::Vec3,
+        fov: f32,
+    ) -> Entity {
+        let camera_entity = self.main_world.spawn();
+        
+        self.main_world.insert_component(
+            camera_entity,
+            Node::game_entity(NodeType::Camera)
+        );
+        
+        let mut transform = Transform3D::from_position(position.x, position.y, position.z);
+        transform.look_at(target);
+        self.main_world.insert_component(camera_entity, transform);
+        
+        self.main_world.insert_component(
+            camera_entity,
+            Camera3D {
+                fov,
+                near: 0.1,
+                far: 1000.0,
+                background_color: crate::math::Color::BLACK,
+                orthographic: false,
+                orthographic_size: 5.0,
+                viewport: crate::math::Rect::new(0.0, 0.0, 1.0, 1.0),
+                culling_mask: 0xFFFFFFFF,
+                depth: 0,  // Render after UI camera
+            }
+        );
+        
+        // Store as default game camera
+        self.main_world.resources_mut().insert(DefaultGameCamera {
+            entity: camera_entity,
+        });
+        
+        camera_entity
     }
 
     /// Initialize default schedules
@@ -121,7 +268,11 @@ impl App {
         // 3. Extract phase - sync Main World to Render World
         extract_system(&self.main_world, &mut self.render_world);
 
-        // 4. Present to SIM display if available (NuttX SIM platform)
+        // 4. Render phase - execute render commands through RenderWorld
+        // RenderWorld manages the backend internally (Software/GPU/Hybrid)
+        self.render_world.execute_render();
+
+        // 5. Present to SIM display if available (NuttX SIM platform)
         // Similar to LVGL's flush_cb calling FBIO_UPDATE
         #[cfg(feature = "sim")]
         {
