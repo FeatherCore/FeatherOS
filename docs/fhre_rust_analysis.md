@@ -56,8 +56,9 @@ FeatherOS/
 │   │           │   ├── resources.rs   # Resources 实现
 │   │           │   ├── time.rs        # Time 实现
 │   │           │   └── config.rs      # Config 实现
-│   │           │   ├── framebuffer.rs # Framebuffer 实现
-│   │           │   └── target.rs      # RenderTarget 实现
+│   │           ├── pipeline/          # Pipeline 模块（渲染管线）
+│   │           │   ├── mod.rs         # 衔接：导出 pipeline 子模块
+│   │           │   └── batch.rs       # 批处理实现
 │   │           ├── math/              # Math 模块
 │   │           │   ├── mod.rs
 │   │           │   ├── vec2.rs
@@ -73,11 +74,13 @@ FeatherOS/
 │   │           │   ├── graph.rs       # 动画图（混合）
 │   │           │   ├── transition.rs  # 动画过渡
 │   │           │   └── property.rs    # 动画属性
-│   │           └── platform/          # Platform 模块
-│   │               ├── mod.rs         # 衔接：导出 sim, nuttx, default
-│   │               ├── sim.rs         # NuttX SIM 平台支持
-│   │               ├── nuttx.rs       # NuttX 平台支持
-│   │               └── default.rs     # 默认平台支持
+│   │           ├── platform/          # Platform 模块
+│   │           │   ├── mod.rs         # 衔接：导出 sim, nuttx, default, framebuffer
+│   │           │   ├── sim.rs         # NuttX SIM 平台支持
+│   │           │   ├── nuttx.rs       # NuttX 平台支持
+│   │           │   ├── default.rs     # 默认平台支持
+│   │           │   └── framebuffer.rs # Framebuffer 抽象实现
+│   │           └── lib.rs             # 库入口
 │   │
 │   └── examples/
 │       └── fhre/
