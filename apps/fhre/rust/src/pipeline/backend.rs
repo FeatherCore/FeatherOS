@@ -52,6 +52,9 @@ impl SoftwareBackend {
             RenderCommand::DrawTriangle { p0, p1, p2, color } => {
                 self.fill_triangle(*p0, *p1, *p2, *color);
             }
+            RenderCommand::DrawPolygon { vertices, color } => {
+                self.fill_polygon(vertices, *color);
+            }
             RenderCommand::DrawText { position, text: _, color, size: _ } => {
                 // Simplified text rendering - draw placeholder
                 let rect = Rect::new(position.x, position.y, 100.0, 20.0);
@@ -204,6 +207,73 @@ impl SoftwareBackend {
         let w2 = (s4 - w1 * s3) / s1;
 
         w1 >= 0.0 && w2 >= 0.0 && (w1 + w2) <= 1.0
+    }
+
+    /// Fill a convex polygon using scanline algorithm
+    fn fill_polygon(&mut self, vertices: &[Vec2], color: Color) {
+        if vertices.len() < 3 {
+            return;
+        }
+
+        // Find bounding box
+        let mut min_x = vertices[0].x;
+        let mut max_x = vertices[0].x;
+        let mut min_y = vertices[0].y;
+        let mut max_y = vertices[0].y;
+
+        for v in vertices.iter().skip(1) {
+            min_x = min_x.min(v.x);
+            max_x = max_x.max(v.x);
+            min_y = min_y.min(v.y);
+            max_y = max_y.max(v.y);
+        }
+
+        // Clamp to viewport
+        let min_x = min_x.max(self.viewport.x) as i32;
+        let max_x = max_x.min(self.viewport.x + self.viewport.width) as i32;
+        let min_y = min_y.max(self.viewport.y) as i32;
+        let max_y = max_y.min(self.viewport.y + self.viewport.height) as i32;
+
+        // Scanline fill
+        for y in min_y..=max_y {
+            let mut intersections: Vec<f32> = Vec::new();
+            let yf = y as f32;
+
+            // Find intersections with all edges
+            for i in 0..vertices.len() {
+                let j = (i + 1) % vertices.len();
+                let v1 = vertices[i];
+                let v2 = vertices[j];
+
+                // Check if scanline intersects this edge
+                if (v1.y <= yf && v2.y > yf) || (v2.y <= yf && v1.y > yf) {
+                    // Calculate x intersection
+                    let t = (yf - v1.y) / (v2.y - v1.y);
+                    let x = v1.x + t * (v2.x - v1.x);
+                    intersections.push(x);
+                }
+            }
+
+            // Sort intersections
+            intersections.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            // Fill between pairs of intersections
+            for i in (0..intersections.len()).step_by(2) {
+                if i + 1 < intersections.len() {
+                    let x_start = intersections[i].max(self.viewport.x) as i32;
+                    let x_end = intersections[i + 1].min(self.viewport.x + self.viewport.width) as i32;
+
+                    for x in x_start..=x_end {
+                        if x >= 0 && x < self.width as i32 && y >= 0 && y < self.height as i32 {
+                            let index = (y as u32 * self.width + x as u32) as usize;
+                            if index < self.framebuffer.len() {
+                                self.framebuffer[index] = color.to_u32();
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -18,19 +18,13 @@
 #
 ############################################################################
 
-# Detect genromfs version and set appropriate command format
+# Detect genromfs - prefer system genromfs if available
 GENROMFS := $(shell which genromfs 2>/dev/null || echo "$(TOPDIR)/tools/genromfs")
 
-# Test genromfs to determine command format
-GENROMFS_TEST := $(shell $(GENROMFS) test_dir test.img 2>&1 || echo "FAILED")
-
-ifeq ($(findstring "you must specify the destination file",$(GENROMFS_TEST)),)
-# Standard genromfs with -f and -d options
-GENROMFS_CMD = $(GENROMFS) -f romfs.img -d
-else
-# Custom genromfs with positional arguments
-GENROMFS_CMD = $(GENROMFS)
-endif
+# Check if using system genromfs (supports -f -d flags) or NuttX genromfs (positional args)
+# System genromfs outputs "Usage: genromfs -f <output> -d <source_dir>" when called without args
+GENROMFS_HELP := $(shell $(GENROMFS) 2>&1 || true)
+GENROMFS_IS_SYSTEM := $(findstring -f,$(GENROMFS_HELP))
 
 ifneq ($(RCSRCS)$(RCRAWS),)
 ETCDIR := etctmp
@@ -46,10 +40,14 @@ $(RCOBJS): $(ETCDIR)$(DELIM)%: %
 
 $(ETCSRC): $(foreach raw,$(RCRAWS), $(if $(wildcard $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw), $(if $(wildcard $(BOARD_COMMON_DIR)$(DELIM)$(raw)), $(BOARD_COMMON_DIR)$(DELIM)$(raw), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)))) $(RCOBJS)
 	$(foreach raw, $(RCRAWS), \
-	  $(shell rm -rf $(ETCDIR)$(DELIM)$(raw)) \
-	  $(shell mkdir -p $(dir $(ETCDIR)$(DELIM)$(raw))) \
-	  $(shell cp -rfp $(if $(wildcard $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw), $(if $(wildcard $(BOARD_COMMON_DIR)$(DELIM)$(raw)), $(BOARD_COMMON_DIR)$(DELIM)$(raw), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw))) $(ETCDIR)$(DELIM)$(raw)))
-	$(Q) $(GENROMFS_CMD) $(ETCDIR)$(DELIM)$(CONFIG_ETC_ROMFSMOUNTPT) romfs.img
+  	  $(shell rm -rf $(ETCDIR)$(DELIM)$(raw)) \
+  	  $(shell mkdir -p $(dir $(ETCDIR)$(DELIM)$(raw))) \
+  	  $(shell cp -rfp $(if $(wildcard $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw), $(if $(wildcard $(BOARD_COMMON_DIR)$(DELIM)$(raw)), $(BOARD_COMMON_DIR)$(DELIM)$(raw), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw))) $(ETCDIR)$(DELIM)$(raw)))
+	$(Q) if $(GENROMFS) --help 2>&1 | grep -q '\-f.*\-d'; then \
+		$(GENROMFS) -f romfs.img -d $(ETCDIR)$(DELIM)$(CONFIG_ETC_ROMFSMOUNTPT); \
+	else \
+		$(GENROMFS) $(ETCDIR)$(DELIM)$(CONFIG_ETC_ROMFSMOUNTPT) romfs.img; \
+	fi
 	$(Q) echo "#include <nuttx/compiler.h>" > $@
 	$(Q) xxd -i romfs.img | sed -e "s/^unsigned char/const unsigned char aligned_data(4)/g" >> $@
 	$(Q) rm romfs.img

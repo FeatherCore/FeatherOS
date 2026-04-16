@@ -261,6 +261,8 @@ impl HybridScheduler {
             RenderCommand::DrawRect { .. } => TaskType::Gpu,
             RenderCommand::DrawLine { .. } => TaskType::Gpu,
             RenderCommand::DrawTriangle { .. } => TaskType::Gpu,
+            // Polygons are handled by CPU for now (complex scanline algorithm)
+            RenderCommand::DrawPolygon { .. } => TaskType::Cpu,
         }
     }
 

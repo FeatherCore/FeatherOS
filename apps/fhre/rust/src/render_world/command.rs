@@ -19,6 +19,8 @@ pub enum RenderCommand {
     DrawLine { start: Vec2, end: Vec2, color: Color, thickness: f32 },
     /// Draw a triangle
     DrawTriangle { p0: Vec2, p1: Vec2, p2: Vec2, color: Color },
+    /// Draw a polygon (convex or concave, filled)
+    DrawPolygon { vertices: Vec<Vec2>, color: Color },
     /// Draw text (simplified - just rectangles for now)
     DrawText { position: Vec2, text: &'static str, color: Color, size: f32 },
     /// Set scissor rectangle
@@ -51,6 +53,11 @@ impl RenderCommand {
     /// Create a draw triangle command
     pub fn draw_triangle(p0: Vec2, p1: Vec2, p2: Vec2, color: Color) -> Self {
         Self::DrawTriangle { p0, p1, p2, color }
+    }
+
+    /// Create a draw polygon command
+    pub fn draw_polygon(vertices: Vec<Vec2>, color: Color) -> Self {
+        Self::DrawPolygon { vertices, color }
     }
 
     /// Create a draw text command

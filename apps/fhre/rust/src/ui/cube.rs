@@ -233,18 +233,9 @@ impl crate::render_world::RenderComponent for Cube {
         for (face_idx, _, [v0, v1, v2, v3]) in visible_faces {
             let color = self.face_colors[face_idx];
 
-            // Triangle 1: v0, v1, v2
-            commands.push(RenderCommand::DrawTriangle {
-                p0: v0,
-                p1: v1,
-                p2: v2,
-                color,
-            });
-            // Triangle 2: v0, v2, v3
-            commands.push(RenderCommand::DrawTriangle {
-                p0: v0,
-                p1: v2,
-                p2: v3,
+            // 使用多边形填充四边形（避免三角形拼接缝隙）
+            commands.push(RenderCommand::DrawPolygon {
+                vertices: alloc::vec![v0, v1, v2, v3],
                 color,
             });
 
