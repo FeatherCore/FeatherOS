@@ -5,9 +5,11 @@
 pub mod button;
 pub mod cube;
 pub mod dodecahedron;
+pub mod model;
 pub mod soccer_ball;
 
 pub use button::{Button, ButtonState};
 pub use cube::{Cube, CubeFace, RotatingCube};
 pub use dodecahedron::{Dodecahedron, RotatingDodecahedron};
+pub use model::{Model3D, ModelComponent, default_models};
 pub use soccer_ball::{SoccerBall, RotatingSoccerBall};

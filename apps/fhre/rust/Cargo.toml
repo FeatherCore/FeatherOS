@@ -21,3 +21,8 @@ opt-level = 'z'
 
 [dependencies]
 libm = "0.2"
+
+[features]
+default = []
+cube = []
+sim = []

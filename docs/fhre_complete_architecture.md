@@ -534,8 +534,10 @@ FHRE 支持简单的 3D 渲染，使用画家算法（Painter's Algorithm）进�
 
 3. Painter's Algorithm (画家算法)
    - 按 view-space Z 排序（远的先画）
-   - 右手坐标系：Z 值越小（越负）越近，Z 值越大（越接近 0）越远
-   - 先画远的面，后画近的面，近的面覆盖远的面
+   - **重要**：右手坐标系 view space 中，相机看向 -Z 方向
+   - **Z 值越小（越负）表示离相机越远，Z 值越大（越接近 0）表示离相机越近**
+   - 画家算法：先画远的（Z 值小的/更负的），后画近的（Z 值大的/接近 0 的）
+   - 排序使用升序：`faces.sort_by(|a, b| a.z.partial_cmp(&b.z).unwrap())`
 
 4. Triangle Rasterization (三角形光栅化)
    - 使用叉积法判断点是否在三角形内
@@ -563,7 +565,8 @@ if cross_z < 0.0 {
 let avg_view_z = (view_z[v0] + view_z[v1] + view_z[v2] + view_z[v3]) / 4.0;
 
 // 按 Z 升序排列（Z 小的在前，即远的先画）
-// 右手坐标系：Z 越小（越负）表示离相机越近
+// 右手坐标系 view space：相机看向 -Z，Z 越小（越负）表示越远
+// 画家算法：先画远的（Z 值小的/更负的），后画近的（Z 值大的/接近 0 的）
 visible_faces.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 ```
 
@@ -935,7 +938,7 @@ impl SimDisplay {
 ```bash
 cd /home/uan/develop/FeatherOS-code/FeatherOS/nuttx
 make distclean
-./tools/configure.sh sim:fhre
+tools/configure.sh sim:fhre
 make -j
 
 ./nuttx

@@ -2,10 +2,10 @@
 //!
 //! Component that plays animation clips on entities.
 
-use super::clip::{AnimationClip, AnimationClipHandle};
+use super::clip::AnimationClip;
 use super::AnimationResources;
 use crate::main_world::Component;
-use crate::math::{Vec2, Vec3};
+use super::AnimationClipHandle;
 
 /// Repeat behavior for animations
 #[derive(Clone, Copy, Debug, PartialEq)]

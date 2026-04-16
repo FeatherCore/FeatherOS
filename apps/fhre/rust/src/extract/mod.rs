@@ -5,4 +5,4 @@
 
 mod extract;
 
-pub use extract::{Extract, ExtractSchedule, default_extract_schedule, extract_sprites, extract_buttons, extract_cubes, extract_soccer_balls, extract_time};
+pub use extract::{Extract, ExtractSchedule, default_extract_schedule, extract_sprites, extract_buttons, extract_cubes, extract_time, extract_renderable_components};

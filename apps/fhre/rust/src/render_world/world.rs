@@ -299,6 +299,9 @@ impl RenderWorld {
             );
         }
         
+        // Clear the framebuffer with clear_color before rendering
+        self.backend.clear(self.clear_color);
+        
         // Execute all commands through the backend
         self.backend.execute_commands(&self.commands);
         

@@ -96,7 +96,8 @@ impl SoftwareBackend {
 
     // ========== Low-level Software Rasterization ==========
 
-    fn clear(&mut self, color: Color) {
+    /// Clear the framebuffer with a specific color
+    pub fn clear(&mut self, color: Color) {
         let color_value = color.to_u32();
         for pixel in self.framebuffer.iter_mut() {
             *pixel = color_value;

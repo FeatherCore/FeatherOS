@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 
 use crate::main_world::{MainWorld, IntoSystem, Entity};
 use crate::render_world::RenderWorld;
-use crate::extract::extract_system;
+use crate::extract::{extract_sprites, extract_buttons, extract_renderable_components};
 use crate::resources::{Time, RenderConfig, WindowConfig, PrimaryScreen};
 use crate::schedule::{Schedules, ScheduleLabel};
 use crate::node::{Node, NodeType, Transform3D, Camera3D};
@@ -266,7 +266,12 @@ impl App {
         self.main_world.run_systems();
 
         // 3. Extract phase - sync Main World to Render World
-        extract_system(&self.main_world, &mut self.render_world);
+        // 重要：首先清除所有视图，避免视图不断累加
+        self.render_world.clear_views();
+        
+        // Extract 3D renderable components (Cube, SoccerBall, etc.)
+        // 这个函数会创建一个视图，并且提取所有 3D 渲染组件
+        extract_renderable_components(&self.main_world, &mut self.render_world);
 
         // 4. Render phase - execute render commands through RenderWorld
         // RenderWorld manages the backend internally (Software/GPU/Hybrid)
@@ -280,6 +285,11 @@ impl App {
                 display.present(&self.render_world);
             }
         }
+
+        // 6. Clear render commands and views for next frame
+        // Prevent command accumulation between frames
+        self.render_world.clear_commands();
+        self.render_world.clear_views();
     }
 
     /// Run the application with integrated refresh loop

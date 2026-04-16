@@ -34,3 +34,21 @@ pub use view::{
     ClearConfig,
     ViewBundle,
 };
+
+use alloc::vec::Vec;
+
+/// Render Component Trait - All renderable components must implement this
+/// 
+/// This trait allows components to generate their own render commands
+/// without the extract system needing to know about specific component types.
+pub trait RenderComponent {
+    /// Generate render commands for this component
+    /// 
+    /// # Arguments
+    /// * `transform` - The component's transform in world space
+    /// * `view` - The current view (camera) for projection
+    /// 
+    /// # Returns
+    /// A vector of render commands to be executed by the render world
+    fn generate_render_commands(&self, transform: &crate::node::Transform3D, view: &View) -> Vec<RenderCommand>;
+}

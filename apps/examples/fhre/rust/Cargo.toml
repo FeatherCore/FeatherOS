@@ -23,3 +23,7 @@ opt-level = 'z'
 fhre = { path = "../../../../apps/fhre/rust", default-features = false }
 libm = "0.2"
 
+[features]
+default = []
+cube = ["fhre/cube"]
+
