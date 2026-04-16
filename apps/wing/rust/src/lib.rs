@@ -1,8 +1,8 @@
-//! Phoenix Desktop Environment
+//! Wing Desktop Environment
 //!
 //! A desktop shell for FeatherOS based on FHRE (Feather Hybrid Rendering Engine).
 //!
-//! Phoenix provides:
+//! Wing provides:
 //! - Window management (create, move, resize, close windows)
 //! - Desktop wallpaper and icon grid
 //! - Taskbar with application launcher
@@ -14,7 +14,7 @@
 //! ┌─────────────────────────────────────────┐
 //! │         User Applications               │
 //! ├─────────────────────────────────────────┤
-//! │         Phoenix Desktop Shell           │
+//! │         Wing Desktop Shell              │
 //! │  (Window Manager + Desktop + Taskbar)   │
 //! ├─────────────────────────────────────────┤
 //! │         FHRE (Graphics Library)         │
@@ -45,11 +45,11 @@ pub use icon::{DesktopIcon, IconGrid};
 use fhre::math::{Color, Vec2};
 use fhre::node::{Node, Transform2D};
 
-/// Phoenix application context
+/// Wing application context
 ///
-/// This is the main entry point for the Phoenix desktop environment.
+/// This is the main entry point for the Wing desktop environment.
 /// It manages all desktop components and coordinates between applications.
-pub struct Phoenix {
+pub struct Wing {
     /// Window manager
     pub window_manager: WindowManager,
     /// Desktop configuration
@@ -62,8 +62,8 @@ pub struct Phoenix {
     pub screen_size: Vec2,
 }
 
-impl Phoenix {
-    /// Create a new Phoenix desktop environment
+impl Wing {
+    /// Create a new Wing desktop environment
     pub fn new(width: f32, height: f32) -> Self {
         let screen_size = Vec2::new(width, height);
         
@@ -150,9 +150,9 @@ impl Phoenix {
     }
 }
 
-/// Phoenix error types
+/// Wing error types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PhoenixError {
+pub enum WingError {
     /// Window not found
     WindowNotFound,
     /// Application not found
@@ -163,5 +163,5 @@ pub enum PhoenixError {
     AllocationFailed,
 }
 
-/// Result type for Phoenix operations
-pub type Result<T> = core::result::Result<T, PhoenixError>;
+/// Result type for Wing operations
+pub type Result<T> = core::result::Result<T, WingError>;
