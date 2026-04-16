@@ -1,0 +1,27 @@
+[package]
+name = "phoenix"
+version = "0.1.0"
+edition = "2021"
+authors = ["FeatherOS Team"]
+description = "Phoenix Desktop Environment - A desktop shell for FeatherOS based on FHRE"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "phoenix"
+path = "src/lib.rs"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+opt-level = 'z'
+
+[dependencies]
+fhre = { path = "../../../../apps/fhre/rust", default-features = false }
+libm = "0.2"
+
+[features]
+default = []
