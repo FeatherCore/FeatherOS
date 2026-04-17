@@ -1387,11 +1387,12 @@ FeatherOS/
 │   │           │   ├── app.rs         # App 实现
 │   │           │   └── config.rs      # App 配置
 │   │           ├── main_world/        # Main World 模块
-│   │           │   ├── mod.rs         # 衔接：导出 world, entity, component, system
+│   │           │   ├── mod.rs         # 衔接：导出 world, entity, component, system, system_param
 │   │           │   ├── world.rs       # MainWorld 实现
 │   │           │   ├── entity.rs      # Entity 实现
 │   │           │   ├── component.rs   # Component 实现
-│   │           │   └── system.rs      # System 实现
+│   │           │   ├── system.rs      # System 实现 (声明式 ECS)
+│   │           │   └── system_param.rs # SystemParam 实现 (Res, ResMut, Query)
 │   │           ├── render_world/      # Render World 模块
 │   │           │   ├── mod.rs         # 衔接：导出 world, command, object
 │   │           │   ├── world.rs       # RenderWorld 实现

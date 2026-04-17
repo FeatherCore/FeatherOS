@@ -75,24 +75,54 @@ pub mod pipeline;
 pub mod animation;
 pub mod resources;
 pub mod math;
-pub mod platform;
 pub mod node;
 pub mod ui;
+pub mod event;
+pub mod input;
+pub mod plugin;
 
-// Re-export main types
-pub use app::{App, AppBuilder, AppConfig, RunMode, FHRE_VERSION};
-pub use main_world::{MainWorld, Entity, Component, System, IntoSystem, Transform, Sprite, Velocity};
-pub use render_world::{RenderWorld, RenderCommand, DrawCall, RenderObject, ExtractedTransform, ExtractedSprite, Vertex, PrimitiveType};
-pub use extract::{Extract, ExtractSchedule, default_extract_schedule, extract_sprites, extract_buttons, extract_cubes, extract_time};
-pub use schedule::{Schedule, ScheduleLabel, SystemSet, Schedules};
-pub use pipeline::{HybridScheduler, GpuTaskCollector, RenderBatch, BatchStats};
-pub use animation::{AnimationClip, AnimationClipHandle, AnimationPlayer, ActiveAnimation, RepeatAnimation, AnimationState};
-pub use animation::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex, AnimationTransitions};
-pub use animation::{AnimationCurve, KeyframeCurve, Keyframe, Easing, AnimationProperty, AnimationTargetId};
-pub use animation::{AnimationPlugin, AnimationResources, animate_system, transition_system};
-pub use resources::{Resources, Resource, Time, RenderConfig, WindowConfig};
-pub use math::{Vec2, Vec3, Color, Rect};
+// Re-export main types from app
+pub use app::{App, AppBuilder, FHRE_VERSION, DefaultUiCamera, DefaultGameCamera, AppRunner, AppExit, Startup, PreUpdate, Update, PostUpdate};
 
-// Platform-specific exports
-#[cfg(feature = "sim")]
-pub use platform::x11_window::{X11Window, MouseEvent, MouseEventType};
+// Re-export main types from main_world
+pub use main_world::{MainWorld, Entity, Component, System, IntoSystem};
+pub use main_world::{SystemParam, Res, ResMut, Query, Local, system1, system2, system3};
+pub use main_world::{Commands, Command, CommandsState, EntityCommands};
+
+// Re-export render_world types
+pub use render_world::{RenderWorld, RenderCommand, View, ViewBundle, RenderComponent};
+
+// Re-export extract
+pub use extract::extract_renderable_components;
+
+// Re-export schedule types (now in app module)
+// pub use schedule::{Startup, PreUpdate, Update, PostUpdate};
+
+// Re-export resources
+pub use resources::{Time, PrimaryScreen, Resource};
+
+// Re-export plugin types
+pub use plugin::{Plugin, PluginGroup};
+
+// Re-export node types
+pub use node::{Node, NodeType, Transform2D, Transform3D};
+
+// Re-export UI types
+pub use ui::{Button, Cube, SoccerBall};
+
+// Re-export math types (includes Color)
+pub use math::{Color, Vec2, Vec3, Mat4};
+
+// Re-export input types
+pub use input::{ButtonInput, MouseButton, KeyCode};
+
+/// Prelude module for convenient imports
+pub mod prelude {
+    pub use crate::app::{App, Startup, Update};
+    pub use crate::main_world::{Commands, Query, Res, ResMut, Local, system1, system2, system3};
+    pub use crate::resources::{Time, PrimaryScreen};
+    pub use crate::plugin::Plugin;
+    pub use crate::node::{Node, NodeType, Transform2D, Transform3D};
+    pub use crate::ui::{Button, Cube, SoccerBall};
+    pub use crate::math::{Color, Vec2, Vec3};
+}

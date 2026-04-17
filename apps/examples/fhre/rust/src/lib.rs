@@ -1,23 +1,30 @@
 #![no_std]
 #![no_main]
 
-//! FHRE 3D Demo
+//! FHRE 3D Demo - 纯声明式 ECS 版本
 //!
 //! 展示旋转立方体或足球（截角二十面体），底部有三个按钮
 //! 通过 feature "cube" 选择绘制对象
 //!
 //! 架构说明：
-//! - 使用 ECS (Entity-Component-System) 架构
-//! - 动画通过 System 更新，不直接操作组件
+//! - 使用纯声明式 ECS (Entity-Component-System) 架构，完全对齐 Bevy 风格
+//! - 动画通过 System 更新，使用 Res/ResMut/Query 声明式参数
 //! - 使用 Resource 存储全局状态
+//! - 使用 Commands 创建实体（非直接 World 操作）
+//! - ECS 系统使用纯声明式参数（Res/ResMut/Query）
 
 extern crate alloc;
 
 // Import libc functions for NuttX platform
 extern "C" {
     fn printf(format: *const u8, ...) -> i32;
+    fn clock() -> i64;
     fn usleep(usec: u32) -> i32;
 }
+
+// X11 Window module (SIM platform only)
+#[cfg(feature = "sim")]
+mod x11_window;
 
 // 宏定义：选择绘制对象
 #[cfg(feature = "cube")]
@@ -26,32 +33,33 @@ const USE_CUBE: bool = true;
 const USE_CUBE: bool = false;
 
 // Import FHRE modules
-#[cfg(not(feature = "cube"))]
-use fhre::ui::SoccerBall;
-#[cfg(feature = "cube")]
-use fhre::ui::Cube;
+use fhre::ui::{SoccerBall, Cube};
 
 use fhre::{
-    App, FHRE_VERSION,
+    App, FHRE_VERSION, AppExit,
     node::{Node, NodeType, Transform2D, Transform3D},
     ui::Button,
     math::{Color, Vec3},
-    resources::Time,
-    main_world::{MainWorld, Entity},
+    resources::{Time, PrimaryScreen},
+    // 声明式 ECS
+    Res, ResMut, Query, Commands,
+    // 输入系统
+    ButtonInput, MouseButton, KeyCode,
+    // Plugin系统
+    Plugin,
+    // Schedule系统 - Bevy风格
+    Update, PreUpdate, Startup,
+    // 默认摄像机资源
+    DefaultUiCamera,
+    // System 辅助函数
+    system2, system3,
 };
 
-use alloc::vec::Vec;
-
 /// Demo 全局状态资源
-/// 
-/// 存储旋转状态，由 System 读取并应用到对象
 #[derive(Clone, Debug)]
 pub struct DemoState {
-    /// 当前 Y 轴旋转角度
     pub rotation_y: f32,
-    /// 是否正在旋转
     pub is_rotating: bool,
-    /// 旋转速度（度/秒）
     pub rotation_speed: f32,
 }
 
@@ -60,7 +68,7 @@ impl DemoState {
         Self {
             rotation_y: 0.0,
             is_rotating: true,
-            rotation_speed: 60.0, // 60度/秒 = 6秒/圈
+            rotation_speed: 60.0,
         }
     }
 }
@@ -73,267 +81,347 @@ impl Default for DemoState {
 
 impl fhre::resources::Resource for DemoState {}
 
-/// Demo 应用
-/// 
-/// 简化的结构，动画逻辑完全交给 ECS System
-struct DemoApp {
-    app: App,
-    object_entity: Option<fhre::main_world::Entity>,
+/// Screen Plugin - 注册主屏幕资源
+#[derive(Default)]
+pub struct ScreenPlugin {
+    width: u32,
+    height: u32,
 }
 
-impl DemoApp {
-    /// 创建新的 demo 应用
-    fn new() -> Option<Self> {
+impl ScreenPlugin {
+    pub fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+}
+
+impl Plugin for ScreenPlugin {
+    fn build(&self, app: &mut App) {
+        let primary_screen = PrimaryScreen::new(self.width, self.height);
+        app.main_world.resources_mut().insert(primary_screen);
         unsafe {
-            if USE_CUBE {
-                printf(b"[DEBUG] Starting FHRE Cube Demo (ECS version)\n\0".as_ptr());
-            } else {
-                printf(b"[DEBUG] Starting FHRE Soccer Ball Demo (ECS version)\n\0".as_ptr());
-            }
+            printf(b"[INFO] ScreenPlugin: Registered PrimaryScreen %dx%d\n\0".as_ptr(),
+                   self.width, self.height);
         }
-
-        // 创建 FHRE App with X11 window for input (640x480)
-        let mut app = App::new_with_x11_window(640, 480, "FHRE Demo");
-
-        // 获取窗口尺寸
-        let (width, height) = app.screen_dimensions();
-
-        // 设置场景
-        let object_entity = Self::setup_scene(&mut app, width, height);
-
-        // 添加 DemoState 资源
-        app.main_world.resources_mut().insert(DemoState::new());
-
-        // 添加旋转系统到主世界
-        app.main_world.add_system(rotation_system);
-
-        unsafe {
-            printf(b"[INFO] X11 window created: %dx%d\n\0".as_ptr(), width, height);
-            printf(b"[INFO] ECS System registered for animation\n\0".as_ptr());
-        }
-
-        Some(Self {
-            app,
-            object_entity,
-        })
     }
 
-    /// 设置场景 - 3D 对象和按钮
-    fn setup_scene(app: &mut App, width: u32, height: u32) -> Option<fhre::main_world::Entity> {
+    fn name(&self) -> &str {
+        "fhre_demo::ScreenPlugin"
+    }
+}
+
+/// Camera Plugin - 注册默认UI摄像机
+#[derive(Default)]
+pub struct CameraPlugin {
+    width: u32,
+    height: u32,
+}
+
+impl CameraPlugin {
+    pub fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+}
+
+impl Plugin for CameraPlugin {
+    fn build(&self, app: &mut App) {
+        let camera_entity = app.main_world.spawn();
+        app.main_world.insert_component(camera_entity, Node::ui_control(NodeType::Camera));
+
+        let camera_x = self.width as f32 / 2.0;
+        let camera_y = self.height as f32 / 2.0;
+        let camera_z = 400.0;
+
+        app.main_world.insert_component(camera_entity, Transform3D::from_position(camera_x, camera_y, camera_z));
+        // Note: Camera3D component temporarily removed
+
+        app.main_world.resources_mut().insert(DefaultUiCamera { entity: camera_entity });
         unsafe {
-            if USE_CUBE {
-                printf(b"[DEBUG] Setting up cube scene...\n\0".as_ptr());
-            } else {
-                printf(b"[DEBUG] Setting up soccer ball scene...\n\0".as_ptr());
-            }
+            printf(b"[INFO] CameraPlugin: Registered DefaultUiCamera\n\0".as_ptr());
         }
+    }
 
-        // 创建 3D 对象
-        let object_entity = app.main_world.spawn();
-        app.main_world.insert_component(object_entity, Node::game_entity(NodeType::Empty));
+    fn name(&self) -> &str {
+        "fhre_demo::CameraPlugin"
+    }
+}
 
-        // 对象位置在屏幕中央偏上
-        let obj_x = width as f32 / 2.0;
-        let obj_y = height as f32 / 3.0;
-        let obj_z = 0.0;
+/// Setup Plugin - 使用 Commands 设置场景
+#[derive(Default)]
+pub struct SetupPlugin {
+    width: u32,
+    height: u32,
+}
 
-        app.main_world.insert_component(object_entity, Transform3D::from_position(obj_x, obj_y, obj_z));
+impl SetupPlugin {
+    pub fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+}
 
-        #[cfg(feature = "cube")]
-        {
-            // 创建立方体组件 - 基于顶角立起来的旋转
-            // 初始旋转 45 度 around X 和 Z 轴，让一个顶角朝下
-            let cube = Cube::new(120.0)
-                .with_face_colors([
-                    Color::rgb(255, 100, 100), // Front - red
-                    Color::rgb(100, 255, 100), // Back - green
-                    Color::rgb(100, 100, 255), // Top - blue
-                    Color::rgb(255, 255, 100), // Bottom - yellow
-                    Color::rgb(255, 255, 255), // Left - white
-                    Color::rgb(100, 255, 255), // Right - cyan
-                ])
-                .with_rotation(Vec3::new(45.0, 0.0, 45.0)) // 基于顶角立起来
-                .with_wireframe(true, Color::WHITE);
-
-            app.main_world.insert_component(object_entity, cube);
+impl Plugin for SetupPlugin {
+    fn build(&self, app: &mut App) {
+        unsafe {
+            printf(b"[SETUP_PLUGIN] Building setup plugin\n\0".as_ptr());
         }
-
-        #[cfg(not(feature = "cube"))]
-        {
-            // 创建足球组件（截角二十面体：12个五边形 + 20个六边形）
-            let soccer_ball = SoccerBall::new(120.0)
-                .with_rotation(Vec3::new(0.0, 0.0, 0.0))
-                .with_wireframe(true, Color::WHITE);
-
-            app.main_world.insert_component(object_entity, soccer_ball);
+        
+        // Use declarative ECS system with Commands to setup scene
+        app.add_systems(Startup, system2::<
+            Commands,
+            Res<PrimaryScreen>,
+            _,
+        >(setup_scene_system));
+        
+        unsafe {
+            printf(b"[SETUP_PLUGIN] Registered setup_scene_system in Startup schedule\n\0".as_ptr());
         }
+    }
 
-        // 底部三个按钮
-        let button_y = height as f32 - 80.0;
-        let button_spacing = 140.0;
-        let center_x = width as f32 / 2.0;
+    fn name(&self) -> &str {
+        "fhre_demo::SetupPlugin"
+    }
+}
 
-        // 按钮 1 - 重置旋转
-        let btn1 = app.main_world.spawn();
-        app.main_world.insert_component(btn1, Node::ui_control(NodeType::Button));
-        app.main_world.insert_component(btn1, Transform2D::from_position(center_x - button_spacing, button_y));
-        app.main_world.insert_component(btn1, Button::new(100.0, 40.0)
+/// 场景设置系统 - 使用 Commands 创建实体
+/// 
+/// 这是纯声明式 ECS 风格，不直接操作 World
+fn setup_scene_system(
+    mut commands: Commands,
+    screen: Res<PrimaryScreen>,
+) {
+    unsafe {
+        printf(b"[SETUP_SYSTEM] Running setup_scene_system\n\0".as_ptr());
+    }
+    
+    let (width, height) = screen.dimensions();
+    
+    // 创建 3D 对象 - 使用 Commands.spawn()
+    let obj_x = width as f32 / 2.0;
+    let obj_y = height as f32 / 3.0;
+    let obj_z = 0.0;
+
+    #[cfg(feature = "cube")]
+    {
+        let cube = Cube::new(120.0)
+            .with_face_colors([
+                Color::rgb(255, 100, 100),
+                Color::rgb(100, 255, 100),
+                Color::rgb(100, 100, 255),
+                Color::rgb(255, 255, 100),
+                Color::rgb(255, 255, 255),
+                Color::rgb(100, 255, 255),
+            ])
+            .with_rotation(Vec3::new(45.0, 0.0, 45.0))
+            .with_wireframe(true, Color::WHITE);
+        
+        commands.spawn()
+            .insert(Node::game_entity(NodeType::Empty))
+            .insert(Transform3D::from_position(obj_x, obj_y, obj_z))
+            .insert(cube);
+        
+        unsafe {
+            printf(b"[SETUP_SYSTEM] Spawned cube entity\n\0".as_ptr());
+        }
+    }
+
+    #[cfg(not(feature = "cube"))]
+    {
+        let soccer_ball = SoccerBall::new(120.0)
+            .with_rotation(Vec3::new(0.0, 0.0, 0.0))
+            .with_wireframe(true, Color::WHITE);
+        
+        commands.spawn()
+            .insert(Node::game_entity(NodeType::Empty))
+            .insert(Transform3D::from_position(obj_x, obj_y, obj_z))
+            .insert(soccer_ball);
+        
+        unsafe {
+            printf(b"[SETUP_SYSTEM] Spawned soccer ball entity\n\0".as_ptr());
+        }
+    }
+
+    // 底部三个按钮 - 使用 Commands.spawn()
+    let button_y = height as f32 - 80.0;
+    let button_spacing = 140.0;
+    let center_x = width as f32 / 2.0;
+
+    // 按钮 1 - 重置旋转
+    commands.spawn()
+        .insert(Node::ui_control(NodeType::Button))
+        .insert(Transform2D::from_position(center_x - button_spacing, button_y))
+        .insert(Button::new(100.0, 40.0)
             .with_text("Reset")
             .with_colors(
-                Color::rgb(70, 130, 180),   // normal - steel blue
-                Color::rgb(100, 160, 210),  // hover
-                Color::rgb(50, 100, 150),   // pressed
+                Color::rgb(70, 130, 180),
+                Color::rgb(100, 160, 210),
+                Color::rgb(50, 100, 150),
             ));
 
-        // 按钮 2 - 暂停/继续
-        let btn2 = app.main_world.spawn();
-        app.main_world.insert_component(btn2, Node::ui_control(NodeType::Button));
-        app.main_world.insert_component(btn2, Transform2D::from_position(center_x, button_y));
-        app.main_world.insert_component(btn2, Button::new(100.0, 40.0)
+    // 按钮 2 - 暂停/继续
+    commands.spawn()
+        .insert(Node::ui_control(NodeType::Button))
+        .insert(Transform2D::from_position(center_x, button_y))
+        .insert(Button::new(100.0, 40.0)
             .with_text("Pause")
             .with_colors(
-                Color::rgb(60, 150, 80),    // normal - green
-                Color::rgb(90, 180, 110),   // hover
-                Color::rgb(40, 120, 60),    // pressed
+                Color::rgb(60, 150, 80),
+                Color::rgb(90, 180, 110),
+                Color::rgb(40, 120, 60),
             ));
 
-        // 按钮 3 - 退出
-        let btn3 = app.main_world.spawn();
-        app.main_world.insert_component(btn3, Node::ui_control(NodeType::Button));
-        app.main_world.insert_component(btn3, Transform2D::from_position(center_x + button_spacing, button_y));
-        app.main_world.insert_component(btn3, Button::new(100.0, 40.0)
+    // 按钮 3 - 退出
+    commands.spawn()
+        .insert(Node::ui_control(NodeType::Button))
+        .insert(Transform2D::from_position(center_x + button_spacing, button_y))
+        .insert(Button::new(100.0, 40.0)
             .with_text("Exit")
             .with_colors(
-                Color::rgb(180, 70, 70),    // normal - red
-                Color::rgb(210, 100, 100),  // hover
-                Color::rgb(150, 50, 50),    // pressed
+                Color::rgb(180, 70, 70),
+                Color::rgb(210, 100, 100),
+                Color::rgb(150, 50, 50),
             ));
 
-        unsafe {
-            if USE_CUBE {
-                printf(b"[DEBUG] Cube scene setup complete\n\0".as_ptr());
-            } else {
-                printf(b"[DEBUG] Soccer ball scene setup complete\n\0".as_ptr());
-            }
-        }
+    unsafe {
+        printf(b"[SETUP_SYSTEM] Scene setup complete\n\0".as_ptr());
+    }
+}
 
-        Some(object_entity)
+/// Demo Plugin - 包含所有Demo相关的系统和资源
+#[derive(Default)]
+pub struct DemoPlugin;
+
+impl Plugin for DemoPlugin {
+    fn build(&self, app: &mut App) {
+        // Initialize resources
+        app.insert_resource(DemoState::new());
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
+        
+        // Register input handling system in PreUpdate schedule
+        app.add_systems(PreUpdate, system3::<
+            Res<ButtonInput<KeyCode>>,
+            Res<ButtonInput<MouseButton>>,
+            ResMut<DemoState>,
+            _,
+        >(input_system));
+        
+        // Register rotation system in Update schedule
+        #[cfg(feature = "cube")]
+        app.add_systems(Update, system3::<
+            Res<Time>,
+            ResMut<DemoState>,
+            Query<Cube>,
+            _,
+        >(rotation_system));
+        
+        #[cfg(not(feature = "cube"))]
+        app.add_systems(Update, system3::<
+            Res<Time>,
+            ResMut<DemoState>,
+            Query<SoccerBall>,
+            _,
+        >(rotation_system));
+        
+        unsafe {
+            printf(b"[DemoPlugin] Systems registered with add_systems\n\0".as_ptr());
+        }
     }
 
-    /// 运行 demo 主循环
-    fn run(&mut self) {
+    fn name(&self) -> &str {
+        "fhre_demo::DemoPlugin"
+    }
+}
+
+// Input handling system - declarative ECS style
+fn input_system(
+    key_input: Res<ButtonInput<KeyCode>>,
+    mouse_input: Res<ButtonInput<MouseButton>>,
+    mut state: ResMut<DemoState>,
+) {
+    // Handle Space key - pause/resume
+    if key_input.just_pressed(KeyCode::Space) {
+        state.is_rotating = !state.is_rotating;
         unsafe {
-            printf(b"[INFO] FHRE Demo started - Entering main loop\n\0".as_ptr());
-            printf(b"[INFO] Animation handled by ECS System\n\0".as_ptr());
-            printf(b"[INFO] Press 'q' or click X button to exit\n\0".as_ptr());
+            if state.is_rotating {
+                printf(b"[INPUT] Resumed rotation\n\0".as_ptr());
+            } else {
+                printf(b"[INPUT] Paused rotation\n\0".as_ptr());
+            }
         }
+    }
 
-        // 主循环 - 所有动画逻辑都在 ECS System 中处理
-        loop {
-            // 检查是否应该退出
-            if !self.app.is_running() {
-                unsafe {
-                    printf(b"[INFO] FHRE Demo exiting...\n\0".as_ptr());
-                }
-                break;
-            }
+    // Handle R key - reset
+    if key_input.just_pressed(KeyCode::KeyR) {
+        state.rotation_y = 0.0;
+        unsafe {
+            printf(b"[INPUT] Reset rotation\n\0".as_ptr());
+        }
+    }
 
-            // 更新 FHRE App (包含 X11 事件轮询和 System 执行)
-            self.app.update();
-
-            // 控制帧率约 60 FPS
-            unsafe {
-                usleep(16_667); // 16.67ms = 60 FPS
-            }
+    // Handle left mouse button
+    if mouse_input.just_pressed(MouseButton::Left) {
+        unsafe {
+            printf(b"[INPUT] Left mouse clicked\n\0".as_ptr());
         }
     }
 }
 
-/// 旋转系统 - ECS System
+/// Rotation system - declarative ECS style
 /// 
-/// 这个系统每帧自动执行，更新所有旋转对象的旋转角度
-/// 符合 ECS 架构：System 读取 Resource (Time, DemoState)，修改 Component (Cube/SoccerBall)
-fn rotation_system(world: &mut MainWorld) {
-    // 获取时间和状态资源
-    let (delta_time, is_rotating, rotation_speed) = {
-        let time = world.resources().get::<Time>();
-        let state = world.resources().get::<DemoState>();
-        
-        let dt = time.map(|t| t.delta()).unwrap_or(0.016);
-        let rotating = state.map(|s| s.is_rotating).unwrap_or(true);
-        let speed = state.map(|s| s.rotation_speed).unwrap_or(60.0);
-        
-        (dt, rotating, speed)
-    };
-
-    // 如果暂停，不更新旋转
-    if !is_rotating {
+/// Uses Res/ResMut/Query declarative parameters, pure Bevy style
+#[cfg(feature = "cube")]
+fn rotation_system(
+    time: Res<Time>,
+    mut state: ResMut<DemoState>,
+    mut cubes: Query<Cube>,
+) {
+    if !state.is_rotating {
         return;
     }
 
-    // 计算旋转增量
-    let rotation_delta = rotation_speed * delta_time;
+    let delta_time = time.delta();
+    let rotation_delta = state.rotation_speed * delta_time;
 
-    // 更新 DemoState 中的旋转角度
-    if let Some(mut state) = world.resources_mut().get_mut::<DemoState>() {
-        state.rotation_y += rotation_delta;
-        if state.rotation_y >= 360.0 {
-            state.rotation_y -= 360.0;
-        }
+    // Update global rotation state
+    state.rotation_y += rotation_delta;
+    if state.rotation_y >= 360.0 {
+        state.rotation_y -= 360.0;
     }
 
-    // 获取当前旋转角度
-    let current_rotation_y = world
-        .resources()
-        .get::<DemoState>()
-        .map(|s| s.rotation_y)
-        .unwrap_or(0.0);
-
-    // 更新所有 Cube 组件
-    #[cfg(feature = "cube")]
-    {
-        // 收集需要更新的实体和旋转值
-        let updates: Vec<(u64, f32)> = {
-            let mut updates = Vec::new();
-            for (entity, cube) in world.query::<Cube>() {
-                // 保持 X 和 Z 轴的初始旋转（基于顶角立起来）
-                updates.push((entity.id(), current_rotation_y));
-            }
-            updates
-        };
-
-        // 应用更新
-        for (id, rotation_y) in updates {
-            if let Some(cube) = world.get_component_mut::<Cube>(Entity::new(id)) {
-                cube.rotation.y = rotation_y;
-                cube.rotation.x = 45.0; // 保持顶角朝下的姿态
-                cube.rotation.z = 45.0;
-            }
-        }
-    }
-
-    // 更新所有 SoccerBall 组件
-    #[cfg(not(feature = "cube"))]
-    {
-        // 收集需要更新的实体和旋转值
-        let updates: Vec<(u64, f32)> = {
-            let mut updates = Vec::new();
-            for (entity, _) in world.query::<SoccerBall>() {
-                updates.push((entity.id(), current_rotation_y));
-            }
-            updates
-        };
-
-        // 应用更新
-        for (id, rotation_y) in updates {
-            if let Some(soccer_ball) = world.get_component_mut::<SoccerBall>(Entity::new(id)) {
-                soccer_ball.rotation.y = rotation_y;
-            }
-        }
+    // Use declarative Query to update all Cube components
+    for cube in cubes.iter_mut() {
+        cube.rotation.y = state.rotation_y;
+        cube.rotation.x = 45.0;
+        cube.rotation.z = 45.0;
     }
 }
 
-/// Demo 入口函数
+/// Rotation system - declarative ECS style (SoccerBall version)
+#[cfg(not(feature = "cube"))]
+fn rotation_system(
+    time: Res<Time>,
+    mut state: ResMut<DemoState>,
+    mut balls: Query<SoccerBall>,
+) {
+    if !state.is_rotating {
+        return;
+    }
+
+    let delta_time = time.delta();
+    let rotation_delta = state.rotation_speed * delta_time;
+
+    // Update global rotation state
+    state.rotation_y += rotation_delta;
+    if state.rotation_y >= 360.0 {
+        state.rotation_y -= 360.0;
+    }
+
+    // Use declarative Query to update all SoccerBall components
+    for ball in balls.iter_mut() {
+        ball.rotation.y = state.rotation_y;
+    }
+}
+
+/// Demo 入口函数 - 纯声明式 ECS
 #[no_mangle]
 pub extern "C" fn fhre_rust_main() -> i32 {
     unsafe {
@@ -344,21 +432,140 @@ pub extern "C" fn fhre_rust_main() -> i32 {
         } else {
             printf(b"  Mode: Soccer Ball (12 pentagons + 20 hexagons)\n\0".as_ptr());
         }
-        printf(b"  Architecture: ECS (Entity-Component-System)\n\0".as_ptr());
+        printf(b"  Architecture: Pure Declarative ECS\n\0".as_ptr());
         printf(b"========================================\n\n\0".as_ptr());
     }
 
-    match DemoApp::new() {
-        Some(mut demo) => {
-            demo.run();
-            0
-        }
-        None => {
-            unsafe {
-                printf(b"[ERROR] Failed to create demo app\n\0".as_ptr());
+    // 创建 App
+    let mut app = App::new(640, 480);
+    
+    // 添加 Plugins
+    app.add_plugin(ScreenPlugin::new(640, 480))
+        .add_plugin(CameraPlugin::new(640, 480))
+        .add_plugin(SetupPlugin::new(640, 480))
+        .add_plugin(DemoPlugin);
+
+    // SIM 平台：创建 X11 窗口并手动控制循环
+    #[cfg(feature = "sim")]
+    {
+        // 创建 X11 窗口
+        let mut window = match x11_window::X11Window::new(640, 480, "FHRE Demo") {
+            Some(w) => w,
+            None => {
+                unsafe { printf(b"[ERROR] Failed to create X11 window\n\0".as_ptr()); }
+                return 1;
             }
-            -1
+        };
+
+        unsafe { printf(b"[MAIN] Starting main loop with X11 window\n\0".as_ptr()); }
+
+        // 测试：运行一帧看看是否有输出
+        unsafe { printf(b"[MAIN] Testing first frame...\n\0".as_ptr()); }
+        app.update_and_render();
+        let fb = app.framebuffer();
+        unsafe { printf(b"[MAIN] First frame done, fb len=%d\n\0".as_ptr(), fb.len()); }
+
+        // 主循环 - 平台适配层（非 ECS 逻辑）
+        let mut frame_count = 0u32;
+        loop {
+            // 收集输入事件（这会处理 X11 事件，包括关闭事件）
+            let events = window.collect_input_events();
+
+            // 检查窗口是否关闭
+            if !window.is_running() {
+                unsafe { printf(b"[MAIN] Window closed, exiting...\n\0".as_ptr()); }
+                break;
+            }
+
+            // 将 X11 事件转换为 FHRE ECS 输入资源
+            // 在 PreUpdate 之前更新输入状态
+            if let Some(mut key_input) = app.main_world.resources_mut().get_mut::<ButtonInput<KeyCode>>() {
+                key_input.clear();
+                for event in &events.keyboard_events {
+                    if let Some(keycode) = x11_keycode_to_fhre(event.keycode) {
+                        if event.pressed {
+                            key_input.press(keycode);
+                        } else {
+                            key_input.release(keycode);
+                        }
+                    }
+                }
+            }
+
+            if let Some(mut mouse_input) = app.main_world.resources_mut().get_mut::<ButtonInput<MouseButton>>() {
+                mouse_input.clear();
+                for event in &events.mouse_button_events {
+                    if let Some(button) = x11_button_to_fhre(event.button) {
+                        if event.pressed {
+                            mouse_input.press(button);
+                        } else {
+                            mouse_input.release(button);
+                        }
+                    }
+                }
+            }
+
+            // 更新 FHRE（运行 ECS Systems + 渲染）
+            app.update_and_render();
+
+            // 获取 framebuffer 并显示
+            let framebuffer = app.framebuffer();
+            let fb_len = framebuffer.len();
+            
+            unsafe {
+                printf(b"[MAIN] Frame %d: framebuffer len=%d\n\0".as_ptr(),
+                       frame_count, fb_len);
+            }
+            
+            window.present(framebuffer);
+            
+            frame_count += 1;
+            if frame_count > 100 {
+                frame_count = 0; // 防止溢出
+            }
+
+            // 帧率控制（60 FPS）
+            unsafe { usleep(16_000); } // 16ms = ~60 FPS
         }
+
+        unsafe { printf(b"[MAIN] Main loop ended\n\0".as_ptr()); }
+        return 0;
+    }
+
+    // NuttX 平台：使用默认行为
+    #[cfg(not(feature = "sim"))]
+    {
+        app.run();
+        return 0;
+    }
+}
+
+/// X11 键码转换为 FHRE KeyCode
+#[cfg(feature = "sim")]
+fn x11_keycode_to_fhre(x11_keycode: u32) -> Option<KeyCode> {
+    // 常见 X11 键码映射
+    // 注意：这是简化的映射，实际应该使用完整的 X11 键码表
+    match x11_keycode {
+        65 => Some(KeyCode::Space),      // XK_space
+        27 => Some(KeyCode::KeyR),       // XK_r
+        9 => Some(KeyCode::Escape),      // XK_Escape
+        111 => Some(KeyCode::ArrowUp),   // XK_Up
+        116 => Some(KeyCode::ArrowDown), // XK_Down
+        113 => Some(KeyCode::ArrowLeft), // XK_Left
+        114 => Some(KeyCode::ArrowRight),// XK_Right
+        // 添加更多键码映射...
+        _ => None,
+    }
+}
+
+/// X11 鼠标按钮转换为 FHRE MouseButton
+#[cfg(feature = "sim")]
+fn x11_button_to_fhre(x11_button: u32) -> Option<MouseButton> {
+    match x11_button {
+        1 => Some(MouseButton::Left),
+        2 => Some(MouseButton::Middle),
+        3 => Some(MouseButton::Right),
+        _ => None,
     }
 }
 

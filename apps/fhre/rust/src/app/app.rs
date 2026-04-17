@@ -1,243 +1,343 @@
-//! Application implementation for FHRE
+//! App Module
 //!
-//! Provides the main App struct and lifecycle management.
-//! Uses X11 window for input and display on SIM platform.
+//! The main application orchestrator that coordinates Main World and Render World.
+//! Aligned with Bevy's App design - provides plugin system and schedule management.
 
-use alloc::vec::Vec;
-
-use crate::main_world::{MainWorld, IntoSystem, Entity};
+use crate::main_world::MainWorld;
 use crate::render_world::RenderWorld;
-use crate::extract::{extract_renderable_components};
-use crate::resources::{Time, RenderConfig, WindowConfig, PrimaryScreen};
-use crate::schedule::{Schedules, ScheduleLabel};
-use crate::node::{Node, NodeType, Transform3D, Camera3D};
-use super::AppConfig;
+use crate::resources::{Time, PrimaryScreen};
+use crate::plugin::{Plugin, PluginGroup};
+use crate::extract::extract_renderable_components;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::marker::PhantomData;
 
-// External C functions for timing
-extern "C" {
-    fn clock() -> i64;
-    fn usleep(usec: u32) -> i32;
-}
+// Re-export schedule types from schedule module
+pub use crate::schedule::{Startup as ScheduleStartup, PreUpdate as SchedulePreUpdate, 
+                          Update as ScheduleUpdate, PostUpdate as SchedulePostUpdate};
 
-const CLOCKS_PER_SEC: i64 = 1000000; // Standard POSIX value
-
-// Platform-specific imports
-#[cfg(feature = "sim")]
-use crate::platform::x11_window::X11Window;
-
-/// FHRE version
+/// FHRE Version
 pub const FHRE_VERSION: &str = "2.0.0";
 
-/// Resource to store the default UI camera entity
-#[derive(Clone, Copy, Debug)]
+/// Default UI Camera
 pub struct DefaultUiCamera {
-    pub entity: Entity,
-}
-
-/// Resource to store the default game camera entity (if any)
-#[derive(Clone, Copy, Debug)]
-pub struct DefaultGameCamera {
-    pub entity: Entity,
+    pub entity: crate::main_world::Entity,
 }
 
 impl crate::resources::Resource for DefaultUiCamera {}
+
+/// Default Game Camera
+pub struct DefaultGameCamera {
+    pub entity: crate::main_world::Entity,
+}
+
 impl crate::resources::Resource for DefaultGameCamera {}
 
-/// The main Application struct
+/// App Builder for fluent API
+pub struct AppBuilder;
+
+/// App exit status
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppExit {
+    Success,
+    Error(i32),
+}
+
+/// Trait for custom app runners
+pub trait AppRunner {
+    fn run(self: Box<Self>, app: App) -> AppExit;
+}
+
+/// Schedule labels
+pub struct Startup;
+pub struct PreUpdate;
+pub struct Update;
+pub struct PostUpdate;
+
+/// The main application struct
+///
+/// Similar to Bevy's App, this orchestrates the entire application lifecycle.
+/// It manages plugins, schedules, and coordinates between Main World and Render World.
+///
+/// # Example
+/// ```rust
+/// fn main() {
+///     App::new(640, 480)
+///         .add_plugin(MyPlugin)
+///         .run();
+/// }
+/// ```
 pub struct App {
+    /// Main World - holds all game logic state (entities, components, resources)
     pub main_world: MainWorld,
+    
+    /// Render World - holds render-specific state (views, render commands)
     pub render_world: RenderWorld,
-    pub schedules: Schedules,
-    pub config: AppConfig,
-    #[cfg(feature = "sim")]
-    pub x11_window: Option<X11Window>,
-    running: bool,
+    
+    /// Plugins registered with the app
+    plugins: Vec<Box<dyn Plugin>>,
+    
+    /// Whether the app has been initialized
+    initialized: bool,
+    
+    /// Custom runner (optional)
+    runner: Option<Box<dyn AppRunner>>,
 }
 
 impl App {
-    /// Create a new application with X11 window for input and display
-    #[cfg(feature = "sim")]
-    pub fn new_with_x11_window(window_width: u32, window_height: u32, title: &str) -> Self {
-        let config = AppConfig::default();
-
-        // Create X11 window for input and display
-        let x11_window = X11Window::new(window_width, window_height, title);
-
-        // Use window dimensions
-        let (width, height) = if let Some(ref window) = x11_window {
-            window.get_dimensions()
-        } else {
-            (window_width, window_height)
-        };
-
+    /// Create a new App with the specified screen dimensions
+    ///
+    /// # Example
+    /// ```rust
+    /// let app = App::new(640, 480);
+    /// ```
+    pub fn new(width: u32, height: u32) -> Self {
         let mut app = Self {
             main_world: MainWorld::new(),
             render_world: RenderWorld::new(width, height),
-            schedules: Schedules::new(),
-            config,
-            x11_window,
-            running: true,
+            plugins: Vec::new(),
+            initialized: false,
+            runner: None,
         };
-
-        // Setup default resources
-        app.setup_primary_screen(width, height);
-        app.setup_default_ui_camera(width, height);
-
-        // Initialize default schedules
-        app.init_schedules();
-
+        
+        // Insert default resources
+        app.insert_resource(Time::default());
+        app.insert_resource(PrimaryScreen::new(width, height));
+        
         app
     }
 
-    /// Setup the primary screen resource
-    fn setup_primary_screen(&mut self, width: u32, height: u32) {
-        let primary_screen = PrimaryScreen::new(width, height);
-        self.main_world.resources_mut().insert(primary_screen);
-    }
-
-    /// Setup the default UI camera
-    fn setup_default_ui_camera(&mut self, width: u32, height: u32) {
-        let camera_entity = self.main_world.spawn();
-        
-        self.main_world.insert_component(
-            camera_entity,
-            Node::ui_control(NodeType::Camera)
-        );
-        
-        let camera_x = width as f32 / 2.0;
-        let camera_y = height as f32 / 2.0;
-        let camera_z = 400.0;
-        
-        self.main_world.insert_component(
-            camera_entity,
-            Transform3D::from_position(camera_x, camera_y, camera_z)
-        );
-        
-        self.main_world.insert_component(
-            camera_entity,
-            Camera3D {
-                fov: 60.0,
-                near: 0.1,
-                far: 2000.0,
-                background_color: crate::math::Color::BLACK,
-                orthographic: false,
-                orthographic_size: height as f32 / 2.0,
-                viewport: crate::math::Rect::new(0.0, 0.0, 1.0, 1.0),
-                culling_mask: 0xFFFFFFFF,
-                depth: -100,
-            }
-        );
-        
-        self.main_world.resources_mut().insert(DefaultUiCamera {
-            entity: camera_entity,
-        });
-    }
-
-    /// Get the primary screen dimensions
-    pub fn screen_dimensions(&self) -> (u32, u32) {
-        if let Some(screen) = self.main_world.resources().get::<PrimaryScreen>() {
-            screen.dimensions()
-        } else {
-            (self.config.width, self.config.height)
-        }
-    }
-
-    /// Get the default UI camera entity
-    pub fn default_ui_camera(&self) -> Option<Entity> {
-        self.main_world.resources()
-            .get::<DefaultUiCamera>()
-            .map(|cam| cam.entity)
-    }
-
-    /// Initialize default schedules
-    fn init_schedules(&mut self) {
-        // Schedules are already created in Schedules::new()
-    }
-
-    /// Add a system to a schedule
-    pub fn add_system<S: IntoSystem>(&mut self, _schedule: ScheduleLabel, system: S) -> &mut Self
-    where
-        <S as IntoSystem>::System: 'static,
-    {
-        self.main_world.add_system(system);
+    /// Add a plugin to the app
+    ///
+    /// Plugins are the primary way to extend the app with functionality.
+    /// They can add systems, resources, and other setup.
+    ///
+    /// # Example
+    /// ```rust
+    /// app.add_plugin(MyPlugin);
+    /// ```
+    pub fn add_plugin<P: Plugin>(&mut self, plugin: P) -> &mut Self {
+        // Always build plugin immediately, regardless of initialization state
+        // This ensures resources and entities are created when add_plugin is called
+        plugin.build(self);
         self
     }
 
-    /// Run one update frame
-    pub fn update(&mut self) {
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[FHRE_UPDATE] ========== Frame Start ==========\n\0".as_ptr());
+    /// Add a boxed plugin to the app
+    ///
+    /// This is used internally by PluginGroup.
+    pub fn add_boxed_plugin(&mut self, plugin: Box<dyn Plugin>) -> &mut Self {
+        if !self.initialized {
+            // Store plugin for later initialization
+            self.plugins.push(plugin);
+        } else {
+            // Initialize immediately if app is already running
+            plugin.build(self);
+        }
+        self
+    }
+
+    /// Add a group of plugins
+    ///
+    /// # Example
+    /// ```rust
+    /// app.add_plugins(DefaultPlugins);
+    /// ```
+    pub fn add_plugins<P: PluginGroup>(&mut self, group: P) -> &mut Self {
+        let builder = group.build();
+        builder.finish(self);
+        self
+    }
+
+    /// Insert a resource into the Main World
+    ///
+    /// Resources are global singletons that can be accessed by systems.
+    ///
+    /// # Example
+    /// ```rust
+    /// app.insert_resource(MyResource::new());
+    /// ```
+    pub fn insert_resource<R: crate::resources::Resource>(&mut self, resource: R) -> &mut Self {
+        self.main_world.resources_mut().insert(resource);
+        self
+    }
+
+    /// Add systems to a schedule
+    ///
+    /// # Example
+    /// ```rust
+    /// use fhre::prelude::*;
+    ///
+    /// app.add_systems(Update, system1::<Res<MyResource>, _>(my_system));
+    /// ```
+    pub fn add_systems(&mut self, _schedule: impl ScheduleLabel, systems: impl IntoSystems) -> &mut Self {
+        systems.add_to_app(self, _schedule);
+        self
+    }
+
+    /// Set a custom runner for the app
+    ///
+    /// The runner controls the main loop of the application.
+    /// By default, the app uses a simple runner that runs once.
+    ///
+    /// # Example
+    /// ```rust
+    /// app.set_runner(WindowRunner::new());
+    /// ```
+    pub fn set_runner(&mut self, runner: impl AppRunner + 'static) -> &mut Self {
+        self.runner = Some(Box::new(runner));
+        self
+    }
+
+    /// Initialize all plugins
+    fn initialize_plugins(&mut self) {
+        if self.initialized {
+            return;
         }
 
-        // 0. Poll X11 window events if available
-        #[cfg(feature = "sim")]
-        {
-            unsafe {
-                extern "C" {
-                    fn printf(format: *const u8, ...) -> i32;
-                }
-                printf(b"[FHRE_UPDATE] Step 0: Polling X11 events...\n\0".as_ptr());
-            }
-            if let Some(ref mut window) = self.x11_window {
-                window.poll_events();
-            }
-        }
+        // Take ownership of plugins to avoid borrow issues
+        let plugins: Vec<Box<dyn Plugin>> = self.plugins.drain(..).collect();
         
-        // 1. Update time
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[FHRE_UPDATE] Step 1: Updating time...\n\0".as_ptr());
+        for plugin in plugins {
+            plugin.build(self);
         }
+
+        self.initialized = true;
+    }
+
+    /// Run the application
+    ///
+    /// This will initialize all plugins and then run the main loop.
+    /// If no runner is set, it will use the default runner.
+    pub fn run(mut self) -> AppExit {
+        self.initialize_plugins();
+
+        if let Some(runner) = self.runner.take() {
+            runner.run(self)
+        } else {
+            // Default runner - just run once
+            self.update();
+            AppExit::Success
+        }
+    }
+
+    /// Run a single update cycle
+    ///
+    /// This is called by the runner each frame.
+    pub fn update(&mut self) {
+        // Initialize plugins on first update
+        self.initialize_plugins();
+
+        // Run startup systems (only on first frame)
+        self.main_world.run_startup_systems();
+
+        // Update time
         if let Some(time) = self.main_world.resources_mut().get_mut::<Time>() {
             time.update(1.0 / 60.0);
         }
 
-        // 2. Run Main World systems
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[FHRE_UPDATE] Step 2: Running Main World systems...\n\0".as_ptr());
-        }
+        // Run Main World systems
         self.main_world.run_systems();
 
-        // 3. Extract phase
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[FHRE_UPDATE] Step 3: Extract phase...\n\0".as_ptr());
-        }
+        // Extract phase
         self.render_world.clear_views();
         extract_renderable_components(&self.main_world, &mut self.render_world);
 
-        // 4. Render phase
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[FHRE_UPDATE] Step 4: Render phase...\n\0".as_ptr());
-        }
+        // Render phase
         self.render_world.execute_render();
 
-        // 5. Present to X11 window
+        // Clear for next frame
+        self.render_world.clear_commands();
+        self.render_world.clear_views();
+    }
+
+    /// Update and render a single frame (for manual control)
+    ///
+    /// This is used when the Demo wants to control the main loop.
+    pub fn update_and_render(&mut self) {
         unsafe {
             extern "C" {
                 fn printf(format: *const u8, ...) -> i32;
             }
-            printf(b"[FHRE_UPDATE] Step 5: Present to display...\n\0".as_ptr());
+            printf(b"[APP] update_and_render start\n\0".as_ptr());
         }
-        #[cfg(feature = "sim")]
-        {
-            if let Some(ref window) = self.x11_window {
-                let framebuffer = self.render_world.framebuffer();
-                window.present(framebuffer);
+
+        // 1. Run startup systems (only on first frame)
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
             }
+            printf(b"[APP] Step 1: Running startup systems...\n\0".as_ptr());
+        }
+        self.main_world.run_startup_systems();
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[APP] Step 1: Done\n\0".as_ptr());
+        }
+
+        // 2. Update time
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[APP] Step 2: Updating time...\n\0".as_ptr());
+        }
+        if let Some(time) = self.main_world.resources_mut().get_mut::<Time>() {
+            time.update(1.0 / 60.0);
+        }
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[APP] Step 2: Done\n\0".as_ptr());
+        }
+
+        // 3. Run Main World systems
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[APP] Step 3: Running Main World systems...\n\0".as_ptr());
+        }
+        self.main_world.run_systems();
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[APP] Step 3: Done\n\0".as_ptr());
+        }
+
+        // 4. Extract phase
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[APP] Step 4: Extract phase...\n\0".as_ptr());
+        }
+        self.render_world.clear_views();
+        extract_renderable_components(&self.main_world, &mut self.render_world);
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[APP] Step 4: Done\n\0".as_ptr());
+        }
+
+        // 5. Render phase
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[APP] Step 5: Render phase...\n\0".as_ptr());
+        }
+        self.render_world.execute_render();
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[APP] Step 5: Done\n\0".as_ptr());
         }
 
         // 6. Clear for next frame
@@ -245,7 +345,7 @@ impl App {
             extern "C" {
                 fn printf(format: *const u8, ...) -> i32;
             }
-            printf(b"[FHRE_UPDATE] Step 6: Clear render commands...\n\0".as_ptr());
+            printf(b"[APP] Step 6: Clear render commands...\n\0".as_ptr());
         }
         self.render_world.clear_commands();
         self.render_world.clear_views();
@@ -254,116 +354,107 @@ impl App {
             extern "C" {
                 fn printf(format: *const u8, ...) -> i32;
             }
-            printf(b"[FHRE_UPDATE] ========== Frame End ==========\n\n\0".as_ptr());
+            printf(b"[APP] update_and_render end\n\0".as_ptr());
         }
     }
 
-    /// Run the application
-    pub fn run(&mut self) {
-        self.run_with_callback(|| {});
-    }
-    
-    /// Run with callback
-    pub fn run_with_callback<F>(&mut self, mut callback: F)
-    where
-        F: FnMut(),
-    {
-        self.running = true;
-        
-        while self.running {
-            let start_time = unsafe { clock() };
-            
-            callback();
-            self.update();
-            
-            let elapsed = unsafe { clock() } - start_time;
-            let elapsed_ms = (elapsed * 1000 / CLOCKS_PER_SEC) as u64;
-            
-            if elapsed_ms < 16 {
-                unsafe {
-                    usleep(((16 - elapsed_ms) * 1000) as u32);
-                }
-            }
-        }
-    }
-
-    /// Check if app is running
-    pub fn is_running(&self) -> bool {
-        if !self.running {
-            return false;
-        }
-
-        #[cfg(feature = "sim")]
-        {
-            if let Some(ref window) = self.x11_window {
-                return window.is_running();
-            }
-        }
-
-        true
-    }
-
-    /// Stop the application
-    pub fn exit(&mut self) {
-        self.running = false;
-    }
-
-    /// Get framebuffer data
-    pub fn get_framebuffer(&self) -> &[u32] {
+    /// Get the framebuffer from Render World
+    pub fn framebuffer(&self) -> &[u32] {
         self.render_world.framebuffer()
     }
 
-    /// Get X11 window reference
-    #[cfg(feature = "sim")]
-    pub fn x11_window(&self) -> Option<&X11Window> {
-        self.x11_window.as_ref()
+    /// Get mutable access to Main World
+    pub fn main_world_mut(&mut self) -> &mut MainWorld {
+        &mut self.main_world
     }
 
-    /// Get mutable X11 window reference
-    #[cfg(feature = "sim")]
-    pub fn x11_window_mut(&mut self) -> Option<&mut X11Window> {
-        self.x11_window.as_mut()
+    /// Get mutable access to Render World
+    pub fn render_world_mut(&mut self) -> &mut RenderWorld {
+        &mut self.render_world
     }
 }
 
-/// Application builder
-pub struct AppBuilder {
-    app: App,
+/// Trait for types that can be used as schedule labels
+pub trait ScheduleLabel {
+    fn label(&self) -> &'static str;
 }
 
-impl AppBuilder {
-    /// Create a new app builder with X11 window
-    #[cfg(feature = "sim")]
-    pub fn new_with_x11(width: u32, height: u32, title: &str) -> Self {
-        Self {
-            app: App::new_with_x11_window(width, height, title),
+// Implement ScheduleLabel for references
+impl<T: ScheduleLabel> ScheduleLabel for &T {
+    fn label(&self) -> &'static str {
+        (*self).label()
+    }
+}
+
+impl ScheduleLabel for Startup {
+    fn label(&self) -> &'static str {
+        "Startup"
+    }
+}
+
+impl ScheduleLabel for PreUpdate {
+    fn label(&self) -> &'static str {
+        "PreUpdate"
+    }
+}
+
+impl ScheduleLabel for Update {
+    fn label(&self) -> &'static str {
+        "Update"
+    }
+}
+
+impl ScheduleLabel for PostUpdate {
+    fn label(&self) -> &'static str {
+        "PostUpdate"
+    }
+}
+
+/// Trait for converting types into systems that can be added to the app
+pub trait IntoSystems {
+    fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel);
+}
+
+// Single system - any type that implements IntoSystem
+impl<S> IntoSystems for S
+where
+    S: crate::main_world::IntoSystem + 'static,
+    S::System: crate::main_world::System + 'static,
+{
+    fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel) {
+        let system = crate::main_world::IntoSystem::into_system(self);
+        let system_box = Box::new(system);
+        
+        // Add to appropriate system list based on schedule label
+        match schedule.label() {
+            "Startup" => app.main_world.add_startup_system_boxed(system_box),
+            _ => app.main_world.add_boxed_system(system_box),
         }
     }
+}
 
-    /// Set window configuration
-    pub fn with_window_config(mut self, config: WindowConfig) -> Self {
-        self.app.config.width = config.width;
-        self.app.config.height = config.height;
-        self
+// Tuple of 2 systems
+impl<A, B> IntoSystems for (A, B)
+where
+    A: crate::main_world::IntoSystem + 'static,
+    B: crate::main_world::IntoSystem + 'static,
+{
+    fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel) {
+        self.0.add_to_app(app, &schedule);
+        self.1.add_to_app(app, schedule);
     }
+}
 
-    /// Set render configuration
-    pub fn with_render_config(mut self, config: RenderConfig) -> Self {
-        self.app.main_world.resources_mut().insert(config);
-        self
-    }
-
-    /// Add a system
-    pub fn add_system<S: IntoSystem>(mut self, system: S) -> Self
-    where
-        <S as IntoSystem>::System: 'static,
-    {
-        self.app.add_system(ScheduleLabel::Update, system);
-        self
-    }
-
-    /// Build the application
-    pub fn build(self) -> App {
-        self.app
+// Tuple of 3 systems
+impl<A, B, C> IntoSystems for (A, B, C)
+where
+    A: crate::main_world::IntoSystem + 'static,
+    B: crate::main_world::IntoSystem + 'static,
+    C: crate::main_world::IntoSystem + 'static,
+{
+    fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel) {
+        self.0.add_to_app(app, &schedule);
+        self.1.add_to_app(app, &schedule);
+        self.2.add_to_app(app, schedule);
     }
 }

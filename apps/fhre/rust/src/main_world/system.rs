@@ -1,101 +1,305 @@
 //! System Implementation
 //!
-//! Systems are functions that operate on entities and components.
-/// They are the "S" in ECS (Entity-Component-System).
+//! Provides the System trait and related types for ECS.
+//! Supports both imperative and declarative system styles.
 
 use super::world::MainWorld;
-use alloc::vec::Vec;
+use super::system_param::SystemParam;
+use alloc::boxed::Box;
 
-/// System trait - Executable system
-/// 
-/// Systems are functions that operate on the world.
-/// They can query entities, modify components, and spawn/despawn entities.
+/// Trait for systems that can be run
 pub trait System {
-    /// Run the system
     fn run(&mut self, world: &mut MainWorld);
 }
 
-/// IntoSystem trait - Convert functions into systems
-/// 
-/// This allows regular functions to be used as systems.
+/// Trait for types that can be converted into a System
 pub trait IntoSystem {
     type System: System;
-
-    /// Convert into a system
     fn into_system(self) -> Self::System;
 }
 
-/// Function system wrapper
-pub struct FunctionSystem<F> {
-    func: F,
-}
-
-impl<F> System for FunctionSystem<F>
-where
-    F: FnMut(&mut MainWorld),
-{
+// Implement System for function pointers
+impl System for Box<dyn FnMut(&mut MainWorld)> {
     fn run(&mut self, world: &mut MainWorld) {
-        (self.func)(world);
+        self(world);
     }
 }
 
-impl<F> IntoSystem for F
-where
-    F: FnMut(&mut MainWorld) + 'static,
-{
-    type System = FunctionSystem<F>;
+// Implement IntoSystem for closures
+impl<F: FnMut(&mut MainWorld) + 'static> IntoSystem for F {
+    type System = Box<dyn FnMut(&mut MainWorld)>;
 
     fn into_system(self) -> Self::System {
-        FunctionSystem { func: self }
+        Box::new(self)
     }
 }
 
-/// System function that updates positions based on velocity
-pub fn velocity_system(world: &mut MainWorld) {
-    use super::component::{Transform, Velocity};
-    use super::entity::Entity;
-    
-    // Collect updates first to avoid borrow issues
-    let updates: Vec<(u64, f32, f32)> = {
-        let mut updates = Vec::new();
-        for (entity, transform) in world.query::<Transform>() {
-            if let Some(velocity) = world.get_component::<Velocity>(entity) {
-                let new_x = transform.position.x + velocity.linear.x;
-                let new_y = transform.position.y + velocity.linear.y;
-                updates.push((entity.id(), new_x, new_y));
+// === Declarative Systems ===
+
+/// System with 1 parameter
+pub struct DeclarativeSystem1<A, F>
+where
+    A: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>) + 'static,
+{
+    func: F,
+    state: A::State,
+}
+
+impl<A, F> System for DeclarativeSystem1<A, F>
+where
+    A: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>) + 'static,
+{
+    fn run(&mut self, world: &mut MainWorld) {
+        let param = unsafe { A::get_param(&mut self.state, world) };
+        (self.func)(param);
+        
+        // Apply commands after system runs
+        // The state now contains any commands that were queued
+        self.apply_commands(world);
+    }
+}
+
+impl<A, F> DeclarativeSystem1<A, F>
+where
+    A: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>) + 'static,
+{
+    /// Apply commands from state if this is a Commands parameter
+    fn apply_commands(&mut self, world: &mut MainWorld) {
+        // Try to downcast state to CommandsState and apply
+        use super::commands::CommandsState;
+        
+        // SAFETY: We use a type check via TypeId to ensure safety
+        if core::any::TypeId::of::<A::State>() == core::any::TypeId::of::<CommandsState>() {
+            unsafe {
+                let state_ptr = &mut self.state as *mut A::State as *mut CommandsState;
+                (*state_ptr).apply(world);
             }
-        }
-        updates
-    };
-    
-    // Apply updates
-    for (id, x, y) in updates {
-        if let Some(transform) = world.get_component_mut::<Transform>(Entity::new(id)) {
-            transform.position.x = x;
-            transform.position.y = y;
         }
     }
 }
 
-/// System function that rotates sprites
-pub fn rotation_system(world: &mut MainWorld) {
-    use super::component::{Transform, Velocity};
-    use super::entity::Entity;
-    
-    let updates: Vec<(u64, f32)> = {
-        let mut updates = Vec::new();
-        for (entity, transform) in world.query::<Transform>() {
-            if let Some(velocity) = world.get_component::<Velocity>(entity) {
-                let new_rotation = transform.rotation + velocity.angular;
-                updates.push((entity.id(), new_rotation));
+/// System with 2 parameters
+pub struct DeclarativeSystem2<A, B, F>
+where
+    A: SystemParam + 'static,
+    B: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>, B::Item<'_, '_>) + 'static,
+{
+    func: F,
+    state: (A::State, B::State),
+}
+
+impl<A, B, F> System for DeclarativeSystem2<A, B, F>
+where
+    A: SystemParam + 'static,
+    B: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>, B::Item<'_, '_>) + 'static,
+{
+    fn run(&mut self, world: &mut MainWorld) {
+        let (a, b) = unsafe {
+            let world_ptr = world as *mut MainWorld;
+            let a_item = A::get_param(&mut self.state.0, &mut *world_ptr);
+            let b_item = B::get_param(&mut self.state.1, &mut *world_ptr);
+            (a_item, b_item)
+        };
+        (self.func)(a, b);
+        
+        // Apply commands after system runs
+        self.apply_commands(world);
+    }
+}
+
+impl<A, B, F> DeclarativeSystem2<A, B, F>
+where
+    A: SystemParam + 'static,
+    B: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>, B::Item<'_, '_>) + 'static,
+{
+    /// Apply commands from any Commands parameters
+    fn apply_commands(&mut self, world: &mut MainWorld) {
+        use super::commands::CommandsState;
+        
+        // Check and apply for A
+        if core::any::TypeId::of::<A::State>() == core::any::TypeId::of::<CommandsState>() {
+            unsafe {
+                let state_ptr = &mut self.state.0 as *mut A::State as *mut CommandsState;
+                (*state_ptr).apply(world);
             }
         }
-        updates
-    };
-    
-    for (id, rotation) in updates {
-        if let Some(transform) = world.get_component_mut::<Transform>(Entity::new(id)) {
-            transform.rotation = rotation;
+        
+        // Check and apply for B
+        if core::any::TypeId::of::<B::State>() == core::any::TypeId::of::<CommandsState>() {
+            unsafe {
+                let state_ptr = &mut self.state.1 as *mut B::State as *mut CommandsState;
+                (*state_ptr).apply(world);
+            }
         }
     }
+}
+
+/// System with 3 parameters
+pub struct DeclarativeSystem3<A, B, C, F>
+where
+    A: SystemParam + 'static,
+    B: SystemParam + 'static,
+    C: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>, B::Item<'_, '_>, C::Item<'_, '_>) + 'static,
+{
+    func: F,
+    state: (A::State, B::State, C::State),
+}
+
+impl<A, B, C, F> System for DeclarativeSystem3<A, B, C, F>
+where
+    A: SystemParam + 'static,
+    B: SystemParam + 'static,
+    C: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>, B::Item<'_, '_>, C::Item<'_, '_>) + 'static,
+{
+    fn run(&mut self, world: &mut MainWorld) {
+        let (a, b, c) = unsafe {
+            let world_ptr = world as *mut MainWorld;
+            let a_item = A::get_param(&mut self.state.0, &mut *world_ptr);
+            let b_item = B::get_param(&mut self.state.1, &mut *world_ptr);
+            let c_item = C::get_param(&mut self.state.2, &mut *world_ptr);
+            (a_item, b_item, c_item)
+        };
+        (self.func)(a, b, c);
+        
+        // Apply commands after system runs
+        self.apply_commands(world);
+    }
+}
+
+impl<A, B, C, F> DeclarativeSystem3<A, B, C, F>
+where
+    A: SystemParam + 'static,
+    B: SystemParam + 'static,
+    C: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>, B::Item<'_, '_>, C::Item<'_, '_>) + 'static,
+{
+    /// Apply commands from any Commands parameters
+    fn apply_commands(&mut self, world: &mut MainWorld) {
+        use super::commands::CommandsState;
+        
+        // Check and apply for A
+        if core::any::TypeId::of::<A::State>() == core::any::TypeId::of::<CommandsState>() {
+            unsafe {
+                let state_ptr = &mut self.state.0 as *mut A::State as *mut CommandsState;
+                (*state_ptr).apply(world);
+            }
+        }
+        
+        // Check and apply for B
+        if core::any::TypeId::of::<B::State>() == core::any::TypeId::of::<CommandsState>() {
+            unsafe {
+                let state_ptr = &mut self.state.1 as *mut B::State as *mut CommandsState;
+                (*state_ptr).apply(world);
+            }
+        }
+        
+        // Check and apply for C
+        if core::any::TypeId::of::<C::State>() == core::any::TypeId::of::<CommandsState>() {
+            unsafe {
+                let state_ptr = &mut self.state.2 as *mut C::State as *mut CommandsState;
+                (*state_ptr).apply(world);
+            }
+        }
+    }
+}
+
+/// Create a system with 1 parameter
+pub fn system1<A, F>(f: F) -> impl IntoSystem
+where
+    A: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>) + 'static,
+{
+    struct Builder<A, F> {
+        func: F,
+        _marker: core::marker::PhantomData<A>,
+    }
+    
+    impl<A, F> IntoSystem for Builder<A, F>
+    where
+        A: SystemParam + 'static,
+        F: FnMut(A::Item<'_, '_>) + 'static,
+    {
+        type System = DeclarativeSystem1<A, F>;
+
+        fn into_system(self) -> Self::System {
+            DeclarativeSystem1 {
+                func: self.func,
+                state: Default::default(),
+            }
+        }
+    }
+    
+    Builder { func: f, _marker: core::marker::PhantomData }
+}
+
+/// Create a system with 2 parameters
+pub fn system2<A, B, F>(f: F) -> impl IntoSystem
+where
+    A: SystemParam + 'static,
+    B: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>, B::Item<'_, '_>) + 'static,
+{
+    struct Builder<A, B, F> {
+        func: F,
+        _marker: core::marker::PhantomData<(A, B)>,
+    }
+    
+    impl<A, B, F> IntoSystem for Builder<A, B, F>
+    where
+        A: SystemParam + 'static,
+        B: SystemParam + 'static,
+        F: FnMut(A::Item<'_, '_>, B::Item<'_, '_>) + 'static,
+    {
+        type System = DeclarativeSystem2<A, B, F>;
+
+        fn into_system(self) -> Self::System {
+            DeclarativeSystem2 {
+                func: self.func,
+                state: Default::default(),
+            }
+        }
+    }
+    
+    Builder { func: f, _marker: core::marker::PhantomData }
+}
+
+/// Create a system with 3 parameters
+pub fn system3<A, B, C, F>(f: F) -> impl IntoSystem
+where
+    A: SystemParam + 'static,
+    B: SystemParam + 'static,
+    C: SystemParam + 'static,
+    F: FnMut(A::Item<'_, '_>, B::Item<'_, '_>, C::Item<'_, '_>) + 'static,
+{
+    struct Builder<A, B, C, F> {
+        func: F,
+        _marker: core::marker::PhantomData<(A, B, C)>,
+    }
+    
+    impl<A, B, C, F> IntoSystem for Builder<A, B, C, F>
+    where
+        A: SystemParam + 'static,
+        B: SystemParam + 'static,
+        C: SystemParam + 'static,
+        F: FnMut(A::Item<'_, '_>, B::Item<'_, '_>, C::Item<'_, '_>) + 'static,
+    {
+        type System = DeclarativeSystem3<A, B, C, F>;
+
+        fn into_system(self) -> Self::System {
+            DeclarativeSystem3 {
+                func: self.func,
+                state: Default::default(),
+            }
+        }
+    }
+    
+    Builder { func: f, _marker: core::marker::PhantomData }
 }

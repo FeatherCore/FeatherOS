@@ -20,6 +20,25 @@ use crate::pipeline::SoftwareBackend;
 use crate::math::{Color, Rect};
 use alloc::vec::Vec;
 
+// Debug output control - disabled by default
+// Enable with --features debug
+#[cfg(feature = "debug")]
+macro_rules! debug_print {
+    ($($arg:tt)*) => {
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf($($arg)*);
+        }
+    };
+}
+
+#[cfg(not(feature = "debug"))]
+macro_rules! debug_print {
+    ($($arg:tt)*) => {};
+}
+
 /// Render World - Container for rendering data and backend execution
 ///
 /// The Render World is populated during the Extract phase
@@ -289,15 +308,10 @@ impl RenderWorld {
     /// It submits all queued commands to the rendering backend.
     pub fn execute_render(&mut self) {
         // Debug: print number of commands
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[RENDER] Executing %d commands, %d views\n\0".as_ptr(), 
-                self.commands.len() as i32,
-                self.views.len() as i32,
-            );
-        }
+        debug_print!(b"[RENDER] Executing %d commands, %d views\n\0".as_ptr(), 
+            self.commands.len() as i32,
+            self.views.len() as i32,
+        );
         
         // Clear the framebuffer with clear_color before rendering
         self.backend.clear(self.clear_color);
@@ -306,10 +320,8 @@ impl RenderWorld {
         self.backend.execute_commands(&self.commands);
         
         // Debug: check framebuffer after render
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
+        #[cfg(feature = "debug")]
+        {
             let fb = self.backend.framebuffer();
             let mut non_zero = 0;
             // Check the entire framebuffer
@@ -318,7 +330,7 @@ impl RenderWorld {
                     non_zero += 1;
                 }
             }
-            printf(b"[RENDER] Framebuffer non-zero pixels: %d/%d\n\0".as_ptr(),
+            debug_print!(b"[RENDER] Framebuffer non-zero pixels: %d/%d\n\0".as_ptr(),
                 non_zero,
                 fb.len() as i32,
             );
@@ -327,7 +339,7 @@ impl RenderWorld {
             let sample_x = 200;
             let idx = (sample_y * self.width + sample_x) as usize;
             if idx < fb.len() {
-                printf(b"[RENDER] Sample pixel at (200,200): 0x%x\n\0".as_ptr(), fb[idx]);
+                debug_print!(b"[RENDER] Sample pixel at (200,200): 0x%x\n\0".as_ptr(), fb[idx]);
             }
         }
     }

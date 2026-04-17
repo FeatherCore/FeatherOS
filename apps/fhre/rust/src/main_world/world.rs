@@ -22,6 +22,8 @@ pub struct MainWorld {
     components: BTreeMap<TypeId, BTreeMap<u64, Box<dyn Any>>>,
     /// Systems to run
     systems: Vec<Box<dyn System>>,
+    /// Startup systems (run once at app start)
+    startup_systems: Vec<Box<dyn System>>,
     /// Global resources
     resources: Resources,
 }
@@ -34,6 +36,7 @@ impl MainWorld {
             entities: Vec::new(),
             components: BTreeMap::new(),
             systems: Vec::new(),
+            startup_systems: Vec::new(),
             resources: Resources::new(),
         }
     }
@@ -99,51 +102,93 @@ impl MainWorld {
     /// Query all entities with a specific component type
     pub fn query<T: Component>(&self) -> impl Iterator<Item = (Entity, &T)> {
         let type_id = TypeId::of::<T>();
-        let storage = self.components.get(&type_id);
+        let entities = &self.entities;
         
-        self.entities.iter()
-            .filter_map(move |entity| {
-                storage?.get(&entity.id())
-                    .and_then(|boxed| boxed.downcast_ref::<T>())
-                    .map(|comp| (*entity, comp))
+        self.components
+            .get(&type_id)
+            .map(move |storage| {
+                storage.iter()
+                    .filter_map(move |(entity_id, boxed)| {
+                        entities.iter()
+                            .find(|e| e.id() == *entity_id)
+                            .zip(boxed.downcast_ref::<T>())
+                            .map(|(e, c)| (*e, c))
+                    })
             })
+            .into_iter()
+            .flatten()
     }
 
     /// Query all entities with a specific component type (mutable)
-    /// Returns a Vec instead of an iterator to avoid lifetime issues
-    pub fn query_mut<T: Component>(&mut self) -> Vec<(Entity, &mut T)> {
+    pub fn query_mut<T: Component>(&mut self) -> impl Iterator<Item = (Entity, &mut T)> {
         let type_id = TypeId::of::<T>();
-        let entity_ids: Vec<u64> = self.entities.iter().map(|e| e.id()).collect();
+        let entities = &self.entities;
         
-        let mut results = Vec::new();
+        // SAFETY: We need to use unsafe here to work around borrow checker limitations
+        // The caller must ensure no aliasing mutable references exist
+        let components_ptr = &mut self.components as *mut BTreeMap<TypeId, BTreeMap<u64, Box<dyn Any>>>;
         
-        // Get all components for this type first
-        if let Some(storage) = self.components.get_mut(&type_id) {
-            for id in entity_ids {
-                // Use raw pointer to avoid borrow checker issues
-                // SAFETY: We know the storage exists and we're only accessing each id once
-                if let Some(component) = unsafe {
-                    let ptr = storage as *mut BTreeMap<u64, Box<dyn Any>>;
-                    (*ptr).get_mut(&id)
-                        .and_then(|boxed| boxed.downcast_mut::<T>())
-                } {
-                    results.push((Entity::new(id), component));
-                }
-            }
+        unsafe {
+            (*components_ptr)
+                .get_mut(&type_id)
+                .map(move |storage| {
+                    storage.iter_mut()
+                        .filter_map(move |(entity_id, boxed)| {
+                            entities.iter()
+                                .find(|e| e.id() == *entity_id)
+                                .zip(boxed.downcast_mut::<T>())
+                                .map(|(e, c)| (*e, c))
+                        })
+                })
+                .into_iter()
+                .flatten()
         }
-        
-        results
     }
 
-    /// Add a system to the world
-    pub fn add_system<S: IntoSystem>(&mut self, system: S) 
+    /// Add a system to the world (runs every frame)
+    pub fn add_system<S>(&mut self, system: S) 
     where
-        <S as IntoSystem>::System: 'static,
+        S: IntoSystem + 'static,
+        S::System: System + 'static,
     {
         self.systems.push(Box::new(system.into_system()));
     }
 
-    /// Run all systems
+    /// Add a boxed system directly (internal use)
+    pub fn add_boxed_system(&mut self, system: Box<dyn System>) {
+        self.systems.push(system);
+    }
+
+    /// Add a boxed startup system directly (internal use)
+    pub fn add_startup_system_boxed(&mut self, system: Box<dyn System>) {
+        self.startup_systems.push(system);
+    }
+
+    /// Add a startup system (runs once at app start)
+    pub fn add_startup_system<S: IntoSystem>(&mut self, system: S)
+    where
+        <S as IntoSystem>::System: 'static,
+    {
+        self.startup_systems.push(Box::new(system.into_system()));
+    }
+
+    /// Run startup systems (should be called once at app start)
+    pub fn run_startup_systems(&mut self) {
+        // Take systems out temporarily to avoid borrow issues
+        let mut systems: Vec<Box<dyn System>> = Vec::new();
+        core::mem::swap(&mut systems, &mut self.startup_systems);
+        
+        // Run each system
+        for system in systems.iter_mut() {
+            system.run(self);
+        }
+        
+        // Startup systems don't get put back - they run only once
+        // Clear them to free memory
+        self.startup_systems.clear();
+    }
+
+    /// Run all systems (runs every frame)
     pub fn run_systems(&mut self) {
         // Take systems out temporarily to avoid borrow issues
         let mut systems: Vec<Box<dyn System>> = Vec::new();
@@ -154,7 +199,7 @@ impl MainWorld {
             system.run(self);
         }
         
-        // Put systems back
+        // Put systems back so they run next frame too
         self.systems = systems;
     }
 

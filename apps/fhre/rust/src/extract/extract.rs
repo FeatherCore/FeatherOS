@@ -48,9 +48,12 @@ impl ExtractSchedule {
     }
 }
 
-/// Extract renderable 3D components from Main World to Render World
+/// Extract all renderable components from Main World to Render World
 /// 
-/// Queries for entities that have Transform3D and a 3D renderable component (Cube, SoccerBall, etc.).
+/// This is the main extraction function that handles all renderable components:
+/// - 3D objects: Cube, SoccerBall (with Transform3D)
+/// - 2D UI: Button (with Transform2D)
+/// 
 /// Each component implements RenderComponent trait and generates its own render commands.
 /// The extract system only needs to know which concrete types to query - the rendering
 /// logic stays inside each component.
@@ -58,56 +61,98 @@ pub fn extract_renderable_components(main_world: &MainWorld, render_world: &mut 
     use crate::render_world::RenderComponent;
     use crate::node::Transform3D;
     
+    // Debug output
+    unsafe {
+        extern "C" {
+            fn printf(format: *const u8, ...) -> i32;
+        }
+        printf(b"[EXTRACT] Starting extract_renderable_components\n\0".as_ptr());
+    }
+    
     // Get PrimaryScreen for default view
     let screen = main_world.resources().get::<PrimaryScreen>();
     let (width, height) = screen.map(|s| (s.width as f32, s.height as f32)).unwrap_or((800.0, 600.0));
 
     // Check if we have any 3D renderable components
-    // Query Transform3D first, then check if entity has Cube or SoccerBall
-    let mut has_renderables = false;
+    let mut has_3d_renderables = false;
+    let mut transform3d_count = 0;
     for (entity, _transform) in main_world.query::<Transform3D>() {
+        transform3d_count += 1;
         if main_world.get_component::<Cube>(entity).is_some() 
             || main_world.get_component::<SoccerBall>(entity).is_some() {
-            has_renderables = true;
-            break;
+            has_3d_renderables = true;
         }
     }
     
-    // Create appropriate view - use perspective for 3D, orthographic for 2D
-    let view_bundle = if has_renderables {
-        create_perspective_view(width, height)
-    } else {
-        create_default_view(width, height)
-    };
+    unsafe {
+        extern "C" {
+            fn printf(format: *const u8, ...) -> i32;
+        }
+        printf(b"[EXTRACT] Found %d Transform3D components, has_3d_renderables=%d\n\0".as_ptr(),
+               transform3d_count, has_3d_renderables as i32);
+    }
     
-    let view_idx = render_world.add_view(view_bundle);
-    render_world.set_current_view(Some(view_idx));
-    
-    // Extract Cubes - clone view to avoid borrowing issues
-    let view_clone = render_world.current_view().map(|v| v.view.clone());
-    if let Some(ref view) = view_clone {
-        for (entity, transform) in main_world.query::<Transform3D>() {
-            if let Some(cube) = main_world.get_component::<Cube>(entity) {
-                let commands = cube.generate_render_commands(transform, view);
-                for command in commands {
-                    render_world.add_command(command);
+    // Create 3D perspective view if we have 3D renderables
+    if has_3d_renderables {
+        let view_bundle = create_perspective_view(width, height);
+        let view_idx = render_world.add_view(view_bundle);
+        render_world.set_current_view(Some(view_idx));
+        
+        // Extract Cubes
+        let view_clone = render_world.current_view().map(|v| v.view.clone());
+        let mut cube_count = 0;
+        if let Some(ref view) = view_clone {
+            for (entity, transform) in main_world.query::<Transform3D>() {
+                if let Some(cube) = main_world.get_component::<Cube>(entity) {
+                    let commands = cube.generate_render_commands(transform, view);
+                    let cmd_count = commands.len();
+                    for command in commands {
+                        render_world.add_command(command);
+                    }
+                    cube_count += 1;
+                    unsafe {
+                        extern "C" {
+                            fn printf(format: *const u8, ...) -> i32;
+                        }
+                        printf(b"[EXTRACT] Cube %d: generated %d commands at pos (%f, %f, %f)\n\0".as_ptr(),
+                               cube_count, cmd_count as i32,
+                               transform.position.x as f64,
+                               transform.position.y as f64,
+                               transform.position.z as f64);
+                    }
+                }
+            }
+        }
+        
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[EXTRACT] Total cubes extracted: %d\n\0".as_ptr(), cube_count);
+        }
+        
+        // Extract SoccerBalls
+        let view_clone = render_world.current_view().map(|v| v.view.clone());
+        if let Some(ref view) = view_clone {
+            for (entity, transform) in main_world.query::<Transform3D>() {
+                if let Some(soccer_ball) = main_world.get_component::<SoccerBall>(entity) {
+                    let commands = soccer_ball.generate_render_commands(transform, view);
+                    for command in commands {
+                        render_world.add_command(command);
+                    }
                 }
             }
         }
     }
     
-    // Extract SoccerBalls - clone view again to avoid borrowing issues
-    let view_clone = render_world.current_view().map(|v| v.view.clone());
-    if let Some(ref view) = view_clone {
-        for (entity, transform) in main_world.query::<Transform3D>() {
-            if let Some(soccer_ball) = main_world.get_component::<SoccerBall>(entity) {
-                let commands = soccer_ball.generate_render_commands(transform, view);
-                for command in commands {
-                    render_world.add_command(command);
-                }
-            }
-        }
-    }
+    // Always create 2D orthographic view for UI elements
+    // This view is rendered after 3D view (if any)
+    let view_bundle_2d = create_default_view(width, height);
+    let view_idx_2d = render_world.add_view(view_bundle_2d);
+    render_world.set_current_view(Some(view_idx_2d));
+    
+    // Extract Buttons (2D UI)
+    extract_buttons(main_world, render_world);
 }
 
 /// Extract sprites from Main World to Render World
@@ -139,6 +184,13 @@ pub fn extract_sprites(main_world: &MainWorld, render_world: &mut RenderWorld) {
 
 /// Extract buttons from Main World to Render World
 pub fn extract_buttons(main_world: &MainWorld, render_world: &mut RenderWorld) {
+    unsafe {
+        extern "C" {
+            fn printf(format: *const u8, ...) -> i32;
+        }
+        printf(b"[EXTRACT] Starting extract_buttons\n\0".as_ptr());
+    }
+    
     // Get PrimaryScreen for default view
     let screen = main_world.resources().get::<PrimaryScreen>();
     let (width, height) = screen.map(|s| (s.width as f32, s.height as f32)).unwrap_or((800.0, 600.0));
@@ -150,9 +202,29 @@ pub fn extract_buttons(main_world: &MainWorld, render_world: &mut RenderWorld) {
 
     // Query all entities with Transform2D and Button
     let transforms: Vec<_> = main_world.query::<Transform2D>().collect();
+    
+    unsafe {
+        extern "C" {
+            fn printf(format: *const u8, ...) -> i32;
+        }
+        printf(b"[EXTRACT] Found %d Transform2D components\n\0".as_ptr(), transforms.len() as i32);
+    }
 
+    let mut button_count = 0;
     for (entity, transform) in transforms {
         if let Some(button) = main_world.get_component::<Button>(entity) {
+            button_count += 1;
+            unsafe {
+                extern "C" {
+                    fn printf(format: *const u8, ...) -> i32;
+                }
+                printf(b"[EXTRACT] Button %d at pos (%f, %f), size %fx%f\n\0".as_ptr(),
+                       button_count,
+                       transform.position.x as f64,
+                       transform.position.y as f64,
+                       button.width as f64,
+                       button.height as f64);
+            }
             // Get button color based on state
             let color = button.current_color();
 
@@ -178,6 +250,13 @@ pub fn extract_buttons(main_world: &MainWorld, render_world: &mut RenderWorld) {
                 color: Color::WHITE,
             });
         }
+    }
+    
+    unsafe {
+        extern "C" {
+            fn printf(format: *const u8, ...) -> i32;
+        }
+        printf(b"[EXTRACT] Total buttons extracted: %d\n\0".as_ptr(), button_count);
     }
 }
 
