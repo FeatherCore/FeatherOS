@@ -24,6 +24,7 @@ fhre = { path = "../../../../apps/fhre/rust", default-features = false }
 libm = "0.2"
 
 [features]
-default = ["cube"]
+default = ["sim", "cube"]
 cube = ["fhre/cube"]
-
+sim = ["fhre/sim"]
+nuttx = ["fhre/nuttx"]

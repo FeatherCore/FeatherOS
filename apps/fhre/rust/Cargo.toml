@@ -21,8 +21,10 @@ opt-level = 'z'
 
 [dependencies]
 libm = "0.2"
+libc = { version = "0.2", optional = true }
 
 [features]
 default = []
 cube = []
-sim = []
+sim = ["libc"]
+nuttx = []

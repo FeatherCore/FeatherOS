@@ -8,58 +8,10 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
-
 // Import libc functions for NuttX platform
 extern "C" {
     fn printf(format: *const u8, ...) -> i32;
-    fn open(path: *const u8, flags: i32) -> i32;
-    fn close(fd: i32) -> i32;
-    fn ioctl(fd: i32, request: u32, ...) -> i32;
-    fn mmap(
-        addr: *mut core::ffi::c_void,
-        length: usize,
-        prot: i32,
-        flags: i32,
-        fd: i32,
-        offset: isize,
-    ) -> *mut core::ffi::c_void;
-    fn munmap(addr: *mut core::ffi::c_void, length: usize) -> i32;
     fn usleep(usec: u32) -> i32;
-    fn getpid() -> i32;
-    fn __errno() -> *mut i32;
-}
-
-const O_RDWR: i32 = 2;
-const PROT_READ: i32 = 1;
-const PROT_WRITE: i32 = 2;
-const MAP_SHARED: i32 = 1;
-
-// Framebuffer IOCTL commands
-const FBIOGET_VIDEOINFO: u32 = 0x2801;
-const FBIOGET_PLANEINFO: u32 = 0x2802;
-
-/// Framebuffer video info structure
-#[repr(C)]
-struct FbVideoInfo {
-    fmt: u8,
-    xres: u16,
-    yres: u16,
-    nplanes: u8,
-}
-
-/// Framebuffer plane info structure
-#[repr(C)]
-struct FbPlaneInfo {
-    fbmem: *mut u8,
-    fblen: usize,
-    stride: u16,
-    display: u8,
-    bpp: u8,
-    xres_virtual: u32,
-    yres_virtual: u32,
-    xoffset: u32,
-    yoffset: u32,
 }
 
 // 宏定义：选择绘制对象
@@ -85,12 +37,8 @@ use fhre::{
 /// Demo 应用状态
 struct DemoApp {
     app: App,
-    fb_fd: i32,
-    fb_mem: *mut u32,
-    fb_size: usize,
     width: u32,
     height: u32,
-    frame_count: u32,
     object_entity: Option<fhre::main_world::Entity>,
     rotation_y: f32,
     is_rotating: bool,
@@ -103,74 +51,31 @@ impl DemoApp {
             if USE_CUBE {
                 printf(b"[DEBUG] Starting FHRE Cube Demo\n\0".as_ptr());
             } else {
-                printf(b"[DEBUG] Starting FHRE Dodecahedron Demo\n\0".as_ptr());
+                printf(b"[DEBUG] Starting FHRE Soccer Ball Demo\n\0".as_ptr());
             }
         }
 
-        // 初始化 framebuffer
-        let (fb_fd, fb_mem, fb_size, width, height) = Self::init_framebuffer()?;
+        // 创建 FHRE App with X11 window for input (640x480)
+        let mut app = App::new_with_x11_window(640, 480, "FHRE Demo");
 
-        // 创建 FHRE App
-        let mut app = App::new();
+        // 获取窗口尺寸
+        let (width, height) = app.screen_dimensions();
 
         // 设置场景
         let object_entity = Self::setup_scene(&mut app, width, height);
 
+        unsafe {
+            printf(b"[INFO] X11 window created: %dx%d\n\0".as_ptr(), width, height);
+        }
+
         Some(Self {
             app,
-            fb_fd,
-            fb_mem,
-            fb_size,
             width,
             height,
-            frame_count: 0,
             object_entity,
             rotation_y: 0.0,
             is_rotating: true,
         })
-    }
-
-    /// 初始化 framebuffer
-    fn init_framebuffer() -> Option<(i32, *mut u32, usize, u32, u32)> {
-        unsafe {
-            let fb_fd = open(b"/dev/fb0\0".as_ptr(), O_RDWR);
-            if fb_fd < 0 {
-                printf(b"[ERROR] Failed to open /dev/fb0\n\0".as_ptr());
-                return None;
-            }
-
-            let mut vinfo: FbVideoInfo = core::mem::zeroed();
-            if ioctl(fb_fd, FBIOGET_VIDEOINFO, &mut vinfo as *mut _) < 0 {
-                printf(b"[ERROR] Failed to get video info\n\0".as_ptr());
-                close(fb_fd);
-                return None;
-            }
-
-            let mut pinfo: FbPlaneInfo = core::mem::zeroed();
-            if ioctl(fb_fd, FBIOGET_PLANEINFO, &mut pinfo as *mut _) < 0 {
-                printf(b"[ERROR] Failed to get plane info\n\0".as_ptr());
-                close(fb_fd);
-                return None;
-            }
-
-            let width = vinfo.xres as u32;
-            let height = vinfo.yres as u32;
-            let fb_size = (width * height * 4) as usize;
-
-            printf(
-                b"[INFO] Framebuffer: %dx%d, bpp=%d\n\0".as_ptr(),
-                width, height, pinfo.bpp as u32,
-            );
-
-            let fb_mem = pinfo.fbmem as *mut u32;
-            if fb_mem.is_null() {
-                printf(b"[ERROR] Null framebuffer address\n\0".as_ptr());
-                close(fb_fd);
-                return None;
-            }
-
-            Some((fb_fd, fb_mem, fb_size, width, height))
-        }
     }
 
     /// 设置场景 - 3D 对象和按钮
@@ -312,33 +217,25 @@ impl DemoApp {
     fn run(&mut self) {
         unsafe {
             printf(b"[INFO] FHRE Demo started - Entering main loop\n\0".as_ptr());
+            printf(b"[INFO] X11 window should be visible now\n\0".as_ptr());
+            printf(b"[INFO] Press 'q' or click X button to exit\n\0".as_ptr());
         }
 
+        // 在后台线程运行渲染循环
         loop {
+            // 检查是否应该退出
+            if !self.app.is_running() {
+                unsafe {
+                    printf(b"[INFO] FHRE Demo exiting...\n\0".as_ptr());
+                }
+                break;
+            }
+
             // 更新对象旋转
             self.update_object();
 
-            // 更新 FHRE App
+            // 更新 FHRE App (包含 X11 事件轮询)
             self.app.update();
-
-            // 获取 framebuffer 数据
-            let framebuffer = self.app.render_world.framebuffer();
-
-            // 复制到 NuttX framebuffer
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    framebuffer.as_ptr(),
-                    self.fb_mem,
-                    (self.width * self.height) as usize,
-                );
-            }
-
-            // 刷新 framebuffer
-            unsafe {
-                ioctl(self.fb_fd, 0x2803, 0); // FBIO_UPDATE
-            }
-
-            self.frame_count += 1;
 
             // 控制帧率约 60 FPS
             unsafe {

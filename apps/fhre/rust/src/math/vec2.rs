@@ -1,6 +1,6 @@
 //! 2D Vector
 
-use core::ops::{Add, Sub, Mul};
+use core::ops::{Add, Sub, Mul, AddAssign};
 
 /// 2D Vector
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -115,5 +115,12 @@ impl Mul<Vec2> for f32 {
     type Output = Vec2;
     fn mul(self, vec: Vec2) -> Vec2 {
         vec.mul_scalar(self)
+    }
+}
+
+impl AddAssign for Vec2 {
+    fn add_assign(&mut self, other: Self) {
+        self.x += other.x;
+        self.y += other.y;
     }
 }

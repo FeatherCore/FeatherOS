@@ -2,25 +2,10 @@
 //!
 //! Provides platform-specific implementations for different targets.
 
-// Framebuffer abstraction (common across all platforms)
-pub mod framebuffer;
-
-// Platform-specific modules
+// X11 Window for SIM platform (input and display)
 #[cfg(feature = "sim")]
-pub mod sim;
+pub mod x11_window;
 
-#[cfg(feature = "nuttx")]
-pub mod nuttx;
-
-pub mod default;
-
-// Re-export framebuffer types
-pub use framebuffer::{Framebuffer, SimpleFramebuffer};
-
-// Re-export platform types based on feature flags
+// Re-export X11 window for SIM platform
 #[cfg(feature = "sim")]
-pub use sim::{SimDisplay, create_display, refresh_loop, FB_DEVICE_PATH};
-
-// When no specific platform is selected, use default implementations
-#[cfg(not(any(feature = "sim", feature = "nuttx")))]
-pub use default::*;
+pub use x11_window::*;

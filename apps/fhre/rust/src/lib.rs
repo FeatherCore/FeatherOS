@@ -70,14 +70,14 @@ pub mod app;
 pub mod main_world;
 pub mod render_world;
 pub mod extract;
-pub mod schedule;      // System execution scheduling (PreUpdate, Update, PostUpdate, Extract, Render)
-pub mod pipeline;      // GPU/CPU hybrid rendering pipeline and batch processing
-pub mod animation;     // Animation system (inspired by Bevy's animation)
+pub mod schedule;
+pub mod pipeline;
+pub mod animation;
 pub mod resources;
 pub mod math;
-pub mod platform;      // Platform abstraction (includes framebuffer)
-pub mod node;          // Node system - unified minimum unit for game entities and UI controls
-pub mod ui;            // UI components - buttons, labels, panels, etc.
+pub mod platform;
+pub mod node;
+pub mod ui;
 
 // Re-export main types
 pub use app::{App, AppBuilder, AppConfig, RunMode, FHRE_VERSION};
@@ -91,9 +91,8 @@ pub use animation::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex, An
 pub use animation::{AnimationCurve, KeyframeCurve, Keyframe, Easing, AnimationProperty, AnimationTargetId};
 pub use animation::{AnimationPlugin, AnimationResources, animate_system, transition_system};
 pub use resources::{Resources, Resource, Time, RenderConfig, WindowConfig};
-pub use platform::{Framebuffer, SimpleFramebuffer};
 pub use math::{Vec2, Vec3, Color, Rect};
 
-// Platform-specific exports - conditionally compiled
+// Platform-specific exports
 #[cfg(feature = "sim")]
-pub use platform::sim::{SimDisplay, create_display, refresh_loop, FB_DEVICE_PATH};
+pub use platform::x11_window::{X11Window, MouseEvent, MouseEventType};

@@ -50,7 +50,8 @@ context:: $(CARGO_CONFIG) $(FHRE_LIB)
 	RUST_TARGET=$(RUST_TARGET) \
 	cargo build \
 		--manifest-path $(RUST_CARGO_PATH)/Cargo.toml \
-		--target $(RUST_TARGET)
+		--target $(RUST_TARGET) \
+		--features nuttx
 
 # Build FHRE library first
 $(FHRE_LIB):

@@ -22,8 +22,8 @@
 GENROMFS := $(shell which genromfs 2>/dev/null || echo "$(TOPDIR)/tools/genromfs")
 
 # Check if using system genromfs (supports -f -d flags) or NuttX genromfs (positional args)
-# System genromfs outputs "Usage: genromfs -f <output> -d <source_dir>" when called without args
-GENROMFS_HELP := $(shell $(GENROMFS) 2>&1 || true)
+# System genromfs outputs usage with -f flag
+GENROMFS_HELP := $(shell $(GENROMFS) -h 2>&1 || true)
 GENROMFS_IS_SYSTEM := $(findstring -f,$(GENROMFS_HELP))
 
 ifneq ($(RCSRCS)$(RCRAWS),)
@@ -43,7 +43,7 @@ $(ETCSRC): $(foreach raw,$(RCRAWS), $(if $(wildcard $(BOARD_DIR)$(DELIM)src$(DEL
   	  $(shell rm -rf $(ETCDIR)$(DELIM)$(raw)) \
   	  $(shell mkdir -p $(dir $(ETCDIR)$(DELIM)$(raw))) \
   	  $(shell cp -rfp $(if $(wildcard $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw), $(if $(wildcard $(BOARD_COMMON_DIR)$(DELIM)$(raw)), $(BOARD_COMMON_DIR)$(DELIM)$(raw), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw))) $(ETCDIR)$(DELIM)$(raw)))
-	$(Q) if $(GENROMFS) --help 2>&1 | grep -q '\-f.*\-d'; then \
+	$(Q) if $(GENROMFS) -h 2>&1 | grep -q '^\s*-f'; then \
 		$(GENROMFS) -f romfs.img -d $(ETCDIR)$(DELIM)$(CONFIG_ETC_ROMFSMOUNTPT); \
 	else \
 		$(GENROMFS) $(ETCDIR)$(DELIM)$(CONFIG_ETC_ROMFSMOUNTPT) romfs.img; \

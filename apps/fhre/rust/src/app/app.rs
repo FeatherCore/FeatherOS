@@ -1,22 +1,13 @@
 //! Application implementation for FHRE
 //!
 //! Provides the main App struct and lifecycle management.
-//! Integrates with NuttX SIM platform framebuffer similar to LVGL.
-//!
-//! # Default Setup
-//!
-//! FHRE provides default built-in resources:
-//! - **PrimaryScreen**: The main render target with global resolution
-//! - **Default UI Camera**: Orthographic camera for UI rendering
-//!
-//! These are automatically created when App is initialized.
+//! Uses X11 window for input and display on SIM platform.
 
-use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::main_world::{MainWorld, IntoSystem, Entity};
 use crate::render_world::RenderWorld;
-use crate::extract::{extract_sprites, extract_buttons, extract_renderable_components};
+use crate::extract::{extract_renderable_components};
 use crate::resources::{Time, RenderConfig, WindowConfig, PrimaryScreen};
 use crate::schedule::{Schedules, ScheduleLabel};
 use crate::node::{Node, NodeType, Transform3D, Camera3D};
@@ -32,7 +23,7 @@ const CLOCKS_PER_SEC: i64 = 1000000; // Standard POSIX value
 
 // Platform-specific imports
 #[cfg(feature = "sim")]
-use crate::platform::sim::SimDisplay;
+use crate::platform::x11_window::X11Window;
 
 /// FHRE version
 pub const FHRE_VERSION: &str = "2.0.0";
@@ -59,35 +50,24 @@ pub struct App {
     pub schedules: Schedules,
     pub config: AppConfig,
     #[cfg(feature = "sim")]
-    pub sim_display: Option<SimDisplay>,
-    #[cfg(not(feature = "sim"))]
-    pub sim_display: Option<()>,
+    pub x11_window: Option<X11Window>,
     running: bool,
 }
 
 impl App {
-    /// Create a new application with default screen and camera
-    ///
-    /// This automatically sets up:
-    /// 1. PrimaryScreen - the main render target
-    /// 2. Default UI Camera - orthographic camera for UI rendering
-    pub fn new() -> Self {
+    /// Create a new application with X11 window for input and display
+    #[cfg(feature = "sim")]
+    pub fn new_with_x11_window(window_width: u32, window_height: u32, title: &str) -> Self {
         let config = AppConfig::default();
-        let (width, height) = (config.width, config.height);
 
-        // Try to create SIM display (for NuttX SIM platform)
-        #[cfg(feature = "sim")]
-        let sim_display = SimDisplay::new();
-        
-        #[cfg(not(feature = "sim"))]
-        let sim_display: Option<()> = None;
-        
-        // If SIM display is available, use its dimensions
-        #[cfg(feature = "sim")]
-        let (width, height) = if let Some(ref display) = sim_display {
-            display.dimensions()
+        // Create X11 window for input and display
+        let x11_window = X11Window::new(window_width, window_height, title);
+
+        // Use window dimensions
+        let (width, height) = if let Some(ref window) = x11_window {
+            window.get_dimensions()
         } else {
-            (width, height)
+            (window_width, window_height)
         };
 
         let mut app = Self {
@@ -95,14 +75,14 @@ impl App {
             render_world: RenderWorld::new(width, height),
             schedules: Schedules::new(),
             config,
-            sim_display,
-            running: false,
+            x11_window,
+            running: true,
         };
 
         // Setup default resources
         app.setup_primary_screen(width, height);
         app.setup_default_ui_camera(width, height);
-        
+
         // Initialize default schedules
         app.init_schedules();
 
@@ -110,39 +90,29 @@ impl App {
     }
 
     /// Setup the primary screen resource
-    ///
-    /// The primary screen is the default render target for FHRE.
-    /// All rendering happens to this screen by default.
     fn setup_primary_screen(&mut self, width: u32, height: u32) {
         let primary_screen = PrimaryScreen::new(width, height);
         self.main_world.resources_mut().insert(primary_screen);
     }
 
     /// Setup the default UI camera
-    ///
-    /// Creates a perspective camera for 3D UI rendering (including book flip effect).
-    /// This camera is positioned to show 3D effects like page flipping.
     fn setup_default_ui_camera(&mut self, width: u32, height: u32) {
         let camera_entity = self.main_world.spawn();
         
-        // Create UI camera node
         self.main_world.insert_component(
             camera_entity,
             Node::ui_control(NodeType::Camera)
         );
         
-        // Position camera for 3D perspective view
-        // Positioned to see the book flip effect clearly
         let camera_x = width as f32 / 2.0;
         let camera_y = height as f32 / 2.0;
-        let camera_z = 400.0; // Distance for good perspective view
+        let camera_z = 400.0;
         
         self.main_world.insert_component(
             camera_entity,
             Transform3D::from_position(camera_x, camera_y, camera_z)
         );
         
-        // Perspective camera for 3D book flip effect
         self.main_world.insert_component(
             camera_entity,
             Camera3D {
@@ -150,15 +120,14 @@ impl App {
                 near: 0.1,
                 far: 2000.0,
                 background_color: crate::math::Color::BLACK,
-                orthographic: false,  // Use perspective for 3D effect
+                orthographic: false,
                 orthographic_size: height as f32 / 2.0,
                 viewport: crate::math::Rect::new(0.0, 0.0, 1.0, 1.0),
                 culling_mask: 0xFFFFFFFF,
-                depth: -100,  // Render first (lowest depth)
+                depth: -100,
             }
         );
         
-        // Store as default UI camera resource
         self.main_world.resources_mut().insert(DefaultUiCamera {
             entity: camera_entity,
         });
@@ -180,54 +149,9 @@ impl App {
             .map(|cam| cam.entity)
     }
 
-    /// Create a new camera for game rendering
-    ///
-    /// This creates a perspective camera that can be used for 3D game rendering.
-    /// The camera is positioned at the given location and looks at the target.
-    pub fn create_game_camera(
-        &mut self,
-        position: crate::math::Vec3,
-        target: crate::math::Vec3,
-        fov: f32,
-    ) -> Entity {
-        let camera_entity = self.main_world.spawn();
-        
-        self.main_world.insert_component(
-            camera_entity,
-            Node::game_entity(NodeType::Camera)
-        );
-        
-        let mut transform = Transform3D::from_position(position.x, position.y, position.z);
-        transform.look_at(target);
-        self.main_world.insert_component(camera_entity, transform);
-        
-        self.main_world.insert_component(
-            camera_entity,
-            Camera3D {
-                fov,
-                near: 0.1,
-                far: 1000.0,
-                background_color: crate::math::Color::BLACK,
-                orthographic: false,
-                orthographic_size: 5.0,
-                viewport: crate::math::Rect::new(0.0, 0.0, 1.0, 1.0),
-                culling_mask: 0xFFFFFFFF,
-                depth: 0,  // Render after UI camera
-            }
-        );
-        
-        // Store as default game camera
-        self.main_world.resources_mut().insert(DefaultGameCamera {
-            entity: camera_entity,
-        });
-        
-        camera_entity
-    }
-
     /// Initialize default schedules
     fn init_schedules(&mut self) {
         // Schedules are already created in Schedules::new()
-        // We can add custom initialization here if needed
     }
 
     /// Add a system to a schedule
@@ -239,92 +163,122 @@ impl App {
         self
     }
 
-    /// Add a startup system
-    pub fn add_startup_system<S: IntoSystem>(&mut self, _system: S) -> &mut Self
-    where
-        <S as IntoSystem>::System: 'static,
-    {
-        // Startup systems would be added to the startup schedule
-        // Implementation depends on how we handle systems
-        self
-    }
-
-    /// Run the startup phase once
-    pub fn startup(&mut self) {
-        // Run startup schedule if it exists
-        // self.schedules.run(ScheduleLabel::PreUpdate);
-    }
-
     /// Run one update frame
     pub fn update(&mut self) {
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[FHRE_UPDATE] ========== Frame Start ==========\n\0".as_ptr());
+        }
+
+        // 0. Poll X11 window events if available
+        #[cfg(feature = "sim")]
+        {
+            unsafe {
+                extern "C" {
+                    fn printf(format: *const u8, ...) -> i32;
+                }
+                printf(b"[FHRE_UPDATE] Step 0: Polling X11 events...\n\0".as_ptr());
+            }
+            if let Some(ref mut window) = self.x11_window {
+                window.poll_events();
+            }
+        }
+        
         // 1. Update time
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[FHRE_UPDATE] Step 1: Updating time...\n\0".as_ptr());
+        }
         if let Some(time) = self.main_world.resources_mut().get_mut::<Time>() {
-            time.update(1.0 / 60.0); // Default to 60 FPS
+            time.update(1.0 / 60.0);
         }
 
         // 2. Run Main World systems
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[FHRE_UPDATE] Step 2: Running Main World systems...\n\0".as_ptr());
+        }
         self.main_world.run_systems();
 
-        // 3. Extract phase - sync Main World to Render World
-        // 重要：首先清除所有视图，避免视图不断累加
+        // 3. Extract phase
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[FHRE_UPDATE] Step 3: Extract phase...\n\0".as_ptr());
+        }
         self.render_world.clear_views();
-        
-        // Extract 3D renderable components (Cube, SoccerBall, etc.)
-        // 这个函数会创建一个视图，并且提取所有 3D 渲染组件
         extract_renderable_components(&self.main_world, &mut self.render_world);
 
-        // 4. Render phase - execute render commands through RenderWorld
-        // RenderWorld manages the backend internally (Software/GPU/Hybrid)
+        // 4. Render phase
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[FHRE_UPDATE] Step 4: Render phase...\n\0".as_ptr());
+        }
         self.render_world.execute_render();
 
-        // 5. Present to SIM display if available (NuttX SIM platform)
-        // Similar to LVGL's flush_cb calling FBIO_UPDATE
+        // 5. Present to X11 window
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[FHRE_UPDATE] Step 5: Present to display...\n\0".as_ptr());
+        }
         #[cfg(feature = "sim")]
         {
-            if let Some(ref mut display) = self.sim_display {
-                display.present(&self.render_world);
+            if let Some(ref window) = self.x11_window {
+                let framebuffer = self.render_world.framebuffer();
+                window.present(framebuffer);
             }
         }
 
-        // 6. Clear render commands and views for next frame
-        // Prevent command accumulation between frames
+        // 6. Clear for next frame
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[FHRE_UPDATE] Step 6: Clear render commands...\n\0".as_ptr());
+        }
         self.render_world.clear_commands();
         self.render_world.clear_views();
+
+        unsafe {
+            extern "C" {
+                fn printf(format: *const u8, ...) -> i32;
+            }
+            printf(b"[FHRE_UPDATE] ========== Frame End ==========\n\n\0".as_ptr());
+        }
     }
 
-    /// Run the application with integrated refresh loop
-    /// Similar to LVGL's lv_nuttx_run() - manages the main loop internally
+    /// Run the application
     pub fn run(&mut self) {
         self.run_with_callback(|| {});
     }
     
-    /// Run the application with a custom update callback
-    /// The callback is called before each frame update, allowing custom game logic
+    /// Run with callback
     pub fn run_with_callback<F>(&mut self, mut callback: F)
     where
         F: FnMut(),
     {
         self.running = true;
         
-        // Run startup
-        self.startup();
-
-        // Main loop with frame rate control (similar to LVGL)
-        // Default to 60 FPS with usleep for CPU yield
         while self.running {
             let start_time = unsafe { clock() };
             
-            // Call custom callback (e.g., game logic updates)
             callback();
-            
-            // Update one frame
             self.update();
             
-            // Calculate elapsed time and sleep to maintain frame rate
             let elapsed = unsafe { clock() } - start_time;
             let elapsed_ms = (elapsed * 1000 / CLOCKS_PER_SEC) as u64;
             
-            // Target 16ms per frame (~60 FPS)
             if elapsed_ms < 16 {
                 unsafe {
                     usleep(((16 - elapsed_ms) * 1000) as u32);
@@ -333,9 +287,20 @@ impl App {
         }
     }
 
-    /// Check if the app is running
+    /// Check if app is running
     pub fn is_running(&self) -> bool {
-        self.running
+        if !self.running {
+            return false;
+        }
+
+        #[cfg(feature = "sim")]
+        {
+            if let Some(ref window) = self.x11_window {
+                return window.is_running();
+            }
+        }
+
+        true
     }
 
     /// Stop the application
@@ -343,28 +308,35 @@ impl App {
         self.running = false;
     }
 
-    /// Get framebuffer data for output
+    /// Get framebuffer data
     pub fn get_framebuffer(&self) -> &[u32] {
         self.render_world.framebuffer()
     }
-}
 
-impl Default for App {
-    fn default() -> Self {
-        Self::new()
+    /// Get X11 window reference
+    #[cfg(feature = "sim")]
+    pub fn x11_window(&self) -> Option<&X11Window> {
+        self.x11_window.as_ref()
+    }
+
+    /// Get mutable X11 window reference
+    #[cfg(feature = "sim")]
+    pub fn x11_window_mut(&mut self) -> Option<&mut X11Window> {
+        self.x11_window.as_mut()
     }
 }
 
-/// Application builder for more convenient setup
+/// Application builder
 pub struct AppBuilder {
     app: App,
 }
 
 impl AppBuilder {
-    /// Create a new app builder
-    pub fn new() -> Self {
+    /// Create a new app builder with X11 window
+    #[cfg(feature = "sim")]
+    pub fn new_with_x11(width: u32, height: u32, title: &str) -> Self {
         Self {
-            app: App::new(),
+            app: App::new_with_x11_window(width, height, title),
         }
     }
 
@@ -377,12 +349,11 @@ impl AppBuilder {
 
     /// Set render configuration
     pub fn with_render_config(mut self, config: RenderConfig) -> Self {
-        // Store render config in resources
         self.app.main_world.resources_mut().insert(config);
         self
     }
 
-    /// Add a system to the update schedule
+    /// Add a system
     pub fn add_system<S: IntoSystem>(mut self, system: S) -> Self
     where
         <S as IntoSystem>::System: 'static,
@@ -391,23 +362,8 @@ impl AppBuilder {
         self
     }
 
-    /// Add a startup system
-    pub fn add_startup_system<S: IntoSystem>(mut self, system: S) -> Self
-    where
-        <S as IntoSystem>::System: 'static,
-    {
-        self.app.add_startup_system(system);
-        self
-    }
-
     /// Build the application
     pub fn build(self) -> App {
         self.app
-    }
-}
-
-impl Default for AppBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }

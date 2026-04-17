@@ -42,7 +42,8 @@ context:: $(CARGO_CONFIG)
 	RUST_TARGET=$(RUST_TARGET) \
 	cargo build \
 		--manifest-path $(RUST_CARGO_PATH)/Cargo.toml \
-		--target $(RUST_TARGET)
+		--target $(RUST_TARGET) \
+		--features nuttx
 
 # Dynamically generate Cargo config based on NuttX target
 $(CARGO_CONFIG):

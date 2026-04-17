@@ -6,11 +6,12 @@
 2. [双世界架构](#2-双世界架构)
 3. [默认资源系统](#3-默认资源系统)
 4. [摄像机与视图系统](#4-摄像机与视图系统)
-5. [渲染管线](#5-渲染管线)
-6. [模块详解](#6-模块详解)
-7. [控件系统](#7-控件系统)
-8. [NuttX SIM 平台支持](#8-nuttx-sim-平台支持)
-9. [使用示例](#9-使用示例)
+5. [输入系统](#5-输入系统)
+6. [渲染管线](#6-渲染管线)
+7. [模块详解](#7-模块详解)
+8. [控件系统](#8-控件系统)
+9. [NuttX SIM 平台支持](#9-nuttx-sim-平台支持)
+10. [使用示例](#10-使用示例)
 
 ---
 
@@ -411,9 +412,719 @@ fn setup_racing_cameras(mut commands: Commands) {
 
 ---
 
-## 5. 渲染管线
+## 5. 输入系统
 
-### 5.1 架构分层
+### 5.1 设计哲学
+
+FHRE 的输入系统融合了 **Bevy 的 ECS 事件驱动架构** 和 **LVGL 的输入设备抽象**，采用混合设计模式：
+
+```
+底层硬件 (evdev / nuttx input)
+    ↓
+输入驱动 (读取原始事件)
+    ↓
+事件分发 (Message 系统)
+    ↓
+输入系统 (System)
+    ↓
+资源 (Resource)
+    ↓
+游戏/UI 逻辑查询
+```
+
+### 5.2 架构对比
+
+| 特性 | Bevy | LVGL | FHRE |
+|------|------|------|------|
+| 架构模式 | ECS (Resource/Message) | 回调驱动 + 定时器 | **ECS + 事件驱动** |
+| 状态管理 | HashSet 资源 | 结构体字段 | **ButtonInput\<T\> 资源** |
+| 事件类型 | Message | lv_indev_data_t | **InputEvent** |
+| 帧处理 | 每帧清空 just_* | 定时器周期性读取 | **PreUpdate 阶段处理** |
+| 设备类型 | 分离资源 | 统一 lv_indev_t | **泛型 ButtonInput\<T\>** |
+| 坐标系统 | 窗口相对 | 屏幕绝对 | **PrimaryScreen 归一化** |
+
+### 5.3 核心数据结构
+
+#### 5.3.1 输入事件
+
+```rust
+/// 输入事件类型
+pub enum InputEvent {
+    /// 鼠标按键事件
+    MouseButton {
+        button: MouseButton,  // Left, Right, Middle
+        state: ButtonState,   // Pressed, Released
+        position: Vec2,       // 屏幕坐标
+    },
+    /// 鼠标移动事件
+    MouseMotion {
+        delta: Vec2,          // 相对位移
+        position: Vec2,       // 绝对位置
+    },
+    /// 鼠标滚轮事件
+    MouseWheel {
+        delta: Vec2,          // 滚动量
+        unit: ScrollUnit,     // Line, Pixel
+    },
+    /// 键盘按键事件
+    Keyboard {
+        key_code: KeyCode,    // 物理键码
+        state: ButtonState,   // Pressed, Released
+    },
+    /// 触摸事件
+    Touch {
+        id: u64,              // 触摸 ID
+        phase: TouchPhase,    // Started, Moved, Ended, Canceled
+        position: Vec2,       // 触摸位置
+        force: Option<f32>,   // 按压力度 (0.0 - 1.0)
+    },
+}
+
+/// 按钮状态
+pub enum ButtonState {
+    Pressed,
+    Released,
+}
+
+/// 触摸阶段
+pub enum TouchPhase {
+    Started,
+    Moved,
+    Ended,
+    Canceled,
+}
+```
+
+#### 5.3.2 输入资源
+
+```rust
+/// 通用按钮输入资源
+pub struct ButtonInput<T: Clone + Eq + Hash> {
+    pressed: HashSet<T>,       // 当前按下的按钮
+    just_pressed: HashSet<T>,  // 当前帧刚按下的按钮
+    just_released: HashSet<T>, // 当前帧刚释放的按钮
+}
+
+impl<T: Clone + Eq + Hash> ButtonInput<T> {
+    /// 注册按下
+    pub fn press(&mut self, input: T) {
+        if self.pressed.insert(input.clone()) {
+            self.just_pressed.insert(input);
+        }
+    }
+    
+    /// 注册释放
+    pub fn release(&mut self, input: T) {
+        if self.pressed.remove(&input) {
+            self.just_released.insert(input);
+        }
+    }
+    
+    /// 检查是否按下
+    pub fn pressed(&self, input: T) -> bool {
+        self.pressed.contains(&input)
+    }
+    
+    /// 检查当前帧是否刚按下
+    pub fn just_pressed(&self, input: T) -> bool {
+        self.just_pressed.contains(&input)
+    }
+    
+    /// 检查当前帧是否刚释放
+    pub fn just_released(&self, input: T) -> bool {
+        self.just_released.contains(&input)
+    }
+    
+    /// 清空 just_pressed/just_released (每帧调用)
+    pub fn clear(&mut self) {
+        self.just_pressed.clear();
+        self.just_released.clear();
+    }
+}
+
+/// 触摸状态资源
+pub struct Touches {
+    pressed: HashMap<u64, Touch>,
+    just_pressed: HashMap<u64, Touch>,
+    just_released: HashMap<u64, Touch>,
+}
+
+/// 单个触摸信息
+pub struct Touch {
+    id: u64,
+    start_position: Vec2,
+    previous_position: Vec2,
+    position: Vec2,
+}
+
+impl Touch {
+    /// 当前位置 - 上次位置 (移动量)
+    pub fn delta(&self) -> Vec2 {
+        self.position - self.previous_position
+    }
+    
+    /// 当前位置 - 起始位置 (总位移)
+    pub fn distance(&self) -> Vec2 {
+        self.position - self.start_position
+    }
+}
+```
+
+#### 5.3.3 鼠标/键盘按键枚举
+
+```rust
+/// 鼠标按键
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    Back,
+    Forward,
+}
+
+/// 键盘键码 (物理位置)
+pub enum KeyCode {
+    KeyA, KeyB, KeyC,    // 字母
+    Digit0, Digit1,      // 数字
+    ArrowUp, ArrowDown, ArrowLeft, ArrowRight, // 方向键
+    Space, Enter, Escape, Tab,                 // 功能键
+    F1, F2, ... F24,                           // F 键
+    ShiftLeft, ShiftRight,                     // Shift
+    ControlLeft, ControlRight,                 // Ctrl
+    AltLeft, AltRight,                         // Alt
+    // ... 更多
+}
+```
+
+### 5.4 输入处理流程
+
+#### 5.4.1 帧处理时序
+
+```
+Frame N:
+┌──────────────────────────────────────────────────────────────┐
+│ 1. 平台层收集输入事件                                         │
+│    └→ evdev_read() / nuttx_input()                           │
+│    └→ 转换为 InputEvent 并加入消息队列                        │
+│                                                              │
+│ 2. PreUpdate 阶段 - 输入处理系统执行                          │
+│    ├── input_clear_system()                                  │
+│    │   └→ ButtonInput<T>::clear()                            │
+│    │                                                          │
+│    ├── mouse_input_system()                                  │
+│    │   └→ 处理 MouseButton, MouseMotion, MouseWheel          │
+│    │   └→ 更新 ButtonInput<MouseButton>                      │
+│    │                                                          │
+│    ├── keyboard_input_system()                               │
+│    │   └→ 处理 Keyboard                                      │
+│    │   └→ 更新 ButtonInput<KeyCode>                          │
+│    │                                                          │
+│    └── touch_input_system()                                  │
+│        └→ 处理 Touch                                        │
+│        └→ 更新 Touches                                       │
+│                                                              │
+│ 3. Update 阶段 - 用户系统执行                                 │
+│    └→ 查询 Res<ButtonInput<T>> / Res<Touches>               │
+│                                                              │
+│ 4. PostUpdate 阶段                                           │
+│    └→ (可选) 清空临时输入数据                                │
+└──────────────────────────────────────────────────────────────┘
+```
+
+#### 5.4.2 事件处理系统
+
+```rust
+/// 清空 just_pressed/just_released (每帧调用)
+pub fn input_clear_system(
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+) {
+    mouse.bypass_change_detection().clear();
+    keys.bypass_change_detection().clear();
+}
+
+/// 鼠标输入处理系统
+pub fn mouse_input_system(
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut mouse_motion_events: MessageReader<InputEvent>,
+    mut scroll: ResMut<AccumulatedMouseScroll>,
+) {
+    for event in mouse_motion_events.read() {
+        match event {
+            InputEvent::MouseButton { button, state, position } => {
+                match state {
+                    ButtonState::Pressed => mouse.press(*button),
+                    ButtonState::Released => mouse.release(*button),
+                }
+            }
+            InputEvent::MouseWheel { delta, .. } => {
+                scroll.delta += delta;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 键盘输入处理系统
+pub fn keyboard_input_system(
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut keyboard_events: MessageReader<InputEvent>,
+) {
+    for event in keyboard_events.read() {
+        if let InputEvent::Keyboard { key_code, state } = event {
+            match state {
+                ButtonState::Pressed => keys.press(*key_code),
+                ButtonState::Released => keys.release(*key_code),
+            }
+        }
+    }
+}
+
+/// 触摸输入处理系统
+pub fn touch_input_system(
+    mut touches: ResMut<Touches>,
+    mut touch_events: MessageReader<InputEvent>,
+) {
+    // 更新上一帧的位置
+    for touch in touches.pressed.values_mut() {
+        touch.previous_position = touch.position;
+    }
+    
+    for event in touch_events.read() {
+        if let InputEvent::Touch { id, phase, position, force } = event {
+            match phase {
+                TouchPhase::Started => {
+                    let touch = Touch {
+                        id: *id,
+                        start_position: *position,
+                        previous_position: *position,
+                        position: *position,
+                    };
+                    touches.pressed.insert(*id, touch);
+                    touches.just_pressed.insert(*id, touch);
+                }
+                TouchPhase::Moved => {
+                    if let Some(mut touch) = touches.pressed.get(id).cloned() {
+                        touch.position = *position;
+                        touches.pressed.insert(*id, touch);
+                    }
+                }
+                TouchPhase::Ended => {
+                    if let Some((_, touch)) = touches.pressed.remove_entry(id) {
+                        touches.just_released.insert(*id, touch);
+                    }
+                }
+                TouchPhase::Canceled => {
+                    touches.pressed.remove(id);
+                }
+            }
+        }
+    }
+}
+```
+
+### 5.8 SIM 环境下输入系统对接参考 (LVGL SDL 驱动)
+
+FHRE 输入系统的设计参考了 LVGL 在 NuttX SIM 环境下的 SDL 驱动对接方式。
+
+#### 5.8.1 LVGL SIM 输入架构
+
+LVGL 在 SIM 环境中使用 SDL 作为底层窗口和输入系统：
+
+```
+SDL 事件循环 (SDL_PollEvent)
+    ↓
+lv_sdl_window.c: sdl_event_handler() (每 5ms 定时器调用)
+    ↓ 分发事件到各驱动
+    ├── lv_sdl_mouse.c: lv_sdl_mouse_handler()
+    └── lv_sdl_keyboard.c: lv_sdl_keyboard_handler()
+    ↓ 更新驱动内部状态 → 调用 lv_indev_read() 触发 LVGL 输入系统
+lv_indev.c: 事件处理 → UI 更新
+```
+
+#### 5.8.2 SDL 事件循环
+
+```c
+// lv_sdl_window.c
+static lv_timer_t * event_handler_timer;
+
+lv_display_t * lv_sdl_window_create(int32_t hor_res, int32_t ver_res)
+{
+    if(!inited) {
+        SDL_Init(SDL_INIT_VIDEO);
+        SDL_StartTextInput();
+        event_handler_timer = lv_timer_create(sdl_event_handler, 5, NULL);
+        lv_tick_set_cb(SDL_GetTicks);
+        inited = true;
+    }
+    // ...
+}
+
+static void sdl_event_handler(lv_timer_t * t)
+{
+    SDL_Event event;
+    while(SDL_PollEvent(&event)) {
+        lv_sdl_mouse_handler(&event);
+        lv_sdl_keyboard_handler(&event);
+        
+        if(event.type == SDL_QUIT) {
+            SDL_Quit();
+            lv_deinit();
+            exit(0);
+        }
+    }
+}
+```
+
+#### 5.8.3 鼠标驱动对接
+
+LVGL 使用驱动私有数据 + 读取回调的方式：
+
+```c
+typedef struct {
+    int16_t last_x;
+    int16_t last_y;
+    bool left_button_down;
+} lv_sdl_mouse_t;
+
+lv_indev_t * lv_sdl_mouse_create(void)
+{
+    lv_sdl_mouse_t * dsc = lv_malloc_zeroed(sizeof(lv_sdl_mouse_t));
+    lv_indev_t * indev = lv_indev_create();
+    
+    lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(indev, sdl_mouse_read);
+    lv_indev_set_driver_data(indev, dsc);
+    lv_indev_set_mode(indev, LV_INDEV_MODE_EVENT);  // 事件驱动模式
+    
+    return indev;
+}
+
+static void sdl_mouse_read(lv_indev_t * indev, lv_indev_data_t * data)
+{
+    lv_sdl_mouse_t * dsc = lv_indev_get_driver_data(indev);
+    data->point.x = dsc->last_x;
+    data->point.y = dsc->last_y;
+    data->state = dsc->left_button_down ? LV_INDEV_STATE_PRESSED 
+                                        : LV_INDEV_STATE_RELEASED;
+}
+
+void lv_sdl_mouse_handler(SDL_Event * event)
+{
+    // ... 找到对应的输入设备
+    switch(event->type) {
+        case SDL_MOUSEBUTTONDOWN:
+            dsc->left_button_down = true;
+            dsc->last_x = event->motion.x / zoom;
+            dsc->last_y = event->motion.y / zoom;
+            break;
+        case SDL_MOUSEBUTTONUP:
+            dsc->left_button_down = false;
+            break;
+        case SDL_MOUSEMOTION:
+            dsc->last_x = event->motion.x / zoom;
+            dsc->last_y = event->motion.y / zoom;
+            break;
+    }
+    lv_indev_read(indev);  // 触发 LVGL 输入处理
+}
+```
+
+#### 5.8.4 FHRE 参考实现
+
+FHRE 的输入系统采用 ECS 架构，但借鉴了 LVGL 的以下设计：
+
+| LVGL 设计 | FHRE 对应实现 | 说明 |
+|----------|--------------|------|
+| `lv_sdl_mouse_t` 驱动私有数据 | `ButtonInput<MouseButton>` Resource | ECS Resource 替代驱动私有数据 |
+| `sdl_mouse_read` 回调 | `input_process_system` | ECS System 替代读取回调 |
+| `lv_indev_read(indev)` 触发处理 | `App::update()` 中的输入阶段 | 帧更新时处理 |
+| 事件驱动模式 `LV_INDEV_MODE_EVENT` | `App.input_events` 队列 | 事件队列替代事件模式 |
+| `lv_sdl_window_create()` 创建输入设备 | `init_input_system()` | 资源初始化 |
+| 按键缓冲区 + dummy_read | `just_pressed/just_released` | 帧边界状态管理 |
+
+FHRE SIM 环境输入对接流程图：
+
+```
+main()
+    ↓
+App::new()
+    ├── init_input_system()     ← 创建输入资源
+    │   ├── MouseInput
+    │   ├── KeyboardInput
+    │   └── Touches
+    └── ...
+
+主循环:
+    run_with_callback(|app| {
+        // 平台层收集输入事件 (类似 SDL_PollEvent)
+        #[cfg(feature = "sim")]
+        {
+            if let Some(driver) = &mut app.input_driver {
+                let events = driver.read_events();
+                app.push_input_events(&events);
+            }
+        }
+    })
+    ↓
+App::update()
+    ├── input_clear_system()     ← 清空 just_pressed/just_released
+    ├── input_process_system()   ← 处理 input_events，更新资源
+    ├── main_world.run_systems() ← 用户系统执行
+    ├── extract_renderable_components()
+    ├── render_world.execute_render()
+    └── sim_display.present()
+```
+
+FHRE 平台输入驱动 (类似 `lv_sdl_mouse_handler`):
+
+```rust
+// driver.rs - 平台输入驱动
+pub struct PlatformInputDriver {
+    fd: c_int,
+    current_x: f32,
+    current_y: f32,
+}
+
+impl PlatformInputDriver {
+    pub fn new(path: &str) -> Option<Self> { /* ... */ }
+    
+    pub fn read_events(&mut self) -> Vec<InputEvent> {
+        let mut events = Vec::new();
+        loop {
+            match self.read_single_event() {
+                Some(event) => events.push(event),
+                None => break,
+            }
+        }
+        events
+    }
+    
+    fn convert_raw_event(&mut self, raw: &RawInputEvent) -> Option<InputEvent> {
+        match raw.type_ {
+            EV_KEY => { /* 键盘/按钮 */ }
+            EV_REL => { /* 鼠标移动 */ }
+            EV_ABS => { /* 触摸/绝对坐标 */ }
+            _ => None,
+        }
+    }
+}
+```
+
+FHRE 应用集成 (类似 `sdl_event_handler`):
+
+```rust
+// app.rs - App 生命周期集成
+pub struct App {
+    pub main_world: MainWorld,
+    pub input_events: Vec<InputEvent>,
+    // ...
+}
+
+impl App {
+    pub fn push_input_event(&mut self, event: InputEvent) {
+        self.input_events.push(event);
+    }
+    
+    pub fn update(&mut self) {
+        // 1. 清空 just_* 状态
+        input_clear_system(self.main_world.resources_mut());
+        
+        // 2. 处理输入事件
+        input_process_system(self.main_world.resources_mut(), &self.input_events);
+        
+        // 3. 清空事件队列
+        self.input_events.clear();
+        
+        // 4. 继续其他阶段...
+        self.main_world.run_systems();
+    }
+}
+```
+
+### 5.9 与 LVGL/Bevy 的完整对比
+
+| 特性 | Bevy | LVGL | FHRE |
+|------|------|------|------|
+| 架构模式 | ECS (Resource/Message) | 回调驱动 + 定时器 | **ECS + 事件队列** |
+| 状态管理 | HashSet 资源 | 结构体字段 | **ButtonInput\<T\> 资源** |
+| 事件类型 | Message | lv_indev_data_t | **InputEvent** |
+| 帧处理 | 每帧清空 just_* | 定时器周期性读取 | **App.update() 中处理** |
+| 驱动私有数据 | 不适用 | `lv_indev_set_driver_data()` | **Resource 替代** |
+| 事件触发 | 自动 | `lv_indev_read()` 手动调用 | **App.push_input_event()** |
+| 坐标系统 | 窗口相对 | 屏幕绝对 | **PrimaryScreen 归一化** |
+| SIM 集成 | winit | SDL | **evdev / SDL** |
+
+---
+
+### 5.10 平台输入驱动
+
+#### 5.5.1 Linux evdev 驱动
+
+```rust
+/// evdev 输入驱动
+pub struct EvdevDriver {
+    fd: i32,                    // /dev/input/event* 文件描述符
+    capabilities: Vec<u16>,     // 设备能力
+}
+
+impl EvdevDriver {
+    /// 读取输入事件
+    pub fn read(&mut self) -> Option<InputEvent> {
+        let mut event = input_event { type: 0, code: 0, value: 0 };
+        
+        if read(self.fd, &mut event as *mut _ as *mut _, size_of_val(&event)) > 0 {
+            match event.type {
+                EV_KEY => {
+                    let state = if event.value == 1 { 
+                        ButtonState::Pressed 
+                    } else { 
+                        ButtonState::Released 
+                    };
+                    // 转换为 InputEvent::MouseButton 或 InputEvent::Keyboard
+                }
+                EV_REL => {
+                    // 相对移动 (鼠标)
+                    InputEvent::MouseMotion { ... }
+                }
+                EV_ABS => {
+                    // 绝对坐标 (触摸)
+                    InputEvent::Touch { ... }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+```
+
+#### 5.5.2 NuttX 输入驱动
+
+```rust
+/// NuttX 输入驱动
+pub struct NuttxInputDriver {
+    fd: i32,                    // 输入设备文件描述符
+}
+
+impl NuttxInputDriver {
+    /// 读取输入事件
+    pub fn read(&mut self) -> Option<InputEvent> {
+        let mut buf = [0u8; 16];
+        
+        if read(self.fd, buf.as_mut_ptr() as *mut _, buf.len()) > 0 {
+            // 解析 NuttX input_event 格式
+            // 转换为 InputEvent
+        } else {
+            None
+        }
+    }
+}
+```
+
+### 5.6 常用 API
+
+#### 5.6.1 鼠标输入
+
+```rust
+fn mouse_system(
+    mouse: Res<ButtonInput<MouseButton>>,
+    scroll: Res<AccumulatedMouseScroll>,
+) {
+    // 检查按键状态
+    if mouse.pressed(MouseButton::Left) { }
+    if mouse.just_pressed(MouseButton::Right) { }
+    if mouse.just_released(MouseButton::Middle) { }
+    
+    // 获取滚轮滚动
+    let scroll_delta = scroll.delta;
+}
+```
+
+#### 5.6.2 键盘输入
+
+```rust
+fn keyboard_system(
+    keys: Res<ButtonInput<KeyCode>>,
+) {
+    // WASD 移动
+    if keys.pressed(KeyCode::KeyW) { }
+    if keys.pressed(KeyCode::KeyA) { }
+    if keys.just_pressed(KeyCode::Escape) { } // 暂停
+    
+    // 组合键
+    if keys.pressed(KeyCode::ControlLeft) 
+        && keys.just_pressed(KeyCode::KeyC) 
+    {
+        println!("Copy!");
+    }
+}
+```
+
+#### 5.6.3 触摸输入
+
+```rust
+fn touch_system(
+    touches: Res<Touches>,
+) {
+    // 获取所有活动触摸
+    for touch in touches.pressed.values() {
+        let pos = touch.position;
+        let delta = touch.delta();      // 移动量
+        let distance = touch.distance(); // 总位移
+    }
+    
+    // 检查特定触摸
+    if touches.just_pressed(id) { }
+    if let Some(touch) = touches.just_released.get(&id) { }
+}
+```
+
+### 5.7 输入系统与 UI 集成
+
+FHRE 的输入系统与 UI 控件系统紧密集成：
+
+```
+InputEvent (位置)
+    ↓
+Hit Testing (指针命中测试)
+    ↓
+查找被点击的 Node/控件
+    ↓
+发送 UI 事件 (Click, Hover, Drag)
+    ↓
+控件响应事件
+```
+
+```rust
+/// 命中测试系统
+fn hit_test_system(
+    mouse: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    mut ui_events: EventWriter<UiEvent>,
+    nodes: Query<(Entity, &Node, &Transform3D)>,
+) {
+    // 获取鼠标/触摸位置
+    let pointer_pos = get_pointer_position(&mouse, &touches);
+    
+    if let Some(pos) = pointer_pos {
+        // 查找命中的节点
+        for (entity, node, transform) in nodes.iter() {
+            if is_point_in_rect(pos, transform.position, node.size) {
+                // 发送 UI 事件
+                ui_events.send(UiEvent::Hover { entity, position: pos });
+            }
+        }
+    }
+}
+```
+
+---
+
+## 6. 渲染管线
+
+### 6.1 架构分层
 
 FHRE 的渲染管线采用三层架构，实现职责分离：
 
@@ -452,7 +1163,7 @@ FHRE 的渲染管线采用三层架构，实现职责分离：
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 5.2 渲染阶段系统
+### 6.2 渲染阶段系统
 
 FHRE 的渲染阶段系统借鉴 Bevy 的设计：
 
@@ -472,7 +1183,7 @@ FHRE 的渲染阶段系统借鉴 Bevy 的设计：
 6. Ui            →  UI 覆盖层（最上层）
 ```
 
-### 5.3 渲染阶段类型
+### 6.3 渲染阶段类型
 
 ```rust
 pub enum RenderPhaseType {
@@ -500,9 +1211,9 @@ pub struct RenderPhase {
 }
 ```
 
-### 5.4 Pipeline 模块详解
+### 6.4 Pipeline 模块详解
 
-#### 5.4.1 模块结构
+#### 6.4.1 模块结构
 
 ```
 pipeline/
@@ -513,7 +1224,7 @@ pipeline/
 └── backend.rs       # 软件渲染后端（三角形光栅化）
 ```
 
-#### 5.4.2 3D 渲染与背面剔除
+#### 6.4.2 3D 渲染与背面剔除
 
 FHRE 支持简单的 3D 渲染，使用画家算法（Painter's Algorithm）进行深度排序：
 
@@ -570,7 +1281,7 @@ let avg_view_z = (view_z[v0] + view_z[v1] + view_z[v2] + view_z[v3]) / 4.0;
 visible_faces.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 ```
 
-#### 5.4.2 SoftwareBackend (CPU 软件渲染)
+#### 6.4.3 SoftwareBackend (CPU 软件渲染)
 
 ```rust
 /// Software rendering backend - simulates a GPU pipeline on CPU
@@ -604,7 +1315,7 @@ impl SoftwareBackend {
 }
 ```
 
-#### 5.4.3 Renderer Trait (未来扩展)
+#### 6.4.4 Renderer Trait (未来扩展)
 
 ```rust
 /// Renderer trait - implemented by all rendering backends
@@ -624,7 +1335,7 @@ pub enum RendererType {
 }
 ```
 
-### 5.5 RenderWorld 与 Pipeline 集成
+### 6.5 RenderWorld 与 Pipeline 集成
 
 ```rust
 pub struct RenderWorld {
@@ -646,7 +1357,7 @@ impl RenderWorld {
 }
 ```
 
-### 5.6 与 Bevy 的对比
+### 6.6 与 Bevy 的对比
 
 | 特性 | Bevy | FHRE |
 |------|------|------|
@@ -658,9 +1369,9 @@ impl RenderWorld {
 
 ---
 
-## 6. 模块详解
+## 7. 模块详解
 
-### 6.1 项目结构
+### 7.1 项目结构
 
 ```
 FeatherOS/
@@ -729,7 +1440,7 @@ FeatherOS/
 │   │           └── lib.rs             # 库入口
 ```
 
-### 6.2 模块化设计原则
+### 7.2 模块化设计原则
 
 **文件夹/mod.rs 结构：**
 
@@ -758,9 +1469,9 @@ pub use system::{System, IntoSystem};
 
 ---
 
-## 7. 控件系统
+## 8. 控件系统
 
-### 7.1 架构对比
+### 8.1 架构对比
 
 | 特性 | LVGL | Bevy | FHRE (设计目标) |
 |------|------|------|-----------------|
@@ -775,7 +1486,7 @@ pub use system::{System, IntoSystem};
 | **动画系统** | 属性动画 | 纹理图集/程序化 | **属性动画 + 程序化** |
 | **3D 支持** | 无 | 完整 3D | **2.5D (简化 3D)** |
 
-### 7.2 最小单位：Node
+### 8.2 最小单位：Node
 
 FHRE 的最小单位是 **Node**，采用 ECS 架构，扁平化设计：
 
@@ -802,7 +1513,7 @@ pub struct Node {
 }
 ```
 
-### 7.3 控件类型层次
+### 8.3 控件类型层次
 
 ```
 Control (基础控件)
@@ -831,7 +1542,7 @@ Control (基础控件)
     └── View3d (3D 视图容器)
 ```
 
-### 7.4 控件创建示例
+### 8.4 控件创建示例
 
 ```rust
 // 纯 2D 控件（默认）
