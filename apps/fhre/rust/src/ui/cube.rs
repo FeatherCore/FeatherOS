@@ -145,6 +145,29 @@ impl Component for Cube {
     }
 }
 
+impl crate::animation::AnimationReceiver for Cube {
+    fn apply_animation(&mut self, property: crate::animation::AnimationProperty, value: f32) {
+        use crate::animation::AnimationProperty;
+        match property {
+            // === 3D Rotation (Euler angles in degrees) ===
+            AnimationProperty::RotationX => { self.rotation.x = value; }
+            AnimationProperty::RotationY => { self.rotation.y = value; }
+            AnimationProperty::RotationZ => { self.rotation.z = value; }
+
+            // === Scale (uniform: size field) ===
+            AnimationProperty::ScaleX | AnimationProperty::ScaleY | AnimationProperty::ScaleZ => {
+                self.size = value;
+            }
+
+            // === Translation (position is in Transform3D, not Cube) ===
+            AnimationProperty::TranslationX | AnimationProperty::TranslationY | AnimationProperty::TranslationZ => {}
+
+            // === Unsupported for Cube ===
+            _ => {}
+        }
+    }
+}
+
 impl crate::render_world::RenderComponent for Cube {
     fn generate_render_commands(&self, transform: &crate::node::Transform3D, view: &crate::render_world::View) -> Vec<crate::render_world::RenderCommand> {
         use crate::math::{Vec2, Vec3, Mat4};

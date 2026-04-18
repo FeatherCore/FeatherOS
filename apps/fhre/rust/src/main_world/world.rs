@@ -20,12 +20,20 @@ pub struct MainWorld {
     entities: Vec<Entity>,
     /// Component storage: TypeId -> EntityId -> Component
     components: BTreeMap<TypeId, BTreeMap<u64, Box<dyn Any>>>,
-    /// Systems to run
-    systems: Vec<Box<dyn System>>,
     /// Startup systems (run once at app start)
     startup_systems: Vec<Box<dyn System>>,
+    /// PreUpdate systems (input handling, etc.)
+    pre_update_systems: Vec<Box<dyn System>>,
+    /// Update systems (game logic, animation, etc.)
+    update_systems: Vec<Box<dyn System>>,
+    /// PostUpdate systems (transform propagation, etc.)
+    post_update_systems: Vec<Box<dyn System>>,
     /// Global resources
     resources: Resources,
+    /// Pending commands from systems
+    pub(crate) pending_commands: super::commands::CommandsState,
+    /// Change detection tracking
+    change_detection: super::change_detection::ChangeDetection,
 }
 
 impl MainWorld {
@@ -35,9 +43,13 @@ impl MainWorld {
             next_entity_id: 0,
             entities: Vec::new(),
             components: BTreeMap::new(),
-            systems: Vec::new(),
             startup_systems: Vec::new(),
+            pre_update_systems: Vec::new(),
+            update_systems: Vec::new(),
+            post_update_systems: Vec::new(),
             resources: Resources::new(),
+            pending_commands: super::commands::CommandsState::default(),
+            change_detection: super::change_detection::ChangeDetection::new(),
         }
     }
 
@@ -69,6 +81,7 @@ impl MainWorld {
             .entry(type_id)
             .or_insert_with(BTreeMap::new);
         storage.insert(entity.id(), Box::new(component));
+        self.change_detection.mark_added::<T>(entity);
     }
 
     /// Get a component reference
@@ -92,6 +105,7 @@ impl MainWorld {
     /// Remove a component from an entity
     pub fn remove_component<T: Component>(&mut self, entity: Entity) -> Option<T> {
         let type_id = TypeId::of::<T>();
+        self.change_detection.remove::<T>(entity);
         self.components
             .get_mut(&type_id)
             .and_then(|storage| storage.remove(&entity.id()))
@@ -145,18 +159,27 @@ impl MainWorld {
         }
     }
 
-    /// Add a system to the world (runs every frame)
+    /// Add a system to the Update schedule (runs every frame)
     pub fn add_system<S>(&mut self, system: S) 
     where
         S: IntoSystem + 'static,
         S::System: System + 'static,
     {
-        self.systems.push(Box::new(system.into_system()));
+        self.update_systems.push(Box::new(system.into_system()));
     }
 
-    /// Add a boxed system directly (internal use)
+    /// Add a boxed system to a specific schedule stage
+    pub fn add_boxed_system_to_stage(&mut self, stage: &str, system: Box<dyn System>) {
+        match stage {
+            "PreUpdate" => self.pre_update_systems.push(system),
+            "PostUpdate" => self.post_update_systems.push(system),
+            _ => self.update_systems.push(system),
+        }
+    }
+
+    /// Add a boxed system to the Update schedule (backward compat)
     pub fn add_boxed_system(&mut self, system: Box<dyn System>) {
-        self.systems.push(system);
+        self.update_systems.push(system);
     }
 
     /// Add a boxed startup system directly (internal use)
@@ -172,35 +195,72 @@ impl MainWorld {
         self.startup_systems.push(Box::new(system.into_system()));
     }
 
+    /// Drain pending commands from systems and return them
+    pub fn drain_pending_commands(&mut self) -> super::commands::CommandsState {
+        core::mem::take(&mut self.pending_commands)
+    }
+
+    /// Apply all pending commands
+    pub fn apply_commands(&mut self) {
+        let mut commands = core::mem::take(&mut self.pending_commands);
+        commands.apply(self);
+    }
+
+    /// Flush commands from a system state into pending_commands
+    pub(crate) fn flush_commands_from_state(&mut self, state: &mut dyn core::any::Any) {
+        use super::commands::CommandsState;
+        if let Some(cmd_state) = state.downcast_mut::<CommandsState>() {
+            cmd_state.drain_into(&mut self.pending_commands);
+        }
+    }
+
     /// Run startup systems (should be called once at app start)
     pub fn run_startup_systems(&mut self) {
-        // Take systems out temporarily to avoid borrow issues
         let mut systems: Vec<Box<dyn System>> = Vec::new();
         core::mem::swap(&mut systems, &mut self.startup_systems);
         
-        // Run each system
         for system in systems.iter_mut() {
             system.run(self);
         }
-        
-        // Startup systems don't get put back - they run only once
-        // Clear them to free memory
-        self.startup_systems.clear();
+
+        self.apply_commands();
     }
 
-    /// Run all systems (runs every frame)
+    /// Run all systems in schedule order: PreUpdate → Update → PostUpdate
+    ///
+    /// Commands are applied at each stage boundary.
+    /// Change detection tick is incremented at the start of each frame.
     pub fn run_systems(&mut self) {
-        // Take systems out temporarily to avoid borrow issues
-        let mut systems: Vec<Box<dyn System>> = Vec::new();
-        core::mem::swap(&mut systems, &mut self.systems);
-        
-        // Run each system
-        for system in systems.iter_mut() {
-            system.run(self);
+        self.change_detection.increment_tick();
+        {
+            let mut temp: Vec<Box<dyn System>> = Vec::new();
+            core::mem::swap(&mut self.pre_update_systems, &mut temp);
+            for system in temp.iter_mut() {
+                system.run(self);
+            }
+            core::mem::swap(&mut self.pre_update_systems, &mut temp);
         }
-        
-        // Put systems back so they run next frame too
-        self.systems = systems;
+        self.apply_commands();
+
+        {
+            let mut temp: Vec<Box<dyn System>> = Vec::new();
+            core::mem::swap(&mut self.update_systems, &mut temp);
+            for system in temp.iter_mut() {
+                system.run(self);
+            }
+            core::mem::swap(&mut self.update_systems, &mut temp);
+        }
+        self.apply_commands();
+
+        {
+            let mut temp: Vec<Box<dyn System>> = Vec::new();
+            core::mem::swap(&mut self.post_update_systems, &mut temp);
+            for system in temp.iter_mut() {
+                system.run(self);
+            }
+            core::mem::swap(&mut self.post_update_systems, &mut temp);
+        }
+        self.apply_commands();
     }
 
     /// Get reference to resources
@@ -222,6 +282,16 @@ impl MainWorld {
     pub fn clear(&mut self) {
         self.entities.clear();
         self.components.clear();
+    }
+
+    /// Get reference to change detection
+    pub fn change_detection(&self) -> &super::change_detection::ChangeDetection {
+        &self.change_detection
+    }
+
+    /// Get mutable reference to change detection
+    pub fn change_detection_mut(&mut self) -> &mut super::change_detection::ChangeDetection {
+        &mut self.change_detection
     }
 }
 

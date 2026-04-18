@@ -8,6 +8,8 @@ use crate::render_world::RenderWorld;
 use crate::resources::{Time, PrimaryScreen};
 use crate::plugin::{Plugin, PluginGroup};
 use crate::extract::extract_renderable_components;
+use crate::sync::{entity_sync_system, detect_sync_changes_system, PendingSyncEntity};
+use crate::extract::ExtractSchedule;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -18,20 +20,6 @@ pub use crate::schedule::{Startup as ScheduleStartup, PreUpdate as SchedulePreUp
 
 /// FHRE Version
 pub const FHRE_VERSION: &str = "2.0.0";
-
-/// Default UI Camera
-pub struct DefaultUiCamera {
-    pub entity: crate::main_world::Entity,
-}
-
-impl crate::resources::Resource for DefaultUiCamera {}
-
-/// Default Game Camera
-pub struct DefaultGameCamera {
-    pub entity: crate::main_world::Entity,
-}
-
-impl crate::resources::Resource for DefaultGameCamera {}
 
 /// App Builder for fluent API
 pub struct AppBuilder;
@@ -168,7 +156,7 @@ impl App {
     /// ```rust
     /// use fhre::prelude::*;
     ///
-    /// app.add_systems(Update, system1::<Res<MyResource>, _>(my_system));
+    /// app.add_systems(Update, my_system);
     /// ```
     pub fn add_systems(&mut self, _schedule: impl ScheduleLabel, systems: impl IntoSystems) -> &mut Self {
         systems.add_to_app(self, _schedule);
@@ -182,7 +170,7 @@ impl App {
     ///
     /// # Example
     /// ```rust
-    /// app.set_runner(WindowRunner::new());
+    /// app.set_runner(MyCustomRunner);
     /// ```
     pub fn set_runner(&mut self, runner: impl AppRunner + 'static) -> &mut Self {
         self.runner = Some(Box::new(runner));
@@ -239,11 +227,29 @@ impl App {
         // Run Main World systems
         self.main_world.run_systems();
 
-        // Extract phase
+        // =========================================================================
+        // Extract Phase (NEW: aligned with Bevy's dual-world architecture)
+        // =========================================================================
+
+        // Step 1: Detect new SyncToRenderWorld markers
+        detect_sync_changes_system(&mut self.main_world);
+
+        // Step 2: Sync entities between Main World and Render World
+        entity_sync_system(&mut self.main_world, &mut self.render_world);
+
+        // Step 3: Run registered extract systems from ExtractSchedule
         self.render_world.clear_views();
+        if let Some(schedule) = self.main_world.resources().get::<ExtractSchedule>() {
+            let schedule = schedule.clone();
+            schedule.run(&self.main_world, &mut self.render_world);
+        }
+
+        // Step 4: Legacy extract (for backward compatibility)
         extract_renderable_components(&self.main_world, &mut self.render_world);
 
-        // Render phase
+        // =========================================================================
+        // Render Phase
+        // =========================================================================
         self.render_world.execute_render();
 
         // Clear for next frame
@@ -255,107 +261,48 @@ impl App {
     ///
     /// This is used when the Demo wants to control the main loop.
     pub fn update_and_render(&mut self) {
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] update_and_render start\n\0".as_ptr());
-        }
+        // Initialize plugins on first call (same as run()/update())
+        self.initialize_plugins();
 
-        // 1. Run startup systems (only on first frame)
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 1: Running startup systems...\n\0".as_ptr());
-        }
+        // Run startup systems (only on first frame)
         self.main_world.run_startup_systems();
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 1: Done\n\0".as_ptr());
-        }
 
-        // 2. Update time
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 2: Updating time...\n\0".as_ptr());
-        }
+        // Update time
         if let Some(time) = self.main_world.resources_mut().get_mut::<Time>() {
             time.update(1.0 / 60.0);
         }
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 2: Done\n\0".as_ptr());
-        }
 
-        // 3. Run Main World systems
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 3: Running Main World systems...\n\0".as_ptr());
-        }
+        // Run Main World systems
         self.main_world.run_systems();
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 3: Done\n\0".as_ptr());
-        }
 
-        // 4. Extract phase
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 4: Extract phase...\n\0".as_ptr());
-        }
+        // =========================================================================
+        // Extract Phase (NEW: aligned with Bevy's dual-world architecture)
+        // =========================================================================
+
+        // Step 1: Detect new SyncToRenderWorld markers
+        detect_sync_changes_system(&mut self.main_world);
+
+        // Step 2: Sync entities between Main World and Render World
+        entity_sync_system(&mut self.main_world, &mut self.render_world);
+
+        // Step 3: Run registered extract systems from ExtractSchedule
         self.render_world.clear_views();
+        if let Some(schedule) = self.main_world.resources().get::<ExtractSchedule>() {
+            let schedule = schedule.clone();
+            schedule.run(&self.main_world, &mut self.render_world);
+        }
+
+        // Step 4: Legacy extract (for backward compatibility)
         extract_renderable_components(&self.main_world, &mut self.render_world);
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 4: Done\n\0".as_ptr());
-        }
 
-        // 5. Render phase
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 5: Render phase...\n\0".as_ptr());
-        }
+        // =========================================================================
+        // Render Phase
+        // =========================================================================
         self.render_world.execute_render();
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 5: Done\n\0".as_ptr());
-        }
 
-        // 6. Clear for next frame
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] Step 6: Clear render commands...\n\0".as_ptr());
-        }
+        // Clear for next frame
         self.render_world.clear_commands();
         self.render_world.clear_views();
-
-        unsafe {
-            extern "C" {
-                fn printf(format: *const u8, ...) -> i32;
-            }
-            printf(b"[APP] update_and_render end\n\0".as_ptr());
-        }
     }
 
     /// Get the framebuffer from Render World
@@ -377,17 +324,6 @@ impl App {
     ///
     /// This is used by the runner to determine when to stop the main loop.
     pub fn is_running(&self) -> bool {
-        // Check if window resource exists and is open
-        #[cfg(feature = "sim")]
-        {
-            use crate::window::X11Window;
-            use crate::app::window_runner::WindowResource;
-            if let Some(window) = self.main_world.resources().get::<X11Window>() {
-                return window.is_open();
-            }
-        }
-        
-        // Default: app is running
         true
     }
 }
@@ -433,7 +369,6 @@ pub trait IntoSystems {
     fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel);
 }
 
-// Single system - any type that implements IntoSystem
 impl<S> IntoSystems for S
 where
     S: crate::main_world::IntoSystem + 'static,
@@ -441,38 +376,27 @@ where
 {
     fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel) {
         let system = crate::main_world::IntoSystem::into_system(self);
-        let system_box = Box::new(system);
-        
-        // Add to appropriate system list based on schedule label
+        let system_box = alloc::boxed::Box::new(system);
         match schedule.label() {
             "Startup" => app.main_world.add_startup_system_boxed(system_box),
-            _ => app.main_world.add_boxed_system(system_box),
+            stage => app.main_world.add_boxed_system_to_stage(stage, system_box),
         }
     }
 }
 
-// Tuple of 2 systems
-impl<A, B> IntoSystems for (A, B)
-where
-    A: crate::main_world::IntoSystem + 'static,
-    B: crate::main_world::IntoSystem + 'static,
-{
-    fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel) {
-        self.0.add_to_app(app, &schedule);
-        self.1.add_to_app(app, schedule);
-    }
+macro_rules! impl_into_systems_tuple {
+    ($($name:ident),+) => {
+        impl<$($name,)+> IntoSystems for ($($name,)+)
+        where
+            $($name: IntoSystems,)+
+        {
+            fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel) {
+                let ($($name,)+) = self;
+                $($name.add_to_app(app, &schedule);)+
+            }
+        }
+    };
 }
 
-// Tuple of 3 systems
-impl<A, B, C> IntoSystems for (A, B, C)
-where
-    A: crate::main_world::IntoSystem + 'static,
-    B: crate::main_world::IntoSystem + 'static,
-    C: crate::main_world::IntoSystem + 'static,
-{
-    fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel) {
-        self.0.add_to_app(app, &schedule);
-        self.1.add_to_app(app, &schedule);
-        self.2.add_to_app(app, schedule);
-    }
-}
+impl_into_systems_tuple!(A, B);
+impl_into_systems_tuple!(A, B, C);

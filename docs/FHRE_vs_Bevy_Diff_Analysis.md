@@ -404,11 +404,15 @@ examples/fhre/rust/src/
 - ✅ **AnimationPlugin** (2026-04-17 完成)
 - ✅ AnimationPlugin 实现 Plugin trait
 - ✅ AnimationResources 作为 Resource 注册
+- ✅ **EventPlugin + 标准事件类型** (2026-04-17 完成)
+- ✅ EventReader / EventWriter 实现
+- ✅ 标准输入事件: KeyboardInput, MouseButtonInput, MouseMotion, MouseWheel
+- ✅ 窗口事件: WindowResized, WindowCloseRequested
+- ✅ **DefaultPlugins (CoreDefaultPlugins)** (2026-04-17 完成)
+- ✅ 包含 EventPlugin + AnimationPlugin
 
 ### 待改进的部分 ⚠️
-- ⏳ Demo 使用 AnimationPlayer 替代手动旋转 (下一步)
-- ⏳ 事件系统应完善 (EventReader/EventWriter)
-- ⏳ 应提供 DefaultPlugins
+- ⏳ Demo 使用 AnimationPlayer 替代手动旋转
 
 ### 实现进度
 
@@ -416,16 +420,16 @@ examples/fhre/rust/src/
 |------|------|------|
 | WindowPlugin + WindowRunner | **已完成** | 2026-04-17 |
 | AnimationPlugin | **已完成** | 2026-04-17 |
+| EventPlugin + 标准事件类型 | **已完成** | 2026-04-17 |
+| DefaultPlugins (CoreDefaultPlugins) | **已完成** | 2026-04-17 |
 | 集成 Animation 到 Demo | 待开始 | - |
-| 完善 Event 系统 | 待开始 | - |
-| 创建 DefaultPlugins | 待开始 | - |
 
 ### 新增/修改文件
 
 ```
 apps/fhre/rust/src/window/
 ├── mod.rs           # 更新: 添加 WindowPlugin
-└── x11.rs           # 新增: X11Window 实现 (从 examples 移入)
+└── x11.rs           # 新增: X11Window 实现
 
 apps/fhre/rust/src/app/
 ├── mod.rs           # 更新: 导出 window_runner 模块
@@ -433,11 +437,58 @@ apps/fhre/rust/src/app/
 
 apps/fhre/rust/src/animation/
 └── mod.rs           # 更新: AnimationPlugin 实现 Plugin trait
+
+apps/fhre/rust/src/event/
+├── mod.rs           # 更新: 添加 EventPlugin + input_events 子模块
+├── events.rs        # 已有: Events 存储
+├── event_reader.rs  # 已有: EventReader
+└── event_writer.rs  # 已有: EventWriter
+
+apps/fhre/rust/src/plugin/
+├── default_plugins.rs # 新增: CoreDefaultPlugins (EventPlugin + AnimationPlugin)
+└── mod.rs            # 更新: 导出 CoreDefaultPlugins, WinitDefaultPlugins
 ```
 
 ### 下一步行动
 1. ~~创建 `WindowPlugin` + `WindowRunner`~~ ✅ **已完成**
 2. ~~创建 `AnimationPlugin`~~ ✅ **已完成**
-3. 重构 Demo 使用 `AnimationPlayer`
-4. 完善 `EventReader/EventWriter`
-5. 整理 `DefaultPlugins`
+3. ~~完善 `EventReader/EventWriter` + `EventPlugin`~~ ✅ **已完成**
+4. ~~创建 `DefaultPlugins`~~ ✅ **已完成**
+5. 重构 Demo 使用 `AnimationPlayer`
+
+---
+
+## 6. 最终状态总结
+
+### 架构对齐度更新
+
+| 模块 | 对齐程度 | 说明 |
+|------|---------|------|
+| **Plugin 系统** | **✅ 95%** | Plugin trait, PluginGroup, DefaultPlugins |
+| **ECS 系统参数** | **✅ 90%** | Res/ResMut/Query/Commands |
+| **Schedule 调度** | **✅ 85%** | Startup/PreUpdate/Update/PostUpdate |
+| **输入系统** | **✅ 80%** | ButtonInput + Event 系统 |
+| **动画系统** | **✅ 70%** | AnimationPlugin + AnimationResources |
+| **窗口管理** | **✅ 90%** | WindowPlugin + WindowRunner |
+
+### 可用的 Plugins
+
+```rust
+// 方式 1: 手动添加每个插件
+App::new(640, 480)
+    .add_plugin(EventPlugin)
+    .add_plugin(AnimationPlugin)
+    .add_plugin(WindowPlugin::new(640, 480, "App"))
+    .run();
+
+// 方式 2: 使用 DefaultPlugins (不包含 WindowPlugin)
+App::new(640, 480)
+    .add_plugins(CoreDefaultPlugins)   // Event + Animation
+    .add_plugin(WindowPlugin::new(640, 480, "App"))
+    .run();
+
+// 方式 3: 使用 WinitDefaultPlugins (包含 WinitPlugin)
+App::new(640, 480)
+    .add_plugins(WinitDefaultPlugins)  // Winit + Input + Time
+    .run();
+```

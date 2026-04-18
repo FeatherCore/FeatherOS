@@ -269,10 +269,6 @@ pub struct Camera3D {
     pub far: f32,
     /// 背景颜色
     pub background_color: crate::math::Color,
-    /// 是否正交投影
-    pub orthographic: bool,
-    /// 正交投影尺寸
-    pub orthographic_size: f32,
     /// 视口（归一化坐标）
     pub viewport: crate::math::Rect,
     /// 渲染深度（排序用）
@@ -288,8 +284,6 @@ impl Camera3D {
             near: 0.1,
             far: 1000.0,
             background_color: crate::math::Color::BLACK,
-            orthographic: false,
-            orthographic_size: 5.0,
             viewport: crate::math::Rect::new(0.0, 0.0, 1.0, 1.0),
             depth: 0,
             culling_mask: 0xFFFFFFFF,
@@ -304,12 +298,6 @@ impl Camera3D {
     pub fn with_clip(mut self, near: f32, far: f32) -> Self {
         self.near = near;
         self.far = far;
-        self
-    }
-
-    pub fn orthographic(mut self, size: f32) -> Self {
-        self.orthographic = true;
-        self.orthographic_size = size;
         self
     }
 

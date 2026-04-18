@@ -47,9 +47,9 @@ pub use easing::{Easing, EasingFn};
 pub use player::{AnimationPlayer, ActiveAnimation, RepeatAnimation, AnimationState};
 pub use graph::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex, BlendNode, ClipNode};
 pub use transition::{AnimationTransitions, AnimationTransition};
-pub use property::{AnimationProperty, AnimationTargetId, AnimatedField};
+pub use property::{AnimationProperty, AnimationTargetId, AnimatedField, AnimationReceiver};
 
-use crate::main_world::{Component, Entity};
+use crate::main_world::{Component, Entity, Res, ResMut, Query, system2, system3};
 use crate::resources::Time;
 use crate::resources::Resource;
 use alloc::vec::Vec;
@@ -90,14 +90,108 @@ use crate::app::{App, Update};
 
 impl Plugin for AnimationPlugin {
     fn build(&self, app: &mut App) {
-        // Insert AnimationResources as a global resource
-        app.insert_resource(Self::init());
-        
-        // Register animate_system to run every frame in Update schedule
-        // Note: This system will be called by App's run_systems()
-        unsafe {
-            extern "C" { fn printf(format: *const u8, ...) -> i32; }
-            printf(b"[ANIMATION_PLUGIN] Initialized - AnimationResources registered\n\0".as_ptr());
+        app.insert_resource(Self::init())
+            .add_systems(Update, system3::<Res<Time>, Res<AnimationResources>, Query<AnimationPlayer>, _>(advance_animations))
+            .add_systems(Update, system2::<Res<AnimationResources>, Query<AnimationPlayer>, _>(animate_targets));
+    }
+}
+
+/// System: Advance all active animations (update playback time)
+///
+/// Equivalent to Bevy's `advance_animations`. Updates AnimationPlayer time
+/// for all entities that have an AnimationPlayer component. Handles looping,
+/// pausing, and speed.
+///
+/// Registered automatically by `AnimationPlugin`. Users should NOT need to
+/// call this manually.
+pub fn advance_animations(time: Res<Time>, anim_resources: Res<AnimationResources>, mut players: Query<AnimationPlayer>) {
+    let delta = time.delta();
+    for mut player in players.iter_mut() {
+        player.update_time(delta, &anim_resources);
+    }
+}
+
+/// System: Sample animation curves and store values in ActiveAnimation.sampled_properties
+///
+/// Equivalent to Bevy's `animate_targets` (sampling phase). For each entity with
+/// an active AnimationPlayer:
+/// 1. Gets the playing animation clip from AnimationResources
+/// 2. Samples each curve at the current playback time
+/// 3. Stores sampled values in `ActiveAnimation.sampled_properties`
+///
+/// Component-specific apply happens separately via `apply_animation_to<T>` or
+/// by the component implementing `AnimationTarget`.
+///
+/// Registered automatically by `AnimationPlugin`.
+pub fn animate_targets(
+    anim_resources: Res<AnimationResources>,
+    mut players: Query<AnimationPlayer>,
+) {
+    for mut player in players.iter_mut() {
+        if let Some(anim) = player.animation_mut(0) {
+            if anim.clip_handle.is_null() { continue; }
+
+            anim.sampled_properties.clear();
+
+            if let Some(clip) = anim_resources.get_clip(&anim.clip_handle) {
+                if let Some(curves) = clip.curves_for_target(anim.target_id) {
+                    for property_curve in curves.iter() {
+                        if let Some(value) = property_curve.curve.sample(anim.time) {
+                            anim.sampled_properties.insert(property_curve.property, value);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Apply sampled animation values from AnimationPlayer to a component implementing AnimationReceiver
+///
+/// Internal helper used by `apply_animations<T>`.
+fn apply_sampled_to<T: AnimationReceiver>(player: &AnimationPlayer, target: &mut T) {
+    if let Some(anim) = player.animation(0) {
+        for (&property, &value) in anim.sampled_properties.iter() {
+            target.apply_animation(property, value);
+        }
+    }
+}
+
+/// Generic Phase 3 system: Apply sampled animation values to any `AnimationReceiver` component (Entity-matched)
+///
+/// This is a **template function** — instantiate it for each animatable component type:
+///
+/// ```ignore
+/// app.add_systems(Update, system2::<Query<AnimationPlayer>, Query<Cube>, _>(apply_animations::<Cube>));
+/// app.add_systems(Update, system2::<Query<AnimationPlayer>, Query<SoccerBall>, _>(apply_animations::<SoccerBall>));
+/// ```
+///
+/// # Design (aligned with Bevy's `animate_targets`)
+///
+/// Bevy merges sampling + applying into a single `animate_targets` system that uses
+/// `AnimationCurveEvaluator` trait objects for type-erased property application.
+/// FHRE achieves the same goal without reflection by providing this **generic template**:
+/// - `AnimationPlugin` registers only Phase 1 (time) + Phase 2 (sampling) — zero business dependency
+/// - Phase 3 is registered per-component-type via `apply_animations::<T>`
+/// - Entity matching uses `iter_mut_with_entities()` + `get_mut(entity)` — correct association
+///
+/// # Why not hardcode in AnimationPlugin?
+///
+/// Hardcoding `Cube`/`SoccerBall` in AnimationPlugin creates a "god plugin" that must be
+/// modified for every new animatable component. This pattern separates concerns:
+/// - **AnimationPlugin** = pure animation infrastructure (time + curves + sampling)
+/// - **Component owner** (UI plugin, game plugin) = registers which types receive animation
+pub fn apply_animations<T: AnimationReceiver + Component>(
+    mut players: Query<AnimationPlayer>,
+    mut targets: Query<T>,
+) {
+    for (entity, player) in players.iter_with_entities() {
+        if let Some(anim) = player.animation(0) {
+            if !anim.sampled_properties.is_empty() {
+                if let Some(mut target) = targets.get_mut(entity) {
+                    apply_sampled_to(&player, &mut *target);
+                }
+            }
         }
     }
 }

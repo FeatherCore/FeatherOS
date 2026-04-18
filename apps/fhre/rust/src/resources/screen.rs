@@ -1,20 +1,54 @@
-//! Screen Resource
+//! Screen Canvas Resource
 //!
-//! Defines the primary screen and viewport management.
-//! The primary screen is the default render target for FHRE.
+//! Defines the primary screen canvas (幕布) — a 3D object in the main world
+//! that serves as the camera's projection plane.
+//!
+//! # Architecture
+//!
+//! The screen canvas is a flat plane in the 3D main world, positioned in front
+//! of the camera. The camera captures the 3D scene and projects it onto this
+//! canvas. The canvas content is then presented to the user via a presentation
+//! window (X11, framebuffer, etc.).
+//!
+//! By default, the canvas is positioned at the camera's look-at target and
+//! sized to fill the presentation window 1:1. The canvas can be manipulated
+//! (moved closer/further from camera, rotated, etc.) to change what the user
+//! sees in the presentation window.
+//!
+//! ```text
+//! Camera (3D) ──looks at──▶ Screen Canvas (幕布, 3D plane)
+//!                                │
+//!                                │ 1:1 default overlap
+//!                                ▼
+//!                           Presentation Window (X11/FB)
+//! ```
 
-use crate::math::{Rect, Vec2};
+use crate::math::{Rect, Vec2, Vec3};
+use crate::node::Transform3D;
 
-/// Primary Screen Resource
+/// Primary Screen Canvas Resource
 ///
-/// This is the default render target for FHRE.
-/// It defines the main window/screen dimensions and properties.
-/// All rendering happens to this screen by default unless otherwise specified.
+/// The screen canvas is the camera's projection plane in the 3D main world.
+/// It defines where the camera's output is rendered and how it maps to the
+/// presentation window.
+///
+/// # Default Behavior
+///
+/// - Canvas is positioned at z=0 (camera's default look-at target)
+/// - Canvas size matches the presentation window (1:1 pixel mapping)
+/// - Camera looks at the canvas center
+///
+/// # Manipulation
+///
+/// The canvas has a `Transform3D` that can be modified:
+/// - Move closer to camera → zoom-in effect on presentation window
+/// - Move further from camera → zoom-out effect
+/// - Rotate → tilted view
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PrimaryScreen {
-    /// Screen width in pixels
+    /// Screen width in pixels (presentation window size)
     pub width: u32,
-    /// Screen height in pixels
+    /// Screen height in pixels (presentation window size)
     pub height: u32,
     /// Full screen viewport
     pub viewport: Rect,
@@ -22,10 +56,18 @@ pub struct PrimaryScreen {
     pub pixel_density: f32,
     /// Whether the screen is fullscreen
     pub fullscreen: bool,
+    /// 3D transform of the canvas in the main world
+    ///
+    /// Default: positioned at (width/2, height/2, 0) — the camera's look-at target.
+    /// The canvas plane faces the camera (normal along +Z).
+    pub transform: Transform3D,
 }
 
 impl PrimaryScreen {
-    /// Create a new primary screen with given dimensions
+    /// Create a new primary screen canvas with given dimensions
+    ///
+    /// The canvas is positioned at (width/2, height/2, 0) by default,
+    /// which aligns with the camera's default look-at target.
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             width,
@@ -33,6 +75,11 @@ impl PrimaryScreen {
             viewport: Rect::new(0.0, 0.0, width as f32, height as f32),
             pixel_density: 1.0,
             fullscreen: false,
+            transform: Transform3D::from_position(
+                width as f32 / 2.0,
+                height as f32 / 2.0,
+                0.0,
+            ),
         }
     }
 
@@ -46,7 +93,7 @@ impl PrimaryScreen {
         Vec2::new(self.width as f32, self.height as f32)
     }
 
-    /// Get screen center point
+    /// Get screen center point (2D, canvas-local)
     pub fn center(&self) -> Vec2 {
         Vec2::new(self.width as f32 / 2.0, self.height as f32 / 2.0)
     }
@@ -92,6 +139,31 @@ impl PrimaryScreen {
         self
     }
 
+    /// Set custom 3D transform for the canvas (chainable)
+    pub fn with_transform(mut self, transform: Transform3D) -> Self {
+        self.transform = transform;
+        self
+    }
+
+    /// Move the canvas closer to the camera (zoom-in effect)
+    ///
+    /// Increases the Z component of the canvas position.
+    pub fn move_closer(&mut self, delta: f32) {
+        self.transform.position.z += delta;
+    }
+
+    /// Move the canvas further from the camera (zoom-out effect)
+    ///
+    /// Decreases the Z component of the canvas position.
+    pub fn move_further(&mut self, delta: f32) {
+        self.transform.position.z -= delta;
+    }
+
+    /// Get the canvas position in 3D world space
+    pub fn position(&self) -> Vec3 {
+        self.transform.position
+    }
+
     /// Resize the screen (e.g., when window is resized)
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
@@ -102,12 +174,10 @@ impl PrimaryScreen {
 
 impl Default for PrimaryScreen {
     fn default() -> Self {
-        // Default to 800x600, will be overridden by actual display
         Self::new(800, 600)
     }
 }
 
-// PrimaryScreen is a Resource
 impl crate::resources::Resource for PrimaryScreen {}
 
 /// Screen Coordinate Helper

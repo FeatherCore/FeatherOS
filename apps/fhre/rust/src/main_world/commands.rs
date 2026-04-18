@@ -89,14 +89,9 @@ impl<'w, 's> Commands<'w, 's> {
     }
 
     /// Start building a new entity (returns EntityCommands for builder pattern)
-    pub fn spawn(&mut self) -> EntityCommands<'_> {
+    pub fn spawn(&mut self) -> EntityCommands<'_, 'w, 's> {
         let placeholder = self.spawn_empty();
-        // SAFETY: EntityCommands lifetime is bound to Commands lifetime
-        // The 'static lifetime on EntityCommands is a workaround for the type system
-        let commands_static = unsafe { 
-            &mut *(self as *mut Commands<'w, 's> as *mut Commands<'static, 'static>)
-        };
-        EntityCommands::new(placeholder, commands_static)
+        EntityCommands::new(placeholder, self)
     }
 
     /// Insert a component to an entity (using placeholder)
@@ -196,14 +191,14 @@ pub trait Command {
 ///         .insert(Sprite::default());
 /// }
 /// ```
-pub struct EntityCommands<'a> {
+pub struct EntityCommands<'a, 'w, 's> {
     placeholder: Entity,
-    commands: &'a mut Commands<'static, 'static>,
+    commands: &'a mut Commands<'w, 's>,
 }
 
-impl<'a> EntityCommands<'a> {
+impl<'a, 'w, 's> EntityCommands<'a, 'w, 's> {
     /// Create new EntityCommands
-    pub fn new(placeholder: Entity, commands: &'a mut Commands<'static, 'static>) -> Self {
+    pub fn new(placeholder: Entity, commands: &'a mut Commands<'w, 's>) -> Self {
         Self { placeholder, commands }
     }
 
@@ -276,6 +271,13 @@ impl CommandsState {
     /// Check if there are any pending commands
     pub fn is_empty(&self) -> bool {
         self.spawn_queue.is_empty() && self.despawn_queue.is_empty() && self.insert_queue.is_empty()
+    }
+
+    /// Drain all queued commands into another CommandsState
+    pub fn drain_into(&mut self, other: &mut CommandsState) {
+        other.spawn_queue.append(&mut self.spawn_queue);
+        other.despawn_queue.append(&mut self.despawn_queue);
+        other.insert_queue.append(&mut self.insert_queue);
     }
 }
 

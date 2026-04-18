@@ -2,6 +2,14 @@
 //!
 //! Provides change detection for components, aligned with Bevy's change detection system.
 //! Tracks when components are added, modified, or removed.
+//!
+//! # How it works
+//!
+//! Each frame, `ChangeDetection::increment_tick()` advances the tick counter.
+//! When a component is inserted, `mark_added` records the current tick.
+//! When a component is mutably accessed via `Mut<T>`, `mark_changed` records the tick.
+//! `Mut<T>::is_added()` / `is_changed()` compare against `last_run_tick` to determine
+//! if the change happened since the last time this system ran.
 
 use super::component::Component;
 use super::entity::Entity;
@@ -45,6 +53,8 @@ impl ChangeTicks {
 pub struct ChangeDetection {
     /// Current tick counter
     current_tick: u64,
+    /// Last tick when systems started running (updated at start of each frame)
+    last_run_tick: u64,
     /// Component change tracking: (Entity, ComponentType) -> ChangeTicks
     component_ticks: BTreeMap<(Entity, TypeId), ChangeTicks>,
 }
@@ -53,18 +63,25 @@ impl ChangeDetection {
     pub fn new() -> Self {
         Self {
             current_tick: 1,
+            last_run_tick: 0,
             component_ticks: BTreeMap::new(),
         }
     }
 
-    /// Increment tick counter (called each frame)
+    /// Increment tick counter and update last_run_tick (called each frame)
     pub fn increment_tick(&mut self) {
+        self.last_run_tick = self.current_tick;
         self.current_tick = self.current_tick.wrapping_add(1);
     }
 
     /// Get current tick
     pub fn current_tick(&self) -> u64 {
         self.current_tick
+    }
+
+    /// Get last run tick (tick at the start of the current frame)
+    pub fn last_run_tick(&self) -> u64 {
+        self.last_run_tick
     }
 
     /// Mark component as added
@@ -121,14 +138,9 @@ impl Default for ChangeDetection {
 
 /// Wrapper for mutable component access with change detection
 ///
-/// Usage:
-/// ```rust
-/// fn my_system(mut transforms: Query<Mut<Transform>>) {
-///     for mut transform in transforms.iter_mut() {
-///         transform.position.x += 1.0; // Automatically marks as changed
-///     }
-/// }
-/// ```
+/// When `DerefMut` is called, the component is automatically marked as changed.
+/// Use `is_added()` / `is_changed()` to check if the component was modified
+/// since the last time this system ran.
 pub struct Mut<'a, T: Component> {
     value: &'a mut T,
     entity: Entity,
@@ -150,16 +162,14 @@ impl<'a, T: Component> Mut<'a, T> {
         }
     }
 
-    /// Check if component was added this frame
+    /// Check if component was added since last system run
     pub fn is_added(&self) -> bool {
-        // TODO: Need to pass last_run_tick somehow
-        false
+        self.change_detection.is_added::<T>(self.entity, self.change_detection.last_run_tick)
     }
 
-    /// Check if component was changed this frame
+    /// Check if component was changed since last system run
     pub fn is_changed(&self) -> bool {
-        // TODO: Need to pass last_run_tick somehow
-        false
+        self.change_detection.is_changed::<T>(self.entity, self.change_detection.last_run_tick)
     }
 }
 
@@ -173,13 +183,15 @@ impl<'a, T: Component> core::ops::Deref for Mut<'a, T> {
 
 impl<'a, T: Component> core::ops::DerefMut for Mut<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        // Mark as changed when mutably dereferenced
         self.change_detection.mark_changed::<T>(self.entity);
         self.value
     }
 }
 
 /// Ref wrapper for immutable component access with change detection info
+///
+/// Use `is_added()` / `is_changed()` to check if the component was modified
+/// since the last time this system ran, without triggering change marks.
 pub struct Ref<'a, T: Component> {
     value: &'a T,
     entity: Entity,
@@ -197,16 +209,14 @@ impl<'a, T: Component> Ref<'a, T> {
         }
     }
 
-    /// Check if component was added this frame
+    /// Check if component was added since last system run
     pub fn is_added(&self) -> bool {
-        // TODO: Need to pass last_run_tick somehow
-        false
+        self.change_detection.is_added::<T>(self.entity, self.change_detection.last_run_tick)
     }
 
-    /// Check if component was changed this frame
+    /// Check if component was changed since last system run
     pub fn is_changed(&self) -> bool {
-        // TODO: Need to pass last_run_tick somehow
-        false
+        self.change_detection.is_changed::<T>(self.entity, self.change_detection.last_run_tick)
     }
 }
 

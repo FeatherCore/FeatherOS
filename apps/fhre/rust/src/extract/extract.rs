@@ -1,6 +1,15 @@
 //! Extract System Implementation
 //!
 //! The Extract phase syncs data from Main World to Render World.
+//!
+//! # Architecture
+//!
+//! FHRE uses a single 3D perspective camera. The rendering pipeline:
+//! 1. Camera captures the 3D scene via MVP transformation
+//! 2. 3D objects are projected onto the 2D screen canvas (幕布)
+//! 3. 2D UI elements are drawn directly in screen canvas pixel coordinates
+//! 4. Both share the same screen canvas coordinate system (origin top-left, Y-down)
+//! 5. The screen canvas content is then presented to the user via a presentation window
 
 use crate::main_world::MainWorld;
 use crate::render_world::RenderWorld;
@@ -11,7 +20,7 @@ use crate::main_world::{Transform, Sprite};
 use crate::node::Transform2D;
 use crate::node::Transform3D;
 use crate::ui::{Button, Cube, Dodecahedron, SoccerBall};
-use crate::resources::{Time, PrimaryScreen};
+use crate::resources::{Time, PrimaryScreen, Camera, ProjectionType};
 use crate::math::{Vec2, Vec3, Mat4, Color, Rect};
 use alloc::vec::Vec;
 use alloc::boxed::Box;
@@ -50,30 +59,35 @@ impl ExtractSchedule {
 
 /// Extract all renderable components from Main World to Render World
 /// 
-/// This is the main extraction function that handles all renderable components:
-/// - 3D objects: Cube, SoccerBall (with Transform3D)
-/// - 2D UI: Button (with Transform2D)
-/// 
-/// Each component implements RenderComponent trait and generates its own render commands.
-/// The extract system only needs to know which concrete types to query - the rendering
-/// logic stays inside each component.
+/// Single 3D camera architecture:
+/// 1. Create the 3D perspective View from the Camera resource
+///    - Camera target automatically tracks the screen canvas position
+/// 2. 3D objects (Cube, SoccerBall) are projected via Camera MVP → screen canvas coordinates
+/// 3. 2D UI (Button) is drawn directly in screen canvas pixel coordinates
+/// 4. Both share the same screen canvas coordinate system
 pub fn extract_renderable_components(main_world: &MainWorld, render_world: &mut RenderWorld) {
     use crate::render_world::RenderComponent;
     use crate::node::Transform3D;
     
-    // Debug output
     unsafe {
         extern "C" {
             fn printf(format: *const u8, ...) -> i32;
         }
-        printf(b"[EXTRACT] Starting extract_renderable_components\n\0".as_ptr());
+        printf(b"[EXTRACT] Starting extract_renderable_components (single camera)\n\0".as_ptr());
     }
     
-    // Get PrimaryScreen for default view
     let screen = main_world.resources().get::<PrimaryScreen>();
     let (width, height) = screen.map(|s| (s.width as f32, s.height as f32)).unwrap_or((800.0, 600.0));
+    let canvas_pos = screen.map(|s| s.position()).unwrap_or(Vec3::new(width / 2.0, height / 2.0, 0.0));
 
-    // Check if we have any 3D renderable components
+    let view_bundle = if let Some(camera) = main_world.resources().get::<Camera>() {
+        camera_to_view_bundle(&camera, canvas_pos, width, height)
+    } else {
+        create_perspective_view_with_canvas(canvas_pos, width, height)
+    };
+    let view_idx = render_world.add_view(view_bundle);
+    render_world.set_current_view(Some(view_idx));
+    
     let mut has_3d_renderables = false;
     let mut transform3d_count = 0;
     for (entity, _transform) in main_world.query::<Transform3D>() {
@@ -92,13 +106,7 @@ pub fn extract_renderable_components(main_world: &MainWorld, render_world: &mut 
                transform3d_count, has_3d_renderables as i32);
     }
     
-    // Create 3D perspective view if we have 3D renderables
     if has_3d_renderables {
-        let view_bundle = create_perspective_view(width, height);
-        let view_idx = render_world.add_view(view_bundle);
-        render_world.set_current_view(Some(view_idx));
-        
-        // Extract Cubes
         let view_clone = render_world.current_view().map(|v| v.view.clone());
         let mut cube_count = 0;
         if let Some(ref view) = view_clone {
@@ -131,7 +139,6 @@ pub fn extract_renderable_components(main_world: &MainWorld, render_world: &mut 
             printf(b"[EXTRACT] Total cubes extracted: %d\n\0".as_ptr(), cube_count);
         }
         
-        // Extract SoccerBalls
         let view_clone = render_world.current_view().map(|v| v.view.clone());
         if let Some(ref view) = view_clone {
             for (entity, transform) in main_world.query::<Transform3D>() {
@@ -145,33 +152,18 @@ pub fn extract_renderable_components(main_world: &MainWorld, render_world: &mut 
         }
     }
     
-    // Always create 2D orthographic view for UI elements
-    // This view is rendered after 3D view (if any)
-    let view_bundle_2d = create_default_view(width, height);
-    let view_idx_2d = render_world.add_view(view_bundle_2d);
-    render_world.set_current_view(Some(view_idx_2d));
-    
-    // Extract Buttons (2D UI)
     extract_buttons(main_world, render_world);
 }
 
 /// Extract sprites from Main World to Render World
+///
+/// Sprites are drawn directly in screen canvas pixel coordinates,
+/// sharing the same coordinate system as the 3D camera projection output.
 pub fn extract_sprites(main_world: &MainWorld, render_world: &mut RenderWorld) {
-    // Get PrimaryScreen for default view
-    let screen = main_world.resources().get::<PrimaryScreen>();
-    let (width, height) = screen.map(|s| (s.width as f32, s.height as f32)).unwrap_or((800.0, 600.0));
-
-    // Create default orthographic view
-    let view_bundle = create_default_view(width, height);
-    let view_idx = render_world.add_view(view_bundle);
-    render_world.set_current_view(Some(view_idx));
-
-    // Query all entities with Transform and Sprite
     let transforms: Vec<_> = main_world.query::<Transform>().collect();
 
     for (entity, transform) in transforms {
         if let Some(sprite) = main_world.get_component::<Sprite>(entity) {
-            // Create render object
             let render_obj = RenderObject::new()
                 .with_position(transform.position.x, transform.position.y, transform.position.z)
                 .with_size(sprite.width, sprite.height)
@@ -183,6 +175,10 @@ pub fn extract_sprites(main_world: &MainWorld, render_world: &mut RenderWorld) {
 }
 
 /// Extract buttons from Main World to Render World
+///
+/// Buttons are drawn directly in screen canvas pixel coordinates.
+/// No separate orthographic view is needed — they share the same
+/// screen canvas coordinate system as the 3D camera projection output.
 pub fn extract_buttons(main_world: &MainWorld, render_world: &mut RenderWorld) {
     unsafe {
         extern "C" {
@@ -190,17 +186,7 @@ pub fn extract_buttons(main_world: &MainWorld, render_world: &mut RenderWorld) {
         }
         printf(b"[EXTRACT] Starting extract_buttons\n\0".as_ptr());
     }
-    
-    // Get PrimaryScreen for default view
-    let screen = main_world.resources().get::<PrimaryScreen>();
-    let (width, height) = screen.map(|s| (s.width as f32, s.height as f32)).unwrap_or((800.0, 600.0));
 
-    // Create default orthographic view
-    let view_bundle = create_default_view(width, height);
-    let view_idx = render_world.add_view(view_bundle);
-    render_world.set_current_view(Some(view_idx));
-
-    // Query all entities with Transform2D and Button
     let transforms: Vec<_> = main_world.query::<Transform2D>().collect();
     
     unsafe {
@@ -225,10 +211,8 @@ pub fn extract_buttons(main_world: &MainWorld, render_world: &mut RenderWorld) {
                        button.width as f64,
                        button.height as f64);
             }
-            // Get button color based on state
             let color = button.current_color();
 
-            // Create render command for button background
             let rect = Rect::new(
                 transform.position.x,
                 transform.position.y,
@@ -238,7 +222,6 @@ pub fn extract_buttons(main_world: &MainWorld, render_world: &mut RenderWorld) {
 
             render_world.add_command(RenderCommand::DrawRect { rect, color });
 
-            // Draw button text (simplified as a smaller rect for now)
             let text_rect = Rect::new(
                 transform.position.x + button.width * 0.2,
                 transform.position.y + button.height * 0.3,
@@ -423,8 +406,6 @@ pub fn default_extract_schedule() -> ExtractSchedule {
     let mut schedule = ExtractSchedule::new();
     schedule.add_extractor(extract_sprites);
     schedule.add_extractor(extract_buttons);
-    // Note: Cube and SoccerBall rendering is handled by extract_renderable_components
-    // through the RenderComponent trait in app.rs
     schedule.add_extractor(extract_time);
     schedule
 }
@@ -441,35 +422,11 @@ impl<'a> ExtractParams<'a> {
     }
 }
 
-/// Create default orthographic view
-fn create_default_view(width: f32, height: f32) -> ViewBundle {
+/// Create perspective view for 3D rendering (fallback when no Camera resource)
+///
+/// Uses the screen canvas position as the camera's look-at target.
+fn create_perspective_view_with_canvas(canvas_pos: Vec3, width: f32, height: f32) -> ViewBundle {
     let viewport = Rect::new(0.0, 0.0, width, height);
-    let projection = Mat4::orthographic_rh(0.0, width, height, 0.0, -1000.0, 1000.0);
-    let view = Mat4::IDENTITY;
-    let vp_matrix = projection * view;
-
-    let view = View {
-        projection,
-        view,
-        view_projection: vp_matrix,
-        camera_position: Vec3::new(width / 2.0, height / 2.0, 100.0),
-        near: -1000.0,
-        far: 1000.0,
-        orthographic: true,
-        viewport,
-    };
-
-    ViewBundle {
-        view,
-        target: ViewTarget::Screen,
-        clear: ClearConfig::color(Color::BLACK),
-    }
-}
-
-/// Create perspective view for 3D rendering
-fn create_perspective_view(width: f32, height: f32) -> ViewBundle {
-    let viewport = Rect::new(0.0, 0.0, width, height);
-    // Perspective projection for 3D - use wider FOV for better 3D effect
     let projection = Mat4::perspective_rh(
         45.0_f32.to_radians(),
         width / height,
@@ -477,17 +434,15 @@ fn create_perspective_view(width: f32, height: f32) -> ViewBundle {
         1000.0,
     );
 
-    // Camera positioned to look at the object
-    let camera_pos = Vec3::new(width / 2.0, height / 2.0, 600.0);
-    let target_pos = Vec3::new(width / 2.0, height / 3.0, 0.0);
+    let camera_pos = Vec3::new(canvas_pos.x, canvas_pos.y, canvas_pos.z + 600.0);
     let view = Mat4::look_at_rh(
         camera_pos,
-        target_pos,
-        Vec3::new(0.0, 1.0, 0.0), // Y is up
+        canvas_pos,
+        Vec3::new(0.0, 1.0, 0.0),
     );
     let vp_matrix = projection * view;
 
-    let view = View {
+    let view_struct = View {
         projection,
         view,
         view_projection: vp_matrix,
@@ -499,8 +454,43 @@ fn create_perspective_view(width: f32, height: f32) -> ViewBundle {
     };
 
     ViewBundle {
-        view,
+        view: view_struct,
         target: ViewTarget::Screen,
         clear: ClearConfig::color(Color::BLACK),
     }
 }
+
+/// Build ViewBundle from Camera Resource (declarative)
+///
+/// Reads position/fov/projection from user-configured Camera Resource.
+/// The camera's look-at target is overridden to track the screen canvas position,
+/// ensuring the camera always points at the canvas regardless of canvas movement.
+fn camera_to_view_bundle(camera: &Camera, canvas_pos: Vec3, width: f32, height: f32) -> ViewBundle {
+    let viewport = Rect::new(0.0, 0.0, width, height);
+    let projection = camera.projection.build_projection_matrix(width, height);
+    let view = Mat4::look_at_rh(camera.position, canvas_pos, camera.up);
+    let vp_matrix = projection * view;
+
+    let (near, far) = match camera.projection {
+        ProjectionType::Perspective { near, far, .. } => (near, far),
+    };
+
+    let view_struct = View {
+        projection,
+        view,
+        view_projection: vp_matrix,
+        camera_position: camera.position,
+        near,
+        far,
+        orthographic: false,
+        viewport,
+    };
+
+    ViewBundle {
+        view: view_struct,
+        target: ViewTarget::Screen,
+        clear: ClearConfig::color(Color::BLACK),
+    }
+}
+
+

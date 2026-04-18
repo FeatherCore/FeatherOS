@@ -7,8 +7,10 @@ mod resources;
 mod time;
 mod config;
 mod screen;
+mod camera;
 
 pub use resources::{Resources, Resource, Res, ResMut};
 pub use time::Time;
 pub use config::{RenderConfig, WindowConfig};
 pub use screen::{PrimaryScreen, ScreenCoordinate, ViewportConfig};
+pub use camera::{Camera, ProjectionType};

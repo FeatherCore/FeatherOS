@@ -6,11 +6,15 @@ mod plugin;
 mod plugin_group;
 mod winit_plugin;
 mod default_plugins;
+mod ui_animatable;
+mod sync_component_plugin;
 
 pub use plugin::{Plugin, PluginEntry, PluginsState};
 pub use plugin_group::{PluginGroup, PluginGroupBuilder, NoopPluginGroup};
 pub use winit_plugin::WinitPlugin;
-pub use default_plugins::DefaultPlugins as CoreDefaultPlugins;
+pub use default_plugins::DefaultPlugins;
+pub use ui_animatable::UiAnimatablePlugin;
+pub use sync_component_plugin::{SyncComponentPlugin, SyncComponents};
 
 // Re-export for convenience
 pub use winit_plugin::DefaultPlugins as WinitDefaultPlugins;

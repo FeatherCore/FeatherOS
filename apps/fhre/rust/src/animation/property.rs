@@ -9,18 +9,31 @@ use super::curve::Animatable;
 /// Properties that can be animated on entities
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AnimationProperty {
+    // === Translation (3D position) ===
     /// Transform position X
     TranslationX,
     /// Transform position Y
     TranslationY,
     /// Transform position Z
     TranslationZ,
-    /// Transform rotation (2D angle in radians)
-    Rotation,
-    /// Transform scale X
+
+    // === Rotation (3D Euler angles, degrees) ===
+    /// Rotation around X axis (pitch)
+    RotationX,
+    /// Rotation around Y axis (yaw)
+    RotationY,
+    /// Rotation around Z axis (roll)
+    RotationZ,
+
+    // === Scale (3D uniform or per-axis) ===
+    /// Scale factor X
     ScaleX,
-    /// Transform scale Y
+    /// Scale factor Y
     ScaleY,
+    /// Scale factor Z
+    ScaleZ,
+
+    // === Sprite / UI properties ===
     /// Sprite color R
     ColorR,
     /// Sprite color G
@@ -33,6 +46,8 @@ pub enum AnimationProperty {
     SpriteWidth,
     /// Sprite height
     SpriteHeight,
+
+    // === Custom ===
     /// Custom property index
     Custom(u32),
 }
@@ -44,9 +59,12 @@ impl AnimationProperty {
             AnimationProperty::TranslationX |
             AnimationProperty::TranslationY |
             AnimationProperty::TranslationZ |
-            AnimationProperty::Rotation |
+            AnimationProperty::RotationX |
+            AnimationProperty::RotationY |
+            AnimationProperty::RotationZ |
             AnimationProperty::ScaleX |
             AnimationProperty::ScaleY |
+            AnimationProperty::ScaleZ |
             AnimationProperty::ColorR |
             AnimationProperty::ColorG |
             AnimationProperty::ColorB |
@@ -229,68 +247,48 @@ pub fn apply_animated_value(
     use AnimationProperty::*;
     
     match property {
-        TranslationX => {
-            if let Some(t) = transform {
-                t.position.x = value;
-            }
-        }
-        TranslationY => {
-            if let Some(t) = transform {
-                t.position.y = value;
-            }
-        }
-        TranslationZ => {
-            if let Some(t) = transform {
-                t.position.z = value;
-            }
-        }
-        Rotation => {
-            if let Some(t) = transform {
-                t.rotation = value;
-            }
-        }
-        ScaleX => {
-            if let Some(t) = transform {
-                t.scale.x = value;
-            }
-        }
-        ScaleY => {
-            if let Some(t) = transform {
-                t.scale.y = value;
-            }
-        }
-        ColorR => {
-            if let Some(s) = sprite {
-                s.color.r = value as u8;
-            }
-        }
-        ColorG => {
-            if let Some(s) = sprite {
-                s.color.g = value as u8;
-            }
-        }
-        ColorB => {
-            if let Some(s) = sprite {
-                s.color.b = value as u8;
-            }
-        }
-        ColorA => {
-            if let Some(s) = sprite {
-                s.color.a = value as u8;
-            }
-        }
-        SpriteWidth => {
-            if let Some(s) = sprite {
-                s.width = value;
-            }
-        }
-        SpriteHeight => {
-            if let Some(s) = sprite {
-                s.height = value;
-            }
-        }
-        Custom(_) => {
-            // Custom properties need custom handling
-        }
+        TranslationX => { if let Some(t) = transform { t.position.x = value; } }
+        TranslationY => { if let Some(t) = transform { t.position.y = value; } }
+        TranslationZ => { if let Some(t) = transform { t.position.z = value; } }
+        Rotation => { if let Some(t) = transform { t.rotation = value; } }
+        ScaleX => { if let Some(t) = transform { t.scale.x = value; } }
+        ScaleY => { if let Some(t) = transform { t.scale.y = value; } }
+        ColorR => { if let Some(s) = sprite { s.color.r = value as u8; } }
+        ColorG => { if let Some(s) = sprite { s.color.g = value as u8; } }
+        ColorB => { if let Some(s) = sprite { s.color.b = value as u8; } }
+        ColorA => { if let Some(s) = sprite { s.color.a = value as u8; } }
+        SpriteWidth => { if let Some(s) = sprite { s.width = value; } }
+        SpriteHeight => { if let Some(s) = sprite { s.height = value; } }
+        Custom(_) => {}
     }
+}
+
+/// Trait for components that can receive animation values.
+///
+/// Implement this trait for any component that should receive animation values.
+/// The animation system's apply systems will automatically call `apply_animation()`
+/// for each animated property on the entity.
+///
+/// This is fhre's equivalent of Bevy's property animation mechanism — it decouples
+/// the animation system from specific component types.
+///
+/// # Example
+/// ```rust
+/// impl AnimationReceiver for Cube {
+///     fn apply_animation(&mut self, property: AnimationProperty, value: f32) {
+///         match property {
+///             AnimationProperty::RotationX => { self.rotation.x = value; }
+///             AnimationProperty::RotationY => { self.rotation.y = value; }
+///             AnimationProperty::RotationZ => { self.rotation.z = value; }
+///             AnimationProperty::ScaleX => { self.size = value; }
+///             _ => {}
+///         }
+///     }
+/// }
+/// ```
+pub trait AnimationReceiver {
+    /// Apply an animated property value to this component.
+    ///
+    /// Called by the `animate_targets` system after sampling an AnimationClip.
+    fn apply_animation(&mut self, property: AnimationProperty, value: f32);
 }

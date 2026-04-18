@@ -153,7 +153,6 @@ unsafe impl Sync for Events {}
 /// ```rust
 /// App::new(640, 480)
 ///     .add_plugin(EventPlugin)  // Register Events resource
-///     .add_plugin(WindowPlugin::new(640, 480, "App"))
 ///     .run();
 /// ```
 pub struct EventPlugin;

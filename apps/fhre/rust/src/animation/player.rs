@@ -3,7 +3,7 @@
 //! Component that plays animation clips on entities.
 
 use super::clip::AnimationClip;
-use super::AnimationResources;
+use super::{AnimationResources, AnimationTargetId, AnimationProperty};
 use crate::main_world::Component;
 use super::AnimationClipHandle;
 
@@ -46,6 +46,8 @@ impl Default for AnimationState {
 pub struct ActiveAnimation {
     /// Handle to the clip
     pub clip_handle: AnimationClipHandle,
+    /// Target entity ID for this animation
+    pub target_id: AnimationTargetId,
     /// Current playback time
     pub time: f32,
     /// Playback speed (1.0 = normal)
@@ -58,6 +60,8 @@ pub struct ActiveAnimation {
     pub state: AnimationState,
     /// Number of times completed
     pub completions: u32,
+    /// Sampled property values from the last frame (populated by animate_targets)
+    pub sampled_properties: alloc::collections::BTreeMap<AnimationProperty, f32>,
 }
 
 impl ActiveAnimation {
@@ -65,12 +69,14 @@ impl ActiveAnimation {
     pub fn new(clip_handle: AnimationClipHandle) -> Self {
         Self {
             clip_handle,
+            target_id: AnimationTargetId::default(),
             time: 0.0,
             speed: 1.0,
             weight: 1.0,
             repeat: RepeatAnimation::Never,
             state: AnimationState::Playing,
             completions: 0,
+            sampled_properties: alloc::collections::BTreeMap::new(),
         }
     }
     
@@ -89,6 +95,12 @@ impl ActiveAnimation {
     /// Set repeat mode
     pub fn with_repeat(mut self, repeat: RepeatAnimation) -> Self {
         self.repeat = repeat;
+        self
+    }
+
+    /// Set animation target ID
+    pub fn with_target(mut self, target: AnimationTargetId) -> Self {
+        self.target_id = target;
         self
     }
     
@@ -188,6 +200,21 @@ impl AnimationPlayer {
         self.animations.push(animation);
         self.animations.last_mut().unwrap()
     }
+
+    /// Play an animation clip with repeat forever
+    pub fn play_repeat(&mut self, clip_handle: AnimationClipHandle) -> &mut ActiveAnimation {
+        let anim = self.play(clip_handle);
+        anim.repeat = RepeatAnimation::Forever;
+        anim
+    }
+
+    /// Play an animation clip with target + repeat forever (Bevy-style convenience)
+    pub fn play_with_target(&mut self, clip_handle: AnimationClipHandle, target: AnimationTargetId) -> &mut ActiveAnimation {
+        let anim = self.play(clip_handle);
+        anim.target_id = target;
+        anim.repeat = RepeatAnimation::Forever;
+        anim
+    }
     
     /// Play with specific settings
     pub fn play_with<F>(&mut self, clip_handle: AnimationClipHandle, f: F) -> &mut ActiveAnimation
@@ -247,13 +274,19 @@ impl AnimationPlayer {
         &mut self.animations
     }
     
-    /// Update all animations
+    /// Update all animations with full resource access
     pub fn update(&mut self, delta_time: f32, resources: &AnimationResources) {
-        if self.paused {
-            return;
-        }
-        
-        // Remove finished animations that don't repeat
+        if self.paused { return; }
+        self.update_time(delta_time, resources);
+    }
+
+    /// Advance playback time for all active animations.
+    ///
+    /// Used by the `advance_animations` system. Handles looping/pausing.
+    /// Does NOT sample curves — that's done by `animate_targets`.
+    pub fn update_time(&mut self, delta: f32, resources: &AnimationResources) {
+        if self.paused { return; }
+
         self.animations.retain(|anim| {
             if anim.is_finished() {
                 matches!(anim.repeat, RepeatAnimation::Forever | RepeatAnimation::Count(_))
@@ -261,11 +294,26 @@ impl AnimationPlayer {
                 true
             }
         });
-        
-        // Update remaining animations
+
         for anim in &mut self.animations {
-            if let Some(clip) = resources.get_clip(&anim.clip_handle) {
-                anim.update(delta_time, clip.duration());
+            if !anim.is_playing() { continue; }
+            let duration = resources.get_clip(&anim.clip_handle)
+                .map(|c| c.duration())
+                .unwrap_or(1.0);
+            anim.time += delta * anim.speed;
+            if anim.time >= duration {
+                anim.completions += 1;
+                match anim.repeat {
+                    RepeatAnimation::Never => { anim.time = duration; anim.state = AnimationState::Finished; }
+                    RepeatAnimation::Forever => { anim.time -= duration; }
+                    RepeatAnimation::Count(n) => {
+                        if anim.completions >= n {
+                            anim.time = duration; anim.state = AnimationState::Finished;
+                        } else {
+                            anim.time -= duration;
+                        }
+                    }
+                }
             }
         }
     }

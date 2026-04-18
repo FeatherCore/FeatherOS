@@ -27,26 +27,7 @@ pub struct View {
 }
 
 impl View {
-    /// Create a new 2D orthographic view
-    pub fn new_2d(width: f32, height: f32) -> Self {
-        let viewport = Rect::new(0.0, 0.0, width, height);
-        let projection = Mat4::orthographic_rh(0.0, width, height, 0.0, -1000.0, 1000.0);
-        let view = Mat4::IDENTITY;
-        let view_projection = projection * view;
-        
-        Self {
-            viewport,
-            projection,
-            view,
-            view_projection,
-            camera_position: Vec3::ZERO,
-            near: -1000.0,
-            far: 1000.0,
-            orthographic: true,
-        }
-    }
-
-    /// Create a new 3D perspective view
+    /// Create a new 3D perspective view (default camera view)
     pub fn new_3d(width: f32, height: f32, fov_degrees: f32) -> Self {
         let viewport = Rect::new(0.0, 0.0, width, height);
         let aspect_ratio = width / height;
@@ -165,7 +146,7 @@ impl View {
 
 impl Default for View {
     fn default() -> Self {
-        Self::new_2d(800.0, 600.0)
+        Self::new_3d(800.0, 600.0, 45.0)
     }
 }
 
@@ -250,7 +231,7 @@ impl ViewBundle {
     /// Create a new view bundle for screen rendering
     pub fn new_screen(width: f32, height: f32) -> Self {
         Self {
-            view: View::new_2d(width, height),
+            view: View::new_3d(width, height, 45.0),
             target: ViewTarget::Screen,
             clear: ClearConfig::default(),
         }
@@ -259,7 +240,7 @@ impl ViewBundle {
     /// Create a new view bundle for texture rendering
     pub fn new_texture(width: f32, height: f32, texture_id: u32) -> Self {
         Self {
-            view: View::new_2d(width, height),
+            view: View::new_3d(width, height, 45.0),
             target: ViewTarget::Texture(texture_id),
             clear: ClearConfig::default(),
         }
