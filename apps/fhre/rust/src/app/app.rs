@@ -372,6 +372,24 @@ impl App {
     pub fn render_world_mut(&mut self) -> &mut RenderWorld {
         &mut self.render_world
     }
+
+    /// Check if the app is still running
+    ///
+    /// This is used by the runner to determine when to stop the main loop.
+    pub fn is_running(&self) -> bool {
+        // Check if window resource exists and is open
+        #[cfg(feature = "sim")]
+        {
+            use crate::window::X11Window;
+            use crate::app::window_runner::WindowResource;
+            if let Some(window) = self.main_world.resources().get::<X11Window>() {
+                return window.is_open();
+            }
+        }
+        
+        // Default: app is running
+        true
+    }
 }
 
 /// Trait for types that can be used as schedule labels

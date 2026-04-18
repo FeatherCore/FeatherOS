@@ -80,6 +80,7 @@ pub mod ui;
 pub mod event;
 pub mod input;
 pub mod plugin;
+pub mod window;
 
 // Re-export main types from app
 pub use app::{App, AppBuilder, FHRE_VERSION, DefaultUiCamera, DefaultGameCamera, AppRunner, AppExit, Startup, PreUpdate, Update, PostUpdate};
@@ -115,6 +116,12 @@ pub use math::{Color, Vec2, Vec3, Mat4};
 
 // Re-export input types
 pub use input::{ButtonInput, MouseButton, KeyCode};
+
+// Re-export window types
+#[cfg(feature = "sim")]
+pub use window::WindowPlugin;
+#[cfg(feature = "sim")]
+pub use window::X11Window;
 
 /// Prelude module for convenient imports
 pub mod prelude {
