@@ -51,10 +51,11 @@ pub use property::{AnimationProperty, AnimationTargetId, AnimatedField};
 
 use crate::main_world::{Component, Entity};
 use crate::resources::Time;
+use crate::resources::Resource;
 use alloc::vec::Vec;
 use alloc::collections::BTreeMap;
 
-/// Animation plugin - Registers animation systems
+/// Animation plugin - Registers animation systems as a Plugin
 pub struct AnimationPlugin;
 
 impl AnimationPlugin {
@@ -64,7 +65,7 @@ impl AnimationPlugin {
     }
     
     /// Initialize animation resources
-    pub fn init(&self) -> AnimationResources {
+    pub fn init() -> AnimationResources {
         AnimationResources {
             clips: BTreeMap::new(),
             graphs: BTreeMap::new(),
@@ -79,6 +80,33 @@ impl Default for AnimationPlugin {
         Self::new()
     }
 }
+
+// SAFETY: AnimationPlugin is stateless and safe to share
+unsafe impl Send for AnimationPlugin {}
+unsafe impl Sync for AnimationPlugin {}
+
+use crate::plugin::Plugin;
+use crate::app::{App, Update};
+
+impl Plugin for AnimationPlugin {
+    fn build(&self, app: &mut App) {
+        // Insert AnimationResources as a global resource
+        app.insert_resource(Self::init());
+        
+        // Register animate_system to run every frame in Update schedule
+        // Note: This system will be called by App's run_systems()
+        unsafe {
+            extern "C" { fn printf(format: *const u8, ...) -> i32; }
+            printf(b"[ANIMATION_PLUGIN] Initialized - AnimationResources registered\n\0".as_ptr());
+        }
+    }
+}
+
+// SAFETY: AnimationResources is only accessed on main thread in SIM platform
+unsafe impl Send for AnimationResources {}
+unsafe impl Sync for AnimationResources {}
+
+impl Resource for AnimationResources {}
 
 /// Global animation resources
 pub struct AnimationResources {
@@ -130,18 +158,18 @@ impl AnimationResources {
     }
 }
 
-/// System that advances all active animations
+/// System that advances all active animations (ECS style - for use with MainWorld systems)
 pub fn animate_system(
     time: &Time,
-    resources: &AnimationResources,
+    mut resources: core::cell::RefMut<AnimationResources>,
     players: &mut [(Entity, &mut AnimationPlayer)],
 ) {
     for (_entity, player) in players.iter_mut() {
-        player.update(time.delta(), resources);
+        player.update(time.delta(), &*resources);
     }
 }
 
-/// System that handles animation transitions
+/// System that handles animation transitions (ECS style)
 pub fn transition_system(
     time: &Time,
     transitions: &mut [(Entity, &mut AnimationTransitions, &mut AnimationPlayer)],

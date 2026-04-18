@@ -393,20 +393,51 @@ examples/fhre/rust/src/
 ## 5. 总结
 
 ### 已完成的工作 ✅
-- 纯声明式 ECS 架构 (Res/ResMut/Query/Commands)
-- Plugin 系统基本实现
-- Schedule 调度系统 (Startup/PreUpdate/Update)
-- ButtonInput 输入资源
-- X11 窗口显示和鼠标输入
+- ✅ 纯声明式 ECS 架构 (Res/ResMut/Query/Commands)
+- ✅ Plugin 系统基本实现
+- ✅ Schedule 调度系统 (Startup/PreUpdate/Update)
+- ✅ ButtonInput 输入资源
+- ✅ **WindowPlugin + WindowRunner** (2026-04-17 完成)
+- ✅ X11 窗口显示和鼠标输入
+- ✅ X11Window 实现 WindowResource trait
+- ✅ App::is_running() 检查窗口状态
+- ✅ **AnimationPlugin** (2026-04-17 完成)
+- ✅ AnimationPlugin 实现 Plugin trait
+- ✅ AnimationResources 作为 Resource 注册
 
 ### 待改进的部分 ⚠️
-- 窗口管理应封装为 Plugin
-- 动画系统应集成到 Demo
-- 事件系统应完善
-- 应提供 DefaultPlugins
+- ⏳ Demo 使用 AnimationPlayer 替代手动旋转 (下一步)
+- ⏳ 事件系统应完善 (EventReader/EventWriter)
+- ⏳ 应提供 DefaultPlugins
+
+### 实现进度
+
+| 任务 | 状态 | 日期 |
+|------|------|------|
+| WindowPlugin + WindowRunner | **已完成** | 2026-04-17 |
+| AnimationPlugin | **已完成** | 2026-04-17 |
+| 集成 Animation 到 Demo | 待开始 | - |
+| 完善 Event 系统 | 待开始 | - |
+| 创建 DefaultPlugins | 待开始 | - |
+
+### 新增/修改文件
+
+```
+apps/fhre/rust/src/window/
+├── mod.rs           # 更新: 添加 WindowPlugin
+└── x11.rs           # 新增: X11Window 实现 (从 examples 移入)
+
+apps/fhre/rust/src/app/
+├── mod.rs           # 更新: 导出 window_runner 模块
+└── app.rs           # 更新: 添加 is_running() 方法
+
+apps/fhre/rust/src/animation/
+└── mod.rs           # 更新: AnimationPlugin 实现 Plugin trait
+```
 
 ### 下一步行动
-1. 创建 `WindowPlugin` + `WindowRunner`
-2. 重构 Demo 使用 `AnimationPlayer`
-3. 完善 `EventReader/EventWriter`
-4. 整理 `DefaultPlugins`
+1. ~~创建 `WindowPlugin` + `WindowRunner`~~ ✅ **已完成**
+2. ~~创建 `AnimationPlugin`~~ ✅ **已完成**
+3. 重构 Demo 使用 `AnimationPlayer`
+4. 完善 `EventReader/EventWriter`
+5. 整理 `DefaultPlugins`
