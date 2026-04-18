@@ -5,10 +5,15 @@
 mod plugin;
 mod plugin_group;
 mod winit_plugin;
+mod default_plugins;
 
 pub use plugin::{Plugin, PluginEntry, PluginsState};
 pub use plugin_group::{PluginGroup, PluginGroupBuilder, NoopPluginGroup};
-pub use winit_plugin::{WinitPlugin, DefaultPlugins};
+pub use winit_plugin::WinitPlugin;
+pub use default_plugins::DefaultPlugins as CoreDefaultPlugins;
+
+// Re-export for convenience
+pub use winit_plugin::DefaultPlugins as WinitDefaultPlugins;
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
