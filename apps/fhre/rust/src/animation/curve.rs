@@ -4,7 +4,7 @@
 //! Inspired by Bevy's curve system but simplified for embedded systems.
 
 use crate::math::{Vec2, Vec3, Color};
-use crate::animation::easing::{Easing, EasingFn};
+use crate::animation::easing::Easing;
 use core::f32;
 
 /// A single keyframe with time, value, and easing

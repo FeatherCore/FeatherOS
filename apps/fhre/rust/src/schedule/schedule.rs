@@ -3,7 +3,7 @@
 //! Schedules manage the execution order of systems.
 //! Fully aligned with Bevy's schedule system.
 
-use super::label::{ScheduleLabel, InternedScheduleLabel};
+use super::label::ScheduleLabel;
 use super::set::SystemSet;
 use alloc::vec::Vec;
 use alloc::boxed::Box;

@@ -49,10 +49,9 @@ pub use graph::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex, BlendN
 pub use transition::{AnimationTransitions, AnimationTransition};
 pub use property::{AnimationProperty, AnimationTargetId, AnimatedField, AnimationReceiver};
 
-use crate::main_world::{Component, Entity, Res, ResMut, Query, system2, system3};
+use crate::main_world::{Component, Entity, Res, Query, system2, system3};
 use crate::resources::Time;
 use crate::resources::Resource;
-use alloc::vec::Vec;
 use alloc::collections::BTreeMap;
 
 /// Animation plugin - Registers animation systems as a Plugin
@@ -86,7 +85,8 @@ unsafe impl Send for AnimationPlugin {}
 unsafe impl Sync for AnimationPlugin {}
 
 use crate::plugin::Plugin;
-use crate::app::{App, Update};
+use crate::app::App;
+use crate::schedule::Update;
 
 impl Plugin for AnimationPlugin {
     fn build(&self, app: &mut App) {
@@ -106,7 +106,7 @@ impl Plugin for AnimationPlugin {
 /// call this manually.
 pub fn advance_animations(time: Res<Time>, anim_resources: Res<AnimationResources>, mut players: Query<AnimationPlayer>) {
     let delta = time.delta();
-    for mut player in players.iter_mut() {
+    for (_entity, player) in players.iter_mut() {
         player.update_time(delta, &anim_resources);
     }
 }
@@ -127,7 +127,7 @@ pub fn animate_targets(
     anim_resources: Res<AnimationResources>,
     mut players: Query<AnimationPlayer>,
 ) {
-    for mut player in players.iter_mut() {
+    for (_entity, player) in players.iter_mut() {
         if let Some(anim) = player.animation_mut(0) {
             if anim.clip_handle.is_null() { continue; }
 
@@ -173,7 +173,7 @@ fn apply_sampled_to<T: AnimationReceiver>(player: &AnimationPlayer, target: &mut
 /// FHRE achieves the same goal without reflection by providing this **generic template**:
 /// - `AnimationPlugin` registers only Phase 1 (time) + Phase 2 (sampling) — zero business dependency
 /// - Phase 3 is registered per-component-type via `apply_animations::<T>`
-/// - Entity matching uses `iter_mut_with_entities()` + `get_mut(entity)` — correct association
+/// - Entity matching uses `iter()` + `get_mut(entity)` — correct association
 ///
 /// # Why not hardcode in AnimationPlugin?
 ///
@@ -185,7 +185,7 @@ pub fn apply_animations<T: AnimationReceiver + Component>(
     mut players: Query<AnimationPlayer>,
     mut targets: Query<T>,
 ) {
-    for (entity, player) in players.iter_with_entities() {
+    for (entity, player) in players.iter() {
         if let Some(anim) = player.animation(0) {
             if !anim.sampled_properties.is_empty() {
                 if let Some(mut target) = targets.get_mut(entity) {

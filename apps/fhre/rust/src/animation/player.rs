@@ -2,7 +2,6 @@
 //!
 //! Component that plays animation clips on entities.
 
-use super::clip::AnimationClip;
 use super::{AnimationResources, AnimationTargetId, AnimationProperty};
 use crate::main_world::Component;
 use super::AnimationClipHandle;
@@ -198,7 +197,8 @@ impl AnimationPlayer {
     pub fn play(&mut self, clip_handle: AnimationClipHandle) -> &mut ActiveAnimation {
         let animation = ActiveAnimation::new(clip_handle);
         self.animations.push(animation);
-        self.animations.last_mut().unwrap()
+        let len = self.animations.len();
+        &mut self.animations[len - 1]
     }
 
     /// Play an animation clip with repeat forever
@@ -223,7 +223,8 @@ impl AnimationPlayer {
     {
         let animation = f(ActiveAnimation::new(clip_handle));
         self.animations.push(animation);
-        self.animations.last_mut().unwrap()
+        let len = self.animations.len();
+        &mut self.animations[len - 1]
     }
     
     /// Stop all animations

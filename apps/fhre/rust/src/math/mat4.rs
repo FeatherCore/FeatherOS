@@ -2,7 +2,7 @@
 //!
 //! Provides basic matrix operations for 3D graphics.
 
-use super::{Vec3, Vec2};
+use super::Vec3;
 
 /// 4x4 Matrix (column-major order for OpenGL compatibility)
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -7,6 +7,7 @@ use super::entity::Entity;
 use super::component::Component;
 use super::system::{System, IntoSystem};
 use crate::resources::Resources;
+use crate::sync::{SyncToRenderWorld, RenderEntity, PendingSyncEntity, EntityRecord};
 use alloc::vec::Vec;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -63,12 +64,17 @@ impl MainWorld {
 
     /// Despawn an entity and all its components
     pub fn despawn(&mut self, entity: Entity) {
-        // Remove from entities list
         if let Some(pos) = self.entities.iter().position(|e| e.id() == entity.id()) {
             self.entities.swap_remove(pos);
         }
         
-        // Remove all components for this entity
+        let render_entity_copy = self.get_component::<RenderEntity>(entity).copied();
+        if let Some(render_entity) = render_entity_copy {
+            if let Some(pending) = self.resources.get_mut::<PendingSyncEntity>() {
+                pending.push(EntityRecord::Removed(render_entity));
+            }
+        }
+        
         for (_, storage) in self.components.iter_mut() {
             storage.remove(&entity.id());
         }
@@ -82,6 +88,14 @@ impl MainWorld {
             .or_insert_with(BTreeMap::new);
         storage.insert(entity.id(), Box::new(component));
         self.change_detection.mark_added::<T>(entity);
+        
+        if TypeId::of::<T>() == TypeId::of::<SyncToRenderWorld>() {
+            if self.get_component::<RenderEntity>(entity).is_none() {
+                if let Some(pending) = self.resources.get_mut::<PendingSyncEntity>() {
+                    pending.push(EntityRecord::Added(entity));
+                }
+            }
+        }
     }
 
     /// Get a component reference
@@ -105,6 +119,16 @@ impl MainWorld {
     /// Remove a component from an entity
     pub fn remove_component<T: Component>(&mut self, entity: Entity) -> Option<T> {
         let type_id = TypeId::of::<T>();
+        
+        if TypeId::of::<T>() == TypeId::of::<SyncToRenderWorld>() {
+            let render_entity_copy = self.get_component::<RenderEntity>(entity).copied();
+            if let Some(render_entity) = render_entity_copy {
+                if let Some(pending) = self.resources.get_mut::<PendingSyncEntity>() {
+                    pending.push(EntityRecord::Removed(render_entity));
+                }
+            }
+        }
+        
         self.change_detection.remove::<T>(entity);
         self.components
             .get_mut(&type_id)

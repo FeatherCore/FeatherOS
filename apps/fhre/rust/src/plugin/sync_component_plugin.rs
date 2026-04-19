@@ -4,21 +4,40 @@
 //! This plugin enables automatic component extraction to Render World.
 
 use crate::app::App;
-use crate::Component;
-use crate::sync::sync_markers::SyncToRenderWorld;
-use crate::sync::pending_sync::PendingSyncEntity;
-use crate::ExtractSchedule;
-use crate::ExtractComponent;
-use crate::extract::extract_components;
+use crate::sync::RenderEntity;
+use crate::extract::ExtractComponent;
 use crate::plugin::Plugin;
+use crate::main_world::MainWorld;
+use crate::render_world::RenderWorld;
 use alloc::vec::Vec;
 use alloc::boxed::Box;
+
+/// Extract components implementing ExtractComponent trait
+pub fn extract_components<C: ExtractComponent>(
+    main_world: &MainWorld,
+    render_world: &mut RenderWorld,
+) {
+    let extracts: Vec<_> = main_world.query::<C::QueryData>()
+        .filter_map(|(main_entity, component)| {
+            main_world.get_component::<RenderEntity>(main_entity)
+                .map(|render_entity| (*render_entity, component))
+        })
+        .filter_map(|(render_entity, query_data)| {
+            C::extract_component(query_data)
+                .map(|extracted| (render_entity.id(), extracted))
+        })
+        .collect();
+
+    for (render_entity, extracted) in extracts {
+        render_world.insert_component(render_entity, extracted);
+    }
+}
 
 /// Plugin that enables automatic component extraction to Render World
 ///
 /// When added to an App, this plugin will:
 /// 1. Register the component type for automatic extraction
-/// 2. Add an extractor to the ExtractSchedule
+/// 2. Add an extractor to the extract phase
 ///
 /// # Example
 /// ```rust
@@ -54,26 +73,10 @@ impl<C: ExtractComponent> Default for SyncComponentPlugin<C> {
 
 impl<C: ExtractComponent + 'static> Plugin for SyncComponentPlugin<C> {
     fn build(&self, app: &mut App) {
-        // Ensure PendingSyncEntity and ExtractSchedule resources exist
-        if app.main_world.resources().get::<PendingSyncEntity>().is_none() {
-            app.insert_resource(PendingSyncEntity::default());
-        }
-
-        if app.main_world.resources().get::<ExtractSchedule>().is_none() {
-            app.insert_resource(ExtractSchedule::default());
-        }
-
-        // Add extract system to schedule
-        // We use a closure that captures the type C
-        let extract_fn = move |main_world: &crate::main_world::MainWorld,
-                               render_world: &mut crate::render_world::RenderWorld| {
+        // Add extract system to app
+        app.add_extractor(move |main_world, render_world| {
             extract_components::<C>(main_world, render_world);
-        };
-
-        // Register in ExtractSchedule
-        if let Some(schedule) = app.main_world.resources_mut().get_mut::<ExtractSchedule>() {
-            schedule.add_extractor(extract_fn);
-        }
+        });
     }
 }
 
@@ -90,22 +93,20 @@ impl<C: ExtractComponent + 'static> Plugin for SyncComponentPlugin<C> {
 /// );
 /// ```
 pub struct SyncComponents {
-    plugins: Vec<Box<dyn Fn(&mut App) + Send + Sync>>,
+    plugins: Vec<Box<dyn Fn(&mut App)>>,
 }
 
 impl SyncComponents {
-    /// Create a new empty SyncComponents group
     pub fn new() -> Self {
         Self {
             plugins: Vec::new(),
         }
     }
 
-    /// Add a component type to sync
     pub fn add<C: ExtractComponent + 'static>(mut self) -> Self {
         self.plugins.push(Box::new(|app: &mut App| {
             app.add_plugin(SyncComponentPlugin::<C>::default());
-        }) as Box<dyn Fn(&mut App) + Send + Sync>);
+        }));
         self
     }
 }

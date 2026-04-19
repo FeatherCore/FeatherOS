@@ -227,3 +227,35 @@ impl<'a, T: Component> core::ops::Deref for Ref<'a, T> {
         self.value
     }
 }
+
+// === SystemParam implementations for Mut<T> and Ref<T> ===
+
+/// State for Mut<T> SystemParam
+pub struct MutState<T: Component> {
+    _marker: core::marker::PhantomData<T>,
+}
+
+impl<T: Component> Default for MutState<T> {
+    fn default() -> Self {
+        Self {
+            _marker: core::marker::PhantomData,
+        }
+    }
+}
+
+/// State for Ref<T> SystemParam  
+pub struct RefState<T: Component> {
+    _marker: core::marker::PhantomData<T>,
+}
+
+impl<T: Component> Default for RefState<T> {
+    fn default() -> Self {
+        Self {
+            _marker: core::marker::PhantomData,
+        }
+    }
+}
+
+// Note: Mut<T> and Ref<T> as SystemParam would require a way to specify
+// which entity to query. In Bevy, this is done via Query<Mut<T>>.
+// For now, we provide Query<Mut<T>> support through the Query system.

@@ -2,6 +2,11 @@
 //!
 //! Components are data containers attached to entities.
 //! They represent properties like position, velocity, sprite, etc.
+//!
+//! # Note
+//!
+//! For transforms, prefer using `Transform2D` or `Transform3D` from the `node` module.
+//! The `Transform` type here is a legacy 2.5D transform kept for backward compatibility.
 
 use crate::math::{Vec2, Vec3, Color};
 
@@ -16,8 +21,17 @@ pub trait Component: 'static + Send + Sync {
         Self: Sized;
 }
 
-/// Transform component - Position, rotation, and scale
+/// Transform component - Legacy 2.5D transform
+///
+/// # Note
+///
+/// For new code, prefer using:
+/// - `Transform2D` from `node` module for 2D objects
+/// - `Transform3D` from `node` module for 3D objects
+///
+/// This type is kept for backward compatibility with existing code.
 #[derive(Clone, Debug, PartialEq)]
+#[deprecated(since = "2.3.0", note = "Use Transform2D or Transform3D from node module")]
 pub struct Transform {
     pub position: Vec3,
     pub rotation: f32,

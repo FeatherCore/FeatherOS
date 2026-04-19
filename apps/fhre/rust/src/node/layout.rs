@@ -344,15 +344,18 @@ impl Layout {
         child_sizes: &[Vec2],
         is_row: bool,
     ) {
-        if positions.is_empty() {
+        if positions.is_empty() || child_sizes.is_empty() {
             return;
         }
 
+        let last_pos = positions.last().unwrap_or(&Vec2::ZERO);
+        let last_size = child_sizes.last().unwrap_or(&Vec2::ZERO);
+
         // 计算内容总尺寸
         let total_content_size = if is_row {
-            positions.last().unwrap().x + child_sizes.last().unwrap().x
+            last_pos.x + last_size.x
         } else {
-            positions.last().unwrap().y + child_sizes.last().unwrap().y
+            last_pos.y + last_size.y
         };
 
         // 计算偏移量

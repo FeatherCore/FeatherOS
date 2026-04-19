@@ -5,9 +5,7 @@
 
 use alloc::vec::Vec;
 use alloc::string::String;
-use core::any::TypeId;
 use core::fmt::Debug;
-use alloc::boxed::Box;
 
 /// A type that can be used to identify a schedule.
 ///

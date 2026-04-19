@@ -5,10 +5,9 @@
 use crate::app::App;
 use crate::plugin::Plugin;
 use crate::input::{
-    ButtonInput, MouseButton, MouseButtonInput, MouseMotion, MouseWheel,
+    ButtonInput, MouseButton,
     MouseInput, AccumulatedMouseMotion, AccumulatedMouseScroll,
-    KeyCode, Key, KeyboardInput, KeyboardFocusLost,
-    input_systems_update,
+    KeyCode, Key,
 };
 use crate::event::Events;
 

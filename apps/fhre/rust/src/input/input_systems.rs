@@ -5,12 +5,11 @@
 
 use crate::main_world::MainWorld;
 use crate::event::{Events, EventReader};
-use crate::resources::Resource;
 use super::{
     ButtonInput,
     MouseButton, MouseButtonInput, MouseButtonState,
     MouseMotion, MouseWheel,
-    MouseInput, AccumulatedMouseMotion, AccumulatedMouseScroll,
+    AccumulatedMouseMotion, AccumulatedMouseScroll,
     KeyCode, Key, KeyboardInput, KeyboardKeyState, KeyboardFocusLost,
 };
 

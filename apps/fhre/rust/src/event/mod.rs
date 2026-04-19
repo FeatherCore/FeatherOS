@@ -40,12 +40,10 @@ pub use system_param::{EventReaderState, EventWriterState};
 
 use crate::plugin::Plugin;
 use crate::app::App;
-use crate::resources::Resource;
 
 /// Standard input events for FHRE
 pub mod input_events {
     use super::Event;
-    use alloc::string::String;
 
     /// Keyboard input event
     #[derive(Clone, Debug)]

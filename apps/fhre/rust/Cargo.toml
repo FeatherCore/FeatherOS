@@ -26,5 +26,3 @@ libc = { version = "0.2", optional = true }
 [features]
 default = []
 cube = []
-sim = ["libc"]
-nuttx = []

@@ -2,14 +2,15 @@
 
 use crate::app::App;
 use alloc::boxed::Box;
-use alloc::string::String;
 use core::any::Any;
 
 /// A collection of FHRE app logic and configuration.
 ///
 /// Plugins configure an [`App`]. When an [`App`] registers a plugin,
 /// the plugin's [`Plugin::build`] function is run.
-pub trait Plugin: Any + Send + Sync {
+/// 
+/// Note: FHRE is single-threaded, so Send + Sync is not required.
+pub trait Plugin: Any {
     /// Configures the [`App`] to which this plugin is added.
     fn build(&self, app: &mut App);
 

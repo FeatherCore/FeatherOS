@@ -3,10 +3,8 @@
 //! A graph-based system for blending multiple animations together.
 //! Simplified version of Bevy's AnimationGraph for embedded systems.
 
-use super::clip::{AnimationClip, AnimationClipHandle};
-use super::player::ActiveAnimation;
+use super::clip::AnimationClipHandle;
 use alloc::vec::Vec;
-use alloc::collections::BTreeMap;
 
 /// Handle to an animation graph
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

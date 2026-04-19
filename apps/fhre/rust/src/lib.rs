@@ -18,13 +18,11 @@ extern crate alloc;
 use core::alloc::{GlobalAlloc, Layout};
 use core::panic::PanicInfo;
 
-// Import libc functions
 extern "C" {
     fn malloc(size: usize) -> *mut core::ffi::c_void;
     fn free(ptr: *mut core::ffi::c_void);
 }
 
-// Simple global allocator that uses C's malloc and free
 struct CAllocator;
 
 unsafe impl GlobalAlloc for CAllocator {
@@ -53,7 +51,6 @@ fn alloc_error_handler(_layout: Layout) -> ! {
     loop {}
 }
 
-// Implement rust_eh_personality for no_std environment
 #[no_mangle]
 extern "C" fn rust_eh_personality(
     _version: i32,
@@ -76,7 +73,6 @@ pub mod animation;
 pub mod resources;
 pub mod math;
 pub mod node;
-pub mod ui;
 pub mod event;
 pub mod input;
 pub mod camera;
@@ -85,38 +81,36 @@ pub mod window;
 pub mod sync;
 
 // Re-export main types from app
-pub use app::{App, AppBuilder, FHRE_VERSION, AppRunner, AppExit, Startup, PreUpdate, Update, PostUpdate};
+pub use app::{App, FHRE_VERSION};
+
+// Re-export schedule labels from schedule module
+pub use schedule::{Startup, PreUpdate, Update, PostUpdate, Last};
 
 // Re-export main types from main_world
 pub use main_world::{MainWorld, Entity, Component, System, IntoSystem};
-pub use main_world::{SystemParam, Res, ResMut, Query, Local, system1, system2, system3, system4};
+pub use main_world::{SystemParam, Res, ResMut, Query, Local, system1, system2, system3, system4, system5, system6, system7, system8, system9};
 pub use main_world::{Commands, Command, CommandsState, EntityCommands};
+pub use main_world::query_filter;
 
 // Re-export render_world types
 pub use render_world::{RenderWorld, RenderCommand, View, ViewBundle, RenderComponent};
 
 // Re-export extract
-pub use extract::{extract_renderable_components, ExtractComponent, ExtractSchedule, extract_components};
+pub use extract::{ExtractComponent, ExtractSchedule, ExtractPlugin, Extractors, Extract};
 
 // Re-export sync (NEW - aligned with Bevy)
-pub use sync::{SyncToRenderWorld, RenderEntity, MainEntity, PendingSyncEntity, entity_sync_system, detect_sync_changes_system};
-
-// Re-export schedule types (now in app module)
-// pub use schedule::{Startup, PreUpdate, Update, PostUpdate};
+pub use sync::{SyncToRenderWorld, RenderEntity, MainEntity, PendingSyncEntity, entity_sync_system};
 
 // Re-export resources
 pub use resources::{Time, PrimaryScreen, Resource};
 pub use resources::{Camera, ProjectionType};
 
 // Re-export plugin types
-pub use plugin::{Plugin, PluginGroup, DefaultPlugins, UiAnimatablePlugin, SyncComponentPlugin, SyncComponents};
+pub use plugin::{Plugin, PluginGroup, DefaultPlugins, SyncComponentPlugin, SyncComponents};
 pub use camera::CameraPlugin;
 
 // Re-export node types
 pub use node::{Node, NodeType, Transform2D, Transform3D};
-
-// Re-export UI types
-pub use ui::{Button, Cube, SoccerBall};
 
 // Re-export animation types
 pub use animation::{AnimationClip, AnimationClipHandle, AnimationPlayer, AnimationResources,
@@ -130,19 +124,19 @@ pub use math::{Color, Vec2, Vec3, Mat4};
 pub use input::{ButtonInput, MouseButton, KeyCode};
 
 // Re-export window types (platform-agnostic trait and event types)
-pub use window::{Window, WindowInputEvents, MouseButtonEvent, MouseMotionEvent, MouseWheelEvent, KeyboardEvent};
+pub use window::{Window, WindowInputEvents, MouseButtonEvent, MouseMotionEvent, MouseWheelEvent, KeyboardEvent, WindowRunner, WindowInputAdapter, DefaultInputAdapter, MousePosition};
 
 /// Prelude module for convenient imports
 pub mod prelude {
-    pub use crate::app::{App, Startup, Update};
+    pub use crate::schedule::{Startup, Update};
+    pub use crate::app::App;
     pub use crate::main_world::{Commands, Query, Res, ResMut, Local, system1, system2, system3, system4};
     pub use crate::resources::{Time, PrimaryScreen};
     pub use crate::plugin::Plugin;
     pub use crate::node::{Node, NodeType, Transform2D, Transform3D};
-    pub use crate::ui::{Button, Cube, SoccerBall};
     pub use crate::math::{Color, Vec2, Vec3};
     
-    // NEW: Sync markers for Bevy-aligned dual-world architecture
+    // Sync markers for Bevy-aligned dual-world architecture
     pub use crate::sync::SyncToRenderWorld;
     pub use crate::extract::ExtractComponent;
 }

@@ -4,7 +4,6 @@
 //! Manages draw commands in phases for efficient rendering.
 
 use alloc::vec::Vec;
-use crate::math::Color;
 
 /// Render phase type - determines rendering order and behavior
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -328,7 +327,9 @@ impl BatchBuilder {
                 if batch.can_batch(item.batch_key) {
                     batch.add_item();
                 } else {
-                    batches.push(current_batch.take().unwrap());
+                    if let Some(old_batch) = current_batch.take() {
+                        batches.push(old_batch);
+                    }
                     current_batch = Some(PhaseBatch::new(
                         i,
                         item.batch_key,

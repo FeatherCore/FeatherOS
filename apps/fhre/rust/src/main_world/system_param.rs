@@ -7,7 +7,6 @@ use super::world::MainWorld;
 use super::entity::Entity;
 use super::component::Component;
 use crate::resources::Resource;
-use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 
@@ -169,208 +168,6 @@ impl<T: 'static + Resource> SystemParam for ResMut<'_, T> {
     }
 }
 
-/// Basic Query for components (without filter support)
-///
-/// Use `FilteredQuery` for Bevy-style filtering:
-/// ```rust
-/// fn my_system(query: Query<&Transform>) {
-///     for transform in &query {
-///         println!("Position: {:?}", transform.position);
-///     }
-/// }
-/// ```
-///
-/// Note: This is being replaced by FilteredQuery which supports filters.
-/// Use the type alias `Query<T, F>` from `main_world` module.
-pub struct BasicQuery<'w, 's, T: Component> {
-    items: Vec<(Entity, *mut T)>,
-    _marker: PhantomData<(&'w (), &'s ())>,
-}
-
-impl<'w, 's, T: Component> BasicQuery<'w, 's, T> {
-    /// Create a new Query
-    pub fn new(world: &'w mut MainWorld) -> Self {
-        // Collect all matching entities first
-        let items: Vec<(Entity, *mut T)> = unsafe {
-            let world_ptr = world as *mut MainWorld;
-            let mut items = Vec::new();
-            
-            // Get entity IDs first
-            let entity_ids: Vec<u64> = (*world_ptr).entities()
-                .iter()
-                .map(|e| e.id())
-                .collect();
-            
-            // Then get components
-            for id in entity_ids {
-                if let Some(component) = (*world_ptr).get_component_mut::<T>(Entity::new(id)) {
-                    items.push((Entity::new(id), component as *mut T));
-                }
-            }
-            
-            items
-        };
-        
-        Self {
-            items,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Iterate over all matching components (immutable)
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
-        self.items.iter().map(|(_, ptr)| unsafe {
-            &**ptr
-        })
-    }
-
-    /// Iterate over all matching components (mutable)
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
-        self.items.iter_mut().map(|(_, ptr)| unsafe {
-            &mut **ptr
-        })
-    }
-
-    /// Iterate over entities and components (immutable)
-    pub fn iter_with_entities(&self) -> impl Iterator<Item = (Entity, &T)> {
-        self.items.iter().map(|(entity, ptr)| (*entity, unsafe {
-            &**ptr
-        }))
-    }
-
-    /// Iterate over entities and components (mutable)
-    pub fn iter_mut_with_entities(&mut self) -> impl Iterator<Item = (Entity, &mut T)> {
-        self.items.iter_mut().map(|(entity, ptr)| (*entity, unsafe {
-            &mut **ptr
-        }))
-    }
-
-    /// Get a single component
-    pub fn single(&self) -> Option<&T> {
-        self.iter().next()
-    }
-
-    /// Get a single component mutably
-    pub fn single_mut(&mut self) -> Option<&mut T> {
-        self.iter_mut().next()
-    }
-
-    /// Get component for a specific entity
-    pub fn get(&self, entity: Entity) -> Option<&T> {
-        self.items.iter()
-            .find(|(e, _)| e.id() == entity.id())
-            .map(|(_, ptr)| unsafe { &**ptr })
-    }
-
-    /// Get component mutably for a specific entity
-    pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {
-        self.items.iter_mut()
-            .find(|(e, _)| e.id() == entity.id())
-            .map(|(_, ptr)| unsafe { &mut **ptr })
-    }
-
-    /// Check if query has any matching entities
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-
-    /// Get the number of matching entities
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
-}
-
-impl<'w, 's, T: Component> IntoIterator for &'w BasicQuery<'w, 's, T> {
-    type Item = &'w T;
-    type IntoIter = QueryIter<'w, 's, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        QueryIter {
-            query: self,
-            index: 0,
-        }
-    }
-}
-
-impl<'w, 's, T: Component> IntoIterator for &'w mut BasicQuery<'w, 's, T> {
-    type Item = &'w mut T;
-    type IntoIter = QueryIterMut<'w, 's, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        QueryIterMut {
-            query: self,
-            index: 0,
-        }
-    }
-}
-
-/// Immutable query iterator
-pub struct QueryIter<'w, 's, T: Component> {
-    query: &'w BasicQuery<'w, 's, T>,
-    index: usize,
-}
-
-impl<'w, 's, T: Component> Iterator for QueryIter<'w, 's, T> {
-    type Item = &'w T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.query.items.len() {
-            let item = unsafe { &*self.query.items[self.index].1 };
-            self.index += 1;
-            Some(item)
-        } else {
-            None
-        }
-    }
-}
-
-/// Mutable query iterator
-pub struct QueryIterMut<'w, 's, T: Component> {
-    query: &'w mut BasicQuery<'w, 's, T>,
-    index: usize,
-}
-
-impl<'w, 's, T: Component> Iterator for QueryIterMut<'w, 's, T> {
-    type Item = &'w mut T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.query.items.len() {
-            // SAFETY: Each item is accessed only once
-            let ptr = self.query.items[self.index].1;
-            let item = unsafe { &mut *ptr };
-            self.index += 1;
-            Some(item)
-        } else {
-            None
-        }
-    }
-}
-
-/// State for BasicQuery SystemParam
-pub struct BasicQueryState<T: Component> {
-    _marker: PhantomData<T>,
-}
-
-impl<T: Component> Default for BasicQueryState<T> {
-    fn default() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T: Component> SystemParam for BasicQuery<'_, '_, T> {
-    type Item<'w, 's> = BasicQuery<'w, 's, T>;
-    type State = BasicQueryState<T>;
-
-    unsafe fn get_param<'w, 's>(
-        _state: &'s mut Self::State,
-        world: &'w mut MainWorld,
-    ) -> Self::Item<'w, 's> {
-        BasicQuery::new(world)
-    }
-}
-
 // Tuple implementations for SystemParam
 
 impl SystemParam for () {
@@ -522,5 +319,113 @@ impl<T: 'static + Default + Send> SystemParam for Local<'_, T> {
     ) -> Self::Item<'w, 's> {
         // Initialize on first access if needed
         Local { value: &mut state.value }
+    }
+}
+
+// === EntityRef and EntityMut ===
+
+/// Reference to an entity for read-only access
+///
+/// Use this when you need to access a specific entity in a system.
+/// This is typically used with Query to get entity references.
+pub struct EntityRef<'w> {
+    entity: Entity,
+    world: &'w MainWorld,
+}
+
+impl<'w> EntityRef<'w> {
+    /// Create a new EntityRef
+    pub fn new(entity: Entity, world: &'w MainWorld) -> Self {
+        Self { entity, world }
+    }
+
+    /// Get the entity ID
+    pub fn id(&self) -> Entity {
+        self.entity
+    }
+
+    /// Get a component from the entity
+    pub fn get<T: Component>(&self) -> Option<&T> {
+        self.world.get_component::<T>(self.entity)
+    }
+
+    /// Check if entity has a component
+    pub fn has<T: Component>(&self) -> bool {
+        self.world.get_component::<T>(self.entity).is_some()
+    }
+}
+
+/// Mutable reference to an entity
+///
+/// Use this when you need to modify a specific entity in a system.
+pub struct EntityMut<'w> {
+    entity: Entity,
+    world: &'w mut MainWorld,
+}
+
+impl<'w> EntityMut<'w> {
+    /// Create a new EntityMut
+    pub fn new(entity: Entity, world: &'w mut MainWorld) -> Self {
+        Self { entity, world }
+    }
+
+    /// Get the entity ID
+    pub fn id(&self) -> Entity {
+        self.entity
+    }
+
+    /// Get a component from the entity
+    pub fn get<T: Component>(&self) -> Option<&T> {
+        self.world.get_component::<T>(self.entity)
+    }
+
+    /// Get a mutable component from the entity
+    pub fn get_mut<T: Component>(&mut self) -> Option<&mut T> {
+        self.world.get_component_mut::<T>(self.entity)
+    }
+
+    /// Check if entity has a component
+    pub fn has<T: Component>(&self) -> bool {
+        self.world.get_component::<T>(self.entity).is_some()
+    }
+
+    /// Insert a component into the entity
+    pub fn insert<T: Component>(&mut self, component: T) {
+        self.world.insert_component(self.entity, component);
+    }
+
+    /// Remove a component from the entity
+    pub fn remove<T: Component>(&mut self) -> Option<T> {
+        self.world.remove_component::<T>(self.entity)
+    }
+
+    /// Despawn this entity
+    pub fn despawn(self) {
+        self.world.despawn(self.entity);
+    }
+}
+
+// === Entity SystemParam ===
+
+/// State for Entity SystemParam (passed directly)
+pub struct EntityState;
+
+impl Default for EntityState {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl SystemParam for Entity {
+    type Item<'w, 's> = Entity;
+    type State = EntityState;
+
+    unsafe fn get_param<'w, 's>(
+        _state: &'s mut Self::State,
+        _world: &'w mut MainWorld,
+    ) -> Self::Item<'w, 's> {
+        // Entity must be passed directly, not extracted from world
+        // This is used when Entity is part of a Query result
+        Entity::new(0) // placeholder, actual entity comes from Query
     }
 }

@@ -2,8 +2,7 @@
 //!
 //! Smooth transitions between animations with fade in/out effects.
 
-use super::player::{ActiveAnimation, AnimationPlayer, RepeatAnimation};
-use super::graph::AnimationNodeIndex;
+use super::player::AnimationPlayer;
 use crate::main_world::Component;
 
 /// An animation transition (fade out)

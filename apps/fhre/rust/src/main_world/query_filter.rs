@@ -132,3 +132,47 @@ impl QueryFilter for () {
         true
     }
 }
+
+/// Filter that matches entities where component T was added since last run
+///
+/// Usage:
+/// ```rust
+/// // Query entities where Transform was just added
+/// fn my_system(query: Query<&Transform, Added<Transform>>) {
+///     for transform in &query {
+///         // This Transform was added this frame
+///     }
+/// }
+/// ```
+pub struct Added<T: Component> {
+    _marker: PhantomData<T>,
+}
+
+impl<T: Component> QueryFilter for Added<T> {
+    fn matches(entity: Entity, world: &MainWorld) -> bool {
+        let last_run_tick = world.change_detection().last_run_tick();
+        world.change_detection().is_added::<T>(entity, last_run_tick)
+    }
+}
+
+/// Filter that matches entities where component T was changed since last run
+///
+/// Usage:
+/// ```rust
+/// // Query entities where Transform was modified
+/// fn my_system(query: Query<&Transform, Changed<Transform>>) {
+///     for transform in &query {
+///         // This Transform was modified this frame
+///     }
+/// }
+/// ```
+pub struct Changed<T: Component> {
+    _marker: PhantomData<T>,
+}
+
+impl<T: Component> QueryFilter for Changed<T> {
+    fn matches(entity: Entity, world: &MainWorld) -> bool {
+        let last_run_tick = world.change_detection().last_run_tick();
+        world.change_detection().is_changed::<T>(entity, last_run_tick)
+    }
+}

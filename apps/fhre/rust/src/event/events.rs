@@ -4,7 +4,6 @@
 //! Events are added to the current frame's queue and read from the previous frame.
 
 use alloc::collections::VecDeque;
-use alloc::vec::Vec;
 use core::any::{TypeId, Any};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;

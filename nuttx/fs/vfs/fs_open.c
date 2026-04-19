@@ -251,9 +251,10 @@ static int file_vopen(FAR struct file *filep, FAR const char *path,
 #endif
   else if (INODE_IS_DRIVER(inode) || INODE_IS_PIPE(inode))
     {
-      if (inode->u.i_ops->open != NULL)
+      FAR const struct file_operations *ops = inode->u.i_ops;
+      if (ops->open != NULL)
         {
-          ret = inode->u.i_ops->open(filep);
+          ret = ops->open(filep);
         }
     }
   else

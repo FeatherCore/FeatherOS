@@ -210,6 +210,8 @@ void sim_buttonevent(int x, int y, int buttons)
       /* Not yet reported */
 
       priv->contact = TOUCH_UP;
+      sample.point[0].x = x;
+      sample.point[0].y = y;
       sample.point[0].flags = TOUCH_UP | TOUCH_ID_VALID;
     }
   else
@@ -248,7 +250,7 @@ void sim_buttonevent(int x, int y, int buttons)
   sample.npoints            = 1;
   sample.point[0].h         = 1;
   sample.point[0].w         = 1;
-  sample.point[0].pressure  = 42;
+  sample.point[0].pressure  = pendown ? 42 : 0;
   sample.point[0].id        = priv->id;
 
   /* Report data changes */

@@ -10,7 +10,8 @@ use core::any::{TypeId, Any};
 /// Resource trait - Marker trait for resource types
 ///
 /// All resource types must implement this trait.
-pub trait Resource: 'static + Send + Sync {}
+/// Note: FHRE is single-threaded, so Send + Sync is not required.
+pub trait Resource: 'static {}
 
 /// Resources - Container for global data
 ///

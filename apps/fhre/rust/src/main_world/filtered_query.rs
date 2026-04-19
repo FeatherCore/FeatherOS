@@ -84,41 +84,50 @@ impl<'w, 's, T: Component, F: QueryFilter> FilteredQuery<'w, 's, T, F> {
         }
     }
 
-    /// Iterate over all matching components (immutable)
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
-        self.items.iter().map(|(_, ptr)| unsafe {
-            &**ptr
-        })
-    }
-
-    /// Iterate over all matching components (mutable)
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
-        self.items.iter_mut().map(|(_, ptr)| unsafe {
-            &mut **ptr
-        })
-    }
-
-    /// Iterate over entities and components (immutable)
-    pub fn iter_with_entities(&self) -> impl Iterator<Item = (Entity, &T)> {
+    /// Iterate over entity-component pairs (Bevy-style default)
+    /// 
+    /// This is the primary iteration method, returning (Entity, &T) tuples.
+    pub fn iter(&self) -> impl Iterator<Item = (Entity, &T)> {
         self.items.iter().map(|(entity, ptr)| (*entity, unsafe {
             &**ptr
         }))
     }
 
-    /// Iterate over entities and components (mutable)
-    pub fn iter_mut_with_entities(&mut self) -> impl Iterator<Item = (Entity, &mut T)> {
+    /// Iterate over entity-component pairs (mutable)
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (Entity, &mut T)> {
         self.items.iter_mut().map(|(entity, ptr)| (*entity, unsafe {
             &mut **ptr
         }))
     }
 
-    /// Get a single component
-    pub fn single(&self) -> Option<&T> {
+    /// Iterate over components only (without entity)
+    /// 
+    /// Use this when you don't need the Entity ID.
+    pub fn iter_components(&self) -> impl Iterator<Item = &T> {
+        self.items.iter().map(|(_, ptr)| unsafe {
+            &**ptr
+        })
+    }
+
+    /// Iterate over components only (mutable, without entity)
+    pub fn iter_components_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.items.iter_mut().map(|(_, ptr)| unsafe {
+            &mut **ptr
+        })
+    }
+
+    /// Iterate over entities only
+    pub fn iter_entities(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.items.iter().map(|(entity, _)| *entity)
+    }
+
+    /// Get a single entity-component pair
+    pub fn single(&self) -> Option<(Entity, &T)> {
         self.iter().next()
     }
 
-    /// Get a single component mutably
-    pub fn single_mut(&mut self) -> Option<&mut T> {
+    /// Get a single entity-component pair (mutable)
+    pub fn single_mut(&mut self) -> Option<(Entity, &mut T)> {
         self.iter_mut().next()
     }
 
@@ -136,6 +145,20 @@ impl<'w, 's, T: Component, F: QueryFilter> FilteredQuery<'w, 's, T, F> {
             .map(|(_, ptr)| unsafe { &mut **ptr })
     }
 
+    /// Get entity-component pair for a specific entity
+    pub fn get_pair(&self, entity: Entity) -> Option<(Entity, &T)> {
+        self.items.iter()
+            .find(|(e, _)| e.id() == entity.id())
+            .map(|(e, ptr)| (*e, unsafe { &**ptr }))
+    }
+
+    /// Get entity-component pair mutably for a specific entity
+    pub fn get_pair_mut(&mut self, entity: Entity) -> Option<(Entity, &mut T)> {
+        self.items.iter_mut()
+            .find(|(e, _)| e.id() == entity.id())
+            .map(|(e, ptr)| (*e, unsafe { &mut **ptr }))
+    }
+
     /// Check if query has any matching entities
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
@@ -145,10 +168,15 @@ impl<'w, 's, T: Component, F: QueryFilter> FilteredQuery<'w, 's, T, F> {
     pub fn len(&self) -> usize {
         self.items.len()
     }
+
+    /// Get the first entity ID if any
+    pub fn first_entity(&self) -> Option<Entity> {
+        self.items.first().map(|(e, _)| *e)
+    }
 }
 
 impl<'w, 's, T: Component, F: QueryFilter> IntoIterator for &'w FilteredQuery<'w, 's, T, F> {
-    type Item = &'w T;
+    type Item = (Entity, &'w T);
     type IntoIter = FilteredQueryIter<'w, 's, T, F>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -160,7 +188,7 @@ impl<'w, 's, T: Component, F: QueryFilter> IntoIterator for &'w FilteredQuery<'w
 }
 
 impl<'w, 's, T: Component, F: QueryFilter> IntoIterator for &'w mut FilteredQuery<'w, 's, T, F> {
-    type Item = &'w mut T;
+    type Item = (Entity, &'w mut T);
     type IntoIter = FilteredQueryIterMut<'w, 's, T, F>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -171,41 +199,42 @@ impl<'w, 's, T: Component, F: QueryFilter> IntoIterator for &'w mut FilteredQuer
     }
 }
 
-/// Immutable filtered query iterator
+/// Immutable filtered query iterator (returns Entity-component pairs)
 pub struct FilteredQueryIter<'w, 's, T: Component, F: QueryFilter> {
     query: &'w FilteredQuery<'w, 's, T, F>,
     index: usize,
 }
 
 impl<'w, 's, T: Component, F: QueryFilter> Iterator for FilteredQueryIter<'w, 's, T, F> {
-    type Item = &'w T;
+    type Item = (Entity, &'w T);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.query.items.len() {
-            let item = unsafe { &*self.query.items[self.index].1 };
+            let (entity, ptr) = self.query.items[self.index];
+            let item = unsafe { &*ptr };
             self.index += 1;
-            Some(item)
+            Some((entity, item))
         } else {
             None
         }
     }
 }
 
-/// Mutable filtered query iterator
+/// Mutable filtered query iterator (returns Entity-component pairs)
 pub struct FilteredQueryIterMut<'w, 's, T: Component, F: QueryFilter> {
     query: &'w mut FilteredQuery<'w, 's, T, F>,
     index: usize,
 }
 
 impl<'w, 's, T: Component, F: QueryFilter> Iterator for FilteredQueryIterMut<'w, 's, T, F> {
-    type Item = &'w mut T;
+    type Item = (Entity, &'w mut T);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.query.items.len() {
-            let ptr = self.query.items[self.index].1;
+            let (entity, ptr) = self.query.items[self.index];
             let item = unsafe { &mut *ptr };
             self.index += 1;
-            Some(item)
+            Some((entity, item))
         } else {
             None
         }
@@ -237,5 +266,4 @@ impl<T: Component, F: QueryFilter> SystemParam for FilteredQuery<'_, '_, T, F> {
     }
 }
 
-// Re-export common filter types for convenience
-pub use super::query_filter::{With, Without, Or, And};
+

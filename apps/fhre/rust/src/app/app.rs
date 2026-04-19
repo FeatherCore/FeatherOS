@@ -7,52 +7,37 @@ use crate::main_world::MainWorld;
 use crate::render_world::RenderWorld;
 use crate::resources::{Time, PrimaryScreen};
 use crate::plugin::{Plugin, PluginGroup};
-use crate::extract::extract_renderable_components;
-use crate::sync::{entity_sync_system, detect_sync_changes_system, PendingSyncEntity};
-use crate::extract::ExtractSchedule;
+use crate::extract::Extractors;
+use crate::schedule::ScheduleLabel;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use core::marker::PhantomData;
 
-// Re-export schedule types from schedule module
-pub use crate::schedule::{Startup as ScheduleStartup, PreUpdate as SchedulePreUpdate, 
-                          Update as ScheduleUpdate, PostUpdate as SchedulePostUpdate};
+/// Default target FPS for the application
+pub const DEFAULT_FPS: f32 = 60.0;
+/// Default frame time in seconds
+pub const DEFAULT_FRAME_TIME: f32 = 1.0 / DEFAULT_FPS;
 
 /// FHRE Version
-pub const FHRE_VERSION: &str = "2.0.0";
-
-/// App Builder for fluent API
-pub struct AppBuilder;
-
-/// App exit status
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppExit {
-    Success,
-    Error(i32),
-}
-
-/// Trait for custom app runners
-pub trait AppRunner {
-    fn run(self: Box<Self>, app: App) -> AppExit;
-}
-
-/// Schedule labels
-pub struct Startup;
-pub struct PreUpdate;
-pub struct Update;
-pub struct PostUpdate;
+pub const FHRE_VERSION: &[u8] = b"2.3.0\0";
 
 /// The main application struct
 ///
 /// Similar to Bevy's App, this orchestrates the entire application lifecycle.
 /// It manages plugins, schedules, and coordinates between Main World and Render World.
 ///
-/// # Example
-/// ```rust
-/// fn main() {
-///     App::new(640, 480)
-///         .add_plugin(MyPlugin)
-///         .run();
+/// # Usage
+///
+/// ```ignore
+/// let mut app = App::new(640, 480);
+/// app.add_plugins(DefaultPlugins)
+///     .insert_resource(MyResource::new())
+///     .add_systems(Startup, setup)
+///     .add_systems(Update, my_system);
+///
+/// // Main loop controlled by user (e.g., WindowRunner)
+/// loop {
+///     app.update_and_render();
+///     window.present(app.framebuffer());
 /// }
 /// ```
 pub struct App {
@@ -68,69 +53,57 @@ pub struct App {
     /// Whether the app has been initialized
     initialized: bool,
     
-    /// Custom runner (optional)
-    runner: Option<Box<dyn AppRunner>>,
+    /// Extract systems - run during extract phase
+    extractors: Extractors,
 }
 
 impl App {
     /// Create a new App with the specified screen dimensions
-    ///
-    /// # Example
-    /// ```rust
-    /// let app = App::new(640, 480);
-    /// ```
     pub fn new(width: u32, height: u32) -> Self {
         let mut app = Self {
             main_world: MainWorld::new(),
             render_world: RenderWorld::new(width, height),
             plugins: Vec::new(),
             initialized: false,
-            runner: None,
+            extractors: Extractors::new(),
         };
         
-        // Insert default resources
         app.insert_resource(Time::default());
         app.insert_resource(PrimaryScreen::new(width, height));
+        app.insert_resource(crate::sync::PendingSyncEntity::new());
         
         app
     }
+    
+    /// Add an extract system
+    /// 
+    /// Extract systems run during the extract phase, after Main World systems
+    /// and before rendering. They sync data from Main World to Render World.
+    pub fn add_extractor<F>(&mut self, extractor: F) -> &mut Self
+    where
+        F: Fn(&MainWorld, &mut RenderWorld) + Send + Sync + 'static,
+    {
+        self.extractors.add(extractor);
+        self
+    }
 
     /// Add a plugin to the app
-    ///
-    /// Plugins are the primary way to extend the app with functionality.
-    /// They can add systems, resources, and other setup.
-    ///
-    /// # Example
-    /// ```rust
-    /// app.add_plugin(MyPlugin);
-    /// ```
     pub fn add_plugin<P: Plugin>(&mut self, plugin: P) -> &mut Self {
-        // Always build plugin immediately, regardless of initialization state
-        // This ensures resources and entities are created when add_plugin is called
         plugin.build(self);
         self
     }
 
     /// Add a boxed plugin to the app
-    ///
-    /// This is used internally by PluginGroup.
     pub fn add_boxed_plugin(&mut self, plugin: Box<dyn Plugin>) -> &mut Self {
         if !self.initialized {
-            // Store plugin for later initialization
             self.plugins.push(plugin);
         } else {
-            // Initialize immediately if app is already running
             plugin.build(self);
         }
         self
     }
 
     /// Add a group of plugins
-    ///
-    /// # Example
-    /// ```rust
-    /// app.add_plugins(DefaultPlugins);
-    /// ```
     pub fn add_plugins<P: PluginGroup>(&mut self, group: P) -> &mut Self {
         let builder = group.build();
         builder.finish(self);
@@ -138,42 +111,14 @@ impl App {
     }
 
     /// Insert a resource into the Main World
-    ///
-    /// Resources are global singletons that can be accessed by systems.
-    ///
-    /// # Example
-    /// ```rust
-    /// app.insert_resource(MyResource::new());
-    /// ```
     pub fn insert_resource<R: crate::resources::Resource>(&mut self, resource: R) -> &mut Self {
         self.main_world.resources_mut().insert(resource);
         self
     }
 
     /// Add systems to a schedule
-    ///
-    /// # Example
-    /// ```rust
-    /// use fhre::prelude::*;
-    ///
-    /// app.add_systems(Update, my_system);
-    /// ```
     pub fn add_systems(&mut self, _schedule: impl ScheduleLabel, systems: impl IntoSystems) -> &mut Self {
         systems.add_to_app(self, _schedule);
-        self
-    }
-
-    /// Set a custom runner for the app
-    ///
-    /// The runner controls the main loop of the application.
-    /// By default, the app uses a simple runner that runs once.
-    ///
-    /// # Example
-    /// ```rust
-    /// app.set_runner(MyCustomRunner);
-    /// ```
-    pub fn set_runner(&mut self, runner: impl AppRunner + 'static) -> &mut Self {
-        self.runner = Some(Box::new(runner));
         self
     }
 
@@ -183,7 +128,6 @@ impl App {
             return;
         }
 
-        // Take ownership of plugins to avoid borrow issues
         let plugins: Vec<Box<dyn Plugin>> = self.plugins.drain(..).collect();
         
         for plugin in plugins {
@@ -193,75 +137,11 @@ impl App {
         self.initialized = true;
     }
 
-    /// Run the application
+    /// Run a single frame: systems + extract + render
     ///
-    /// This will initialize all plugins and then run the main loop.
-    /// If no runner is set, it will use the default runner.
-    pub fn run(mut self) -> AppExit {
-        self.initialize_plugins();
-
-        if let Some(runner) = self.runner.take() {
-            runner.run(self)
-        } else {
-            // Default runner - just run once
-            self.update();
-            AppExit::Success
-        }
-    }
-
-    /// Run a single update cycle
-    ///
-    /// This is called by the runner each frame.
-    pub fn update(&mut self) {
-        // Initialize plugins on first update
-        self.initialize_plugins();
-
-        // Run startup systems (only on first frame)
-        self.main_world.run_startup_systems();
-
-        // Update time
-        if let Some(time) = self.main_world.resources_mut().get_mut::<Time>() {
-            time.update(1.0 / 60.0);
-        }
-
-        // Run Main World systems
-        self.main_world.run_systems();
-
-        // =========================================================================
-        // Extract Phase (NEW: aligned with Bevy's dual-world architecture)
-        // =========================================================================
-
-        // Step 1: Detect new SyncToRenderWorld markers
-        detect_sync_changes_system(&mut self.main_world);
-
-        // Step 2: Sync entities between Main World and Render World
-        entity_sync_system(&mut self.main_world, &mut self.render_world);
-
-        // Step 3: Run registered extract systems from ExtractSchedule
-        self.render_world.clear_views();
-        if let Some(schedule) = self.main_world.resources().get::<ExtractSchedule>() {
-            let schedule = schedule.clone();
-            schedule.run(&self.main_world, &mut self.render_world);
-        }
-
-        // Step 4: Legacy extract (for backward compatibility)
-        extract_renderable_components(&self.main_world, &mut self.render_world);
-
-        // =========================================================================
-        // Render Phase
-        // =========================================================================
-        self.render_world.execute_render();
-
-        // Clear for next frame
-        self.render_world.clear_commands();
-        self.render_world.clear_views();
-    }
-
-    /// Update and render a single frame (for manual control)
-    ///
-    /// This is used when the Demo wants to control the main loop.
+    /// This is the main entry point for each frame.
+    /// Call this from your main loop (e.g., WindowRunner).
     pub fn update_and_render(&mut self) {
-        // Initialize plugins on first call (same as run()/update())
         self.initialize_plugins();
 
         // Run startup systems (only on first frame)
@@ -269,35 +149,19 @@ impl App {
 
         // Update time
         if let Some(time) = self.main_world.resources_mut().get_mut::<Time>() {
-            time.update(1.0 / 60.0);
+            time.update(DEFAULT_FRAME_TIME);
         }
 
         // Run Main World systems
         self.main_world.run_systems();
 
-        // =========================================================================
-        // Extract Phase (NEW: aligned with Bevy's dual-world architecture)
-        // =========================================================================
-
-        // Step 1: Detect new SyncToRenderWorld markers
-        detect_sync_changes_system(&mut self.main_world);
-
-        // Step 2: Sync entities between Main World and Render World
-        entity_sync_system(&mut self.main_world, &mut self.render_world);
-
-        // Step 3: Run registered extract systems from ExtractSchedule
+        // Extract Phase - sync Main World to Render World
+        crate::sync::entity_sync_system(&mut self.main_world, &mut self.render_world);
+        
         self.render_world.clear_views();
-        if let Some(schedule) = self.main_world.resources().get::<ExtractSchedule>() {
-            let schedule = schedule.clone();
-            schedule.run(&self.main_world, &mut self.render_world);
-        }
+        self.extractors.run(&self.main_world, &mut self.render_world);
 
-        // Step 4: Legacy extract (for backward compatibility)
-        extract_renderable_components(&self.main_world, &mut self.render_world);
-
-        // =========================================================================
         // Render Phase
-        // =========================================================================
         self.render_world.execute_render();
 
         // Clear for next frame
@@ -319,49 +183,6 @@ impl App {
     pub fn render_world_mut(&mut self) -> &mut RenderWorld {
         &mut self.render_world
     }
-
-    /// Check if the app is still running
-    ///
-    /// This is used by the runner to determine when to stop the main loop.
-    pub fn is_running(&self) -> bool {
-        true
-    }
-}
-
-/// Trait for types that can be used as schedule labels
-pub trait ScheduleLabel {
-    fn label(&self) -> &'static str;
-}
-
-// Implement ScheduleLabel for references
-impl<T: ScheduleLabel> ScheduleLabel for &T {
-    fn label(&self) -> &'static str {
-        (*self).label()
-    }
-}
-
-impl ScheduleLabel for Startup {
-    fn label(&self) -> &'static str {
-        "Startup"
-    }
-}
-
-impl ScheduleLabel for PreUpdate {
-    fn label(&self) -> &'static str {
-        "PreUpdate"
-    }
-}
-
-impl ScheduleLabel for Update {
-    fn label(&self) -> &'static str {
-        "Update"
-    }
-}
-
-impl ScheduleLabel for PostUpdate {
-    fn label(&self) -> &'static str {
-        "PostUpdate"
-    }
 }
 
 /// Trait for converting types into systems that can be added to the app
@@ -377,7 +198,8 @@ where
     fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel) {
         let system = crate::main_world::IntoSystem::into_system(self);
         let system_box = alloc::boxed::Box::new(system);
-        match schedule.label() {
+        let label_name = schedule.name();
+        match label_name.as_str() {
             "Startup" => app.main_world.add_startup_system_boxed(system_box),
             stage => app.main_world.add_boxed_system_to_stage(stage, system_box),
         }
@@ -392,7 +214,7 @@ macro_rules! impl_into_systems_tuple {
         {
             fn add_to_app(self, app: &mut App, schedule: impl ScheduleLabel) {
                 let ($($name,)+) = self;
-                $($name.add_to_app(app, &schedule);)+
+                $($name.add_to_app(app, schedule.clone());)+
             }
         }
     };

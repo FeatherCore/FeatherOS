@@ -51,7 +51,8 @@ context:: $(CARGO_CONFIG) $(FHRE_LIB)
 	cargo build \
 		--manifest-path $(RUST_CARGO_PATH)/Cargo.toml \
 		--target $(RUST_TARGET) \
-		--features nuttx
+		--no-default-features \
+		--features cube
 
 # Build FHRE library first
 $(FHRE_LIB):

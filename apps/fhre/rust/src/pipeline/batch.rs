@@ -14,7 +14,6 @@ use crate::render_world::{DrawCall, PrimitiveType, RenderCommand, Vertex};
 use crate::math::{Color, Rect, Vec2};
 use alloc::vec::Vec;
 use libm::sqrtf;
-use alloc::boxed::Box;
 
 /// Maximum vertices per batch (prevents buffer overflow)
 const MAX_BATCH_VERTICES: usize = 65536;
@@ -156,7 +155,8 @@ impl GpuTaskCollector {
             });
         }
 
-        let batch = self.current_batch.as_mut().unwrap();
+        // Safe: we just ensured current_batch is Some above
+        let batch = self.current_batch.as_mut().unwrap_or_else(|| unsafe { core::hint::unreachable_unchecked() });
 
         // Add vertices
         batch.vertices.extend_from_slice(&draw_call.vertices);

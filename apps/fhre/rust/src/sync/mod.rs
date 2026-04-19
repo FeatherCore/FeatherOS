@@ -10,6 +10,13 @@
 //! - [`MainEntity`]: Component in Render World storing the corresponding Main World entity ID
 //! - [`PendingSyncEntity`]: Resource tracking pending synchronization operations
 //!
+//! # Observer Mechanism
+//!
+//! Entity sync is triggered automatically via Observer pattern in MainWorld:
+//! - `insert_component<SyncToRenderWorld>` → adds `EntityRecord::Added`
+//! - `remove_component<SyncToRenderWorld>` → adds `EntityRecord::Removed`
+//! - `despawn` entity with `RenderEntity` → adds `EntityRecord::Removed`
+//!
 //! # Architecture
 //!
 //! ```text
@@ -26,4 +33,4 @@ pub mod sync_system;
 
 pub use sync_markers::{SyncToRenderWorld, RenderEntity, MainEntity};
 pub use pending_sync::{PendingSyncEntity, EntityRecord};
-pub use sync_system::{entity_sync_system, detect_sync_changes_system};
+pub use sync_system::entity_sync_system;
