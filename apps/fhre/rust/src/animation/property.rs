@@ -237,11 +237,10 @@ macro_rules! animated_field {
     };
 }
 
-/// Apply an animated value to a property
 pub fn apply_animated_value(
     property: AnimationProperty,
     value: f32,
-    transform: Option<&mut crate::main_world::Transform>,
+    transform: Option<&mut crate::node::Transform>,
     sprite: Option<&mut crate::main_world::Sprite>,
 ) {
     use AnimationProperty::*;
@@ -250,9 +249,12 @@ pub fn apply_animated_value(
         TranslationX => { if let Some(t) = transform { t.position.x = value; } }
         TranslationY => { if let Some(t) = transform { t.position.y = value; } }
         TranslationZ => { if let Some(t) = transform { t.position.z = value; } }
-        Rotation => { if let Some(t) = transform { t.rotation = value; } }
+        RotationX => { if let Some(t) = transform { t.rotation.x = value; } }
+        RotationY => { if let Some(t) = transform { t.rotation.y = value; } }
+        RotationZ => { if let Some(t) = transform { t.rotation.z = value; } }
         ScaleX => { if let Some(t) = transform { t.scale.x = value; } }
         ScaleY => { if let Some(t) = transform { t.scale.y = value; } }
+        ScaleZ => { if let Some(t) = transform { t.scale.z = value; } }
         ColorR => { if let Some(s) = sprite { s.color.r = value as u8; } }
         ColorG => { if let Some(s) = sprite { s.color.g = value as u8; } }
         ColorB => { if let Some(s) = sprite { s.color.b = value as u8; } }

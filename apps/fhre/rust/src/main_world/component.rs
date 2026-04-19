@@ -3,12 +3,9 @@
 //! Components are data containers attached to entities.
 //! They represent properties like position, velocity, sprite, etc.
 //!
-//! # Note
-//!
-//! For transforms, prefer using `Transform2D` or `Transform3D` from the `node` module.
-//! The `Transform` type here is a legacy 2.5D transform kept for backward compatibility.
+//! For transforms, use `Transform` from the `node` module.
 
-use crate::math::{Vec2, Vec3, Color};
+use crate::math::{Vec2, Color};
 
 /// Component trait - Marker trait for component types
 /// 
@@ -19,101 +16,6 @@ pub trait Component: 'static + Send + Sync {
     fn type_name() -> &'static str
     where
         Self: Sized;
-}
-
-/// Transform component - Legacy 2.5D transform
-///
-/// # Note
-///
-/// For new code, prefer using:
-/// - `Transform2D` from `node` module for 2D objects
-/// - `Transform3D` from `node` module for 3D objects
-///
-/// This type is kept for backward compatibility with existing code.
-#[derive(Clone, Debug, PartialEq)]
-#[deprecated(since = "2.3.0", note = "Use Transform2D or Transform3D from node module")]
-pub struct Transform {
-    pub position: Vec3,
-    pub rotation: f32,
-    pub scale: Vec2,
-}
-
-impl Transform {
-    /// Create a new transform at origin
-    pub fn new() -> Self {
-        Self {
-            position: Vec3::new(0.0, 0.0, 0.0),
-            rotation: 0.0,
-            scale: Vec2::new(1.0, 1.0),
-        }
-    }
-
-    /// Create a transform at a specific position
-    pub fn from_position(x: f32, y: f32) -> Self {
-        Self {
-            position: Vec3::new(x, y, 0.0),
-            rotation: 0.0,
-            scale: Vec2::new(1.0, 1.0),
-        }
-    }
-
-    /// Create a transform with position and scale
-    pub fn from_position_scale(x: f32, y: f32, scale_x: f32, scale_y: f32) -> Self {
-        Self {
-            position: Vec3::new(x, y, 0.0),
-            rotation: 0.0,
-            scale: Vec2::new(scale_x, scale_y),
-        }
-    }
-
-    /// Set position
-    pub fn with_position(mut self, x: f32, y: f32) -> Self {
-        self.position.x = x;
-        self.position.y = y;
-        self
-    }
-
-    /// Set rotation
-    pub fn with_rotation(mut self, rotation: f32) -> Self {
-        self.rotation = rotation;
-        self
-    }
-
-    /// Set scale
-    pub fn with_scale(mut self, x: f32, y: f32) -> Self {
-        self.scale.x = x;
-        self.scale.y = y;
-        self
-    }
-
-    /// Translate by a delta
-    pub fn translate(&mut self, dx: f32, dy: f32) {
-        self.position.x += dx;
-        self.position.y += dy;
-    }
-
-    /// Rotate by a delta
-    pub fn rotate(&mut self, delta: f32) {
-        self.rotation += delta;
-    }
-
-    /// Scale by a factor
-    pub fn scale_by(&mut self, factor: f32) {
-        self.scale.x *= factor;
-        self.scale.y *= factor;
-    }
-}
-
-impl Default for Transform {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Component for Transform {
-    fn type_name() -> &'static str {
-        "Transform"
-    }
 }
 
 /// Sprite component - Visual representation

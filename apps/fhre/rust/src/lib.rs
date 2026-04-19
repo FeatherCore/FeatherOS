@@ -74,11 +74,11 @@ pub mod resources;
 pub mod math;
 pub mod node;
 pub mod event;
-pub mod input;
 pub mod camera;
 pub mod plugin;
 pub mod window;
 pub mod sync;
+pub mod picking;
 
 // Re-export main types from app
 pub use app::{App, FHRE_VERSION};
@@ -110,7 +110,7 @@ pub use plugin::{Plugin, PluginGroup, DefaultPlugins, SyncComponentPlugin, SyncC
 pub use camera::CameraPlugin;
 
 // Re-export node types
-pub use node::{Node, NodeType, Transform2D, Transform3D};
+pub use node::{Node, NodeType, Transform, Transform3D};
 
 // Re-export animation types
 pub use animation::{AnimationClip, AnimationClipHandle, AnimationPlayer, AnimationResources,
@@ -120,11 +120,16 @@ pub use animation::{AnimationClip, AnimationClipHandle, AnimationPlayer, Animati
 // Re-export math types (includes Color)
 pub use math::{Color, Vec2, Vec3, Mat4};
 
-// Re-export input types
-pub use input::{ButtonInput, MouseButton, KeyCode};
-
 // Re-export window types (platform-agnostic trait and event types)
-pub use window::{Window, WindowInputEvents, MouseButtonEvent, MouseMotionEvent, MouseWheelEvent, KeyboardEvent, WindowRunner, WindowInputAdapter, DefaultInputAdapter, MousePosition};
+pub use window::{Window, WindowInputEvents, MouseButtonEvent, MouseMotionEvent, MouseWheelEvent, KeyboardEvent, MousePosition};
+
+// Re-export picking types
+pub use picking::{
+    Pickable, PickableBounds, HitData,
+    HoverMap, PreviousHoverMap, PointerId,
+    PointerHits, PickingPlugin, PointerHitsBuffer,
+    update_hover_map, ui_picking_backend,
+};
 
 /// Prelude module for convenient imports
 pub mod prelude {
@@ -133,7 +138,7 @@ pub mod prelude {
     pub use crate::main_world::{Commands, Query, Res, ResMut, Local, system1, system2, system3, system4};
     pub use crate::resources::{Time, PrimaryScreen};
     pub use crate::plugin::Plugin;
-    pub use crate::node::{Node, NodeType, Transform2D, Transform3D};
+    pub use crate::node::{Node, NodeType, Transform, Transform3D};
     pub use crate::math::{Color, Vec2, Vec3};
     
     // Sync markers for Bevy-aligned dual-world architecture

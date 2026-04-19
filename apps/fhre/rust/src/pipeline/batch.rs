@@ -249,20 +249,24 @@ impl HybridScheduler {
     /// - Rule 2: Only isolated primitives that can't join any batch go to CPU
     fn classify_task(command: &RenderCommand) -> TaskType {
         match command {
-            // Clear and scissor commands are special - they break batches
             RenderCommand::Clear { .. } => TaskType::Cpu,
             RenderCommand::SetScissor { .. } => TaskType::Cpu,
             RenderCommand::DisableScissor => TaskType::Cpu,
+            RenderCommand::PushMask => TaskType::Cpu,
+            RenderCommand::PopMask => TaskType::Cpu,
 
-            // Text rendering is currently CPU-only (simplified implementation)
             RenderCommand::DrawText { .. } => TaskType::Cpu,
 
-            // All geometric primitives can be batched for GPU
             RenderCommand::DrawRect { .. } => TaskType::Gpu,
+            RenderCommand::DrawRectGradient { .. } => TaskType::Gpu,
+            RenderCommand::DrawRectRounded { .. } => TaskType::Cpu,
+            RenderCommand::DrawRectRoundedGradient { .. } => TaskType::Cpu,
             RenderCommand::DrawLine { .. } => TaskType::Gpu,
             RenderCommand::DrawTriangle { .. } => TaskType::Gpu,
-            // Polygons are handled by CPU for now (complex scanline algorithm)
             RenderCommand::DrawPolygon { .. } => TaskType::Cpu,
+
+            RenderCommand::DrawImage { .. } => TaskType::Gpu,
+            RenderCommand::DrawImageTransformed { .. } => TaskType::Cpu,
         }
     }
 
@@ -314,10 +318,22 @@ fn command_to_draw_calls(command: &RenderCommand) -> Vec<DrawCall> {
             draw_calls.push(draw_call);
         }
 
+        RenderCommand::DrawRectGradient { rect, gradient } => {
+            let mut draw_call = DrawCall::new(PrimitiveType::Triangles);
+
+            let colors = gradient.sample_rect(rect);
+            let tl = Vertex::with_color(Vec2::new(rect.x, rect.y), colors[0]);
+            let tr = Vertex::with_color(Vec2::new(rect.x + rect.width, rect.y), colors[1]);
+            let br = Vertex::with_color(Vec2::new(rect.x + rect.width, rect.y + rect.height), colors[2]);
+            let bl = Vertex::with_color(Vec2::new(rect.x, rect.y + rect.height), colors[3]);
+
+            draw_call.add_quad(tl, tr, br, bl);
+            draw_calls.push(draw_call);
+        }
+
         RenderCommand::DrawLine { start, end, color, thickness } => {
             let mut draw_call = DrawCall::new(PrimitiveType::Triangles);
 
-            // Create a thick line using two triangles
             let dx = end.x - start.x;
             let dy = end.y - start.y;
             let len = sqrtf(dx * dx + dy * dy);
@@ -347,9 +363,20 @@ fn command_to_draw_calls(command: &RenderCommand) -> Vec<DrawCall> {
             draw_calls.push(draw_call);
         }
 
-        _ => {
-            // Other commands don't produce draw calls (handled by CPU)
+        RenderCommand::DrawImage { rect, texture_id, region, color } => {
+            let mut draw_call = DrawCall::new(PrimitiveType::Triangles);
+            draw_call.set_texture(*texture_id);
+
+            let tl = Vertex::with_uv_color(Vec2::new(rect.x, rect.y), Vec2::new(region.u0, region.v0), *color);
+            let tr = Vertex::with_uv_color(Vec2::new(rect.x + rect.width, rect.y), Vec2::new(region.u1, region.v0), *color);
+            let br = Vertex::with_uv_color(Vec2::new(rect.x + rect.width, rect.y + rect.height), Vec2::new(region.u1, region.v1), *color);
+            let bl = Vertex::with_uv_color(Vec2::new(rect.x, rect.y + rect.height), Vec2::new(region.u0, region.v1), *color);
+
+            draw_call.add_quad(tl, tr, br, bl);
+            draw_calls.push(draw_call);
         }
+
+        _ => {}
     }
 
     draw_calls

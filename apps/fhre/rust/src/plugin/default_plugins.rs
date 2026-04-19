@@ -21,6 +21,7 @@ use crate::plugin::plugin_group::PluginGroupBuilder;
 use crate::event::EventPlugin;
 use crate::animation::AnimationPlugin;
 use crate::camera::CameraPlugin;
+use crate::picking::PickingPlugin;
 
 /// Default plugins for FHRE applications
 ///
@@ -47,6 +48,7 @@ impl PluginGroup for DefaultPlugins {
             .add(EventPlugin)
             .add(AnimationPlugin)
             .add(CameraPlugin)
+            .add(PickingPlugin)
     }
 }
 

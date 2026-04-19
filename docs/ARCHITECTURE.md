@@ -1,672 +1,956 @@
-# FHRE (Feather Hybrid Render Engine) v2.4
+# FHRE 架构文档
 
 ## 概述
 
-FHRE 是一个轻量级混合渲染引擎，采用声明式双世界架构，灵感来自 Bevy 的 ECS 和渲染图设计，适配嵌入式系统。
+FHRE (Feather Hybrid Render Engine) 是一个轻量级的纯 3D 渲染引擎，设计用于嵌入式系统 (no_std)。采用 Bevy 风格的双世界 ECS 架构，2D 只是 3D 的特例（z=0 平面上的对象）。
 
-### 核心特性
+**版本**: 3.0.0  
+**目标平台**: 嵌入式系统 (NuttX RTOS)  
+**设计理念**: 纯 3D 引擎，ECS 架构，双世界同步，组件自管理交互
 
-- **声明式双世界架构** (Main World + Render World)
-- **ECS (Entity-Component-System)** 设计，对齐 Bevy
-- **Observer 机制** - 自动检测 `SyncToRenderWorld` 变化
-- **软件渲染后端** - CPU 光栅化，无 GPU 依赖
-- **单相机架构** - 唯一 3D 透视相机 + 幕布系统
-- **嵌入式友好的无标准库实现** (`no_std`)
-- **跨平台窗口抽象** - X11 / Framebuffer / 用户自定义
+## 核心概念
 
----
+### 纯 3D 引擎
 
-## 1. 架构总览
+FHRE 是纯 3D 引擎，所有实体都在 3D 空间中：
+- 2D 只是 3D 的特例：z=0 平面上的对象
+- 通过正交相机投影到屏幕
+- 统一使用 `Transform` 作为唯一变换组件
+- `Transform3D` 作为别名保持兼容
+- NodeType 不再区分 2D/3D（如 Sprite2D → Sprite, Model3D → Model）
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Application Layer                         │
-│                                                                  │
-│   用户代码构建 App，使用 WindowRunner 控制主循环                   │
-│                                                                  │
-│   ┌──────────────────────────────────────────────────────────┐  │
-│   │  WindowRunner::run()                                     │  │
-│   │    loop {                                                │  │
-│   │      collect_input_events()  // 收集平台输入              │  │
-│   │      bridge_input()          // 桥接到 FHRE 输入资源      │  │
-│   │      app.update_and_render() // 执行一帧                 │  │
-│   │      window.present(framebuffer) // 呈现到屏幕            │  │
-│   │    }                                                     │  │
-│   └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         FHRE Core                                │
-│                                                                  │
-│   ┌─────────────┐    ┌─────────────┐    ┌─────────────────┐    │
-│   │  Main World │    │ Extract     │    │  Render World   │    │
-│   │  (ECS)      │───▶│ (Sync)      │───▶│  (软件渲染)      │    │
-│   │             │    │             │    │                 │    │
-│   │ - Entities  │    │ - Extract   │    │ - Views         │    │
-│   │ - Components│    │   Systems   │    │ - Commands      │    │
-│   │ - Systems   │    │ - Observer  │    │ - Framebuffer   │    │
-│   │ - Resources │    │   Mechanism │    │                 │    │
-│   └─────────────┘    └─────────────┘    └─────────────────┘    │
-│                                                                  │
-│   ┌─────────────────────────────────────────────────────────┐   │
-│   │  Systems Schedule                                        │   │
-│   │  Startup → PreUpdate → Update → PostUpdate              │   │
-│   └─────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Platform Layer                              │
-│                                                                  │
-│   ┌───────────┐  ┌───────────┐  ┌───────────────────────────┐  │
-│   │ X11Window │  │ FBWindow  │  │ MyPlatformWindow          │  │
-│   │ (sim)     │  │ (nuttx)   │  │ (用户自定义)               │  │
-│   │           │  │           │  │                           │  │
-│   │ impl Win  │  │ impl Win  │  │ impl Window trait         │  │
-│   └───────────┘  └───────────┘  └───────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+### Picking 系统 + 按钮交互
+
+FHRE 使用 Picking 系统检测指针与 UI 元素的交互，Button 组件管理交互状态：
+
+```rust
+pub struct Button {
+    // 渲染属性
+    pub width: f32,
+    pub height: f32,
+    pub state: ButtonState,  // Normal, Hover, Pressed, Disabled
+    
+    // 交互状态（由 button_interaction_system 更新）
+    pub clicked: bool,  // 本帧是否被点击
+}
 ```
 
----
+**交互流程**：
+1. `picking_system` 检测鼠标位置与 `PickableBounds` 的碰撞
+2. `update_hover_map` 更新 `HoverMap` 和 `PreviousHoverMap`
+3. `button_interaction_system` 根据悬停状态更新 `Button.state` 和 `Button.clicked`
+4. 用户系统检查 `button.clicked` 执行操作
 
-## 2. 单相机架构 + 幕布系统
+**关键组件**：
+- `PickableBounds`: 可点击区域 (width, height)
+- `Pickable`: 是否可悬停、是否阻挡下层（必须使用 `Pickable::DEFAULT`，而非 `default()`）
+- `HoverMap` / `PreviousHoverMap`: 当前帧/上一帧悬停的实体
 
-### 2.1 核心架构
+## 目录结构
 
 ```
-3D 主世界（唯一 3D 透视摄像机）
+fhre/rust/src/
+├── lib.rs                    # 库入口，全局分配器，panic handler
+├── app/
+│   └── app.rs                # App 结构，插件注册，update_and_render
+├── main_world/               # 主世界 (游戏逻辑)
+│   ├── mod.rs
+│   ├── world.rs              # MainWorld ECS
+│   ├── entity.rs             # Entity ID
+│   ├── component.rs          # Component trait
+│   ├── system.rs             # System trait, declare_system! 宏
+│   ├── system_param.rs       # Res, ResMut, Query, Local
+│   ├── commands.rs           # Commands, EntityCommands
+│   ├── change_detection.rs   # 变更检测 (未使用)
+│   ├── filtered_query.rs     # FilteredQuery
+│   ├── query_data.rs         # 多组件查询 (未使用)
+│   └── query_filter.rs       # With, Without 等
+├── render_world/             # 渲染世界 (渲染数据)
+│   ├── mod.rs
+│   ├── world.rs              # RenderWorld ECS
+│   ├── command.rs            # RenderCommand, DrawCall
+│   ├── phase.rs              # RenderPhase, PhaseItem (未使用)
+│   ├── view.rs               # View, ViewTarget, ClearConfig
+│   ├── extracted.rs          # ExtractedMesh, ExtractedView, ExtractedUI
+│   └── object.rs             # RenderObject (未使用)
+├── pipeline/                 # 渲染管线
+│   ├── mod.rs
+│   ├── renderer.rs           # Renderer trait
+│   ├── batch.rs              # 批处理系统 (未使用)
+│   ├── texture.rs            # 纹理系统 (未使用)
+│   ├── gradient.rs           # 渐变系统
+│   ├── software/             # CPU 软件渲染后端
+│   │   ├── mod.rs
+│   │   └── backend.rs        # SoftwareBackend
+│   └── gpu/                  # GPU 渲染后端 (空占位)
+│       └── mod.rs
+├── sync/                     # 双世界同步
+│   ├── mod.rs
+│   ├── sync_markers.rs       # SyncToRenderWorld, RenderEntity, MainEntity
+│   ├── pending_sync.rs       # PendingSyncEntity
+│   └── sync_system.rs        # entity_sync_system
+├── extract/                  # 提取阶段
+│   └── mod.rs                # ExtractComponent, Extractors
+├── schedule/                 # 调度系统
+│   ├── mod.rs
+│   ├── schedule.rs           # Schedule
+│   ├── label.rs              # Startup, Update, PreUpdate, PostUpdate, Last
+│   ├── set.rs                # SystemSet (未使用)
+│   └── condition.rs          # RunCondition (未使用)
+├── plugin/                   # 插件系统
+│   ├── mod.rs
+│   ├── plugin.rs             # Plugin trait
+│   ├── plugin_group.rs       # PluginGroup
+│   ├── default_plugins.rs    # DefaultPlugins
+│   └── sync_component_plugin.rs  # SyncComponentPlugin (未使用)
+├── node/                     # 节点系统
+│   ├── mod.rs
+│   ├── node.rs               # Node, NodeType
+│   ├── node3d.rs             # Transform, Transform3D
+│   ├── style.rs              # Style (未使用)
+│   └── layout.rs             # Layout (未使用)
+├── animation/                # 动画系统
+│   ├── mod.rs
+│   ├── clip.rs               # AnimationClip
+│   ├── curve.rs              # KeyframeCurve
+│   ├── easing.rs             # Easing 函数
+│   ├── player.rs             # AnimationPlayer
+│   └── property.rs           # AnimationProperty, AnimationReceiver
+├── math/                     # 数学库
+│   ├── mod.rs
+│   ├── vec2.rs               # Vec2
+│   ├── vec3.rs               # Vec3
+│   ├── mat4.rs               # Mat4
+│   ├── rect.rs               # Rect
+│   └── color.rs              # Color, BlendMode
+├── resources/                # 资源系统
+│   ├── mod.rs
+│   ├── resources.rs          # Resource trait, Resources 存储
+│   ├── time.rs               # Time
+│   ├── camera.rs             # Camera
+│   ├── screen.rs             # PrimaryScreen
+│   └── config.rs             # Config
+├── event/                    # 事件系统
+│   ├── mod.rs
+│   ├── events.rs             # Events
+│   ├── event_reader.rs       # EventReader
+│   ├── event_writer.rs       # EventWriter
+│   └── system_param.rs
+├── camera/                   # 相机插件
+│   └── mod.rs
+├── picking/                  # Picking 系统
+│   ├── mod.rs                # 模块导出
+│   ├── pickable.rs           # Pickable 组件
+│   ├── bounds.rs             # PickableBounds 组件
+│   ├── hover.rs              # HoverMap, PreviousHoverMap
+│   ├── system.rs             # update_hover_map, ui_picking_backend
+│   └── plugin.rs             # PickingPlugin, PointerHitsBuffer
+└── window/                   # 窗口抽象 (平台无关)
+    └── mod.rs                # Window trait, MousePosition, 原始事件类型
+
+# 平台层 (examples/fhre/rust/src/platform/)
+platform/
+├── mod.rs
+├── framebuffer.rs            # Window 实现 (NuttX/X11)
+├── input/                    # 平台输入类型
+│   ├── mod.rs
+│   ├── button_input.rs       # ButtonInput<T>
+│   ├── keyboard.rs           # KeyCode, Key
+│   └── mouse.rs              # MouseButton
+└── runner.rs                 # InputBridge, WindowRunner
+
+# 应用层组件 (examples/fhre/rust/src/components/)
+components/
+├── mod.rs
+├── button.rs                 # Button 组件 (含交互状态)
+├── cube.rs                   # Cube 3D 模型
+└── soccer_ball.rs            # SoccerBall 3D 模型
+```
+
+## 核心架构
+
+### 1. 双世界架构 (Dual World Architecture)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                           App                                       │
+│  ┌─────────────────────────┐    ┌─────────────────────────┐        │
+│  │      Main World         │    │     Render World        │        │
+│  │  ─────────────────      │    │  ─────────────────      │        │
+│  │  • Entity + Component   │    │  • Entity + Component   │        │
+│  │  • Transform            │    │  • MainEntity           │        │
+│  │  • Cube, SoccerBall     │    │  • ExtractedMesh        │        │
+│  │  • AnimationPlayer      │    │  • ExtractedUI          │        │
+│  │  • Button (含交互状态)   │    │  • RenderCommand        │        │
+│  │  • Game Logic Systems   │    │                         │        │
+│  └─────────────────────────┘    └─────────────────────────┘        │
+│              │                              ▲                      │
+│              │ entity_sync_system           │                      │
+│              │ Extractors                   │                      │
+│              └──────────────────────────────┘                      │
+│                              │                                      │
+│                              ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────┐  │
+│  │                    SoftwareBackend                           │  │
+│  │              CPU 软件渲染 (fill_rect, fill_polygon, etc.)   │  │
+│  └─────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 2. 帧生命周期
+
+```
+帧执行顺序 (App::update_and_render):
+
+1. initialize_plugins()     # 仅首帧，初始化插件
+2. run_startup_systems()    # 仅首帧，执行 Startup 系统
+3. Update Time resource     # 更新时间
+4. run_systems()            # 执行主世界系统
+    ├── PreUpdate            # button_interaction_system, input_system
+    ├── apply_commands()     # 应用命令
+   ├── Update               # 游戏逻辑、动画
+   ├── apply_commands()     # 应用命令
+   ├── PostUpdate           # 后处理
+   └── apply_commands()     # 应用命令
+5. entity_sync_system()     # 同步实体到渲染世界
+6. extractors.run()         # 提取组件到渲染世界
+7. execute_render()         # 执行渲染
+8. clear_commands()         # 清理命令
+```
+
+### 3. 实体同步机制
+
+```rust
+// Main World 标记
+#[derive(Component)]
+struct SyncToRenderWorld;  // 标记需要同步到渲染世界
+
+// Main World 组件
+#[derive(Component)]
+struct RenderEntity(Entity);  // 存储对应的渲染世界实体 ID
+
+// Render World 组件
+#[derive(Component)]
+struct MainEntity(Entity);  // 存储对应的主世界实体 ID
+
+// 同步流程
+Main World: Entity A + SyncToRenderWorld
     │
-    │ 摄像机采集（MVP 变换）
-    │ 摄像机 target 自动追踪幕布位置
+    │ entity_sync_system (检查 PendingSyncEntity)
     ▼
-2D 屏幕幕布（PrimaryScreen，3D 世界中的投影平面）
-    │  - 含 Transform3D，可操作（拉近拉远、旋转等）
-    │  - 3D 控件：经 MVP 投影到幕布坐标
-    │  - 2D UI：直接用幕布像素坐标绘制
-    │  - 默认与呈现窗口 1:1 重叠
+Render World: Entity B + MainEntity(A)
+    │
+    │ extract_xxx (自定义提取器)
     ▼
-呈现窗口（X11 / FB / 用户定义，不属于 FHRE）
+Render World: Entity B + ExtractedMesh / ExtractedUI
+    │
+    │ queue_xxx (生成命令)
+    ▼
+Render World: RenderCommand 列表
 ```
 
-### 2.2 核心原则
-
-1. **主世界是纯 3D 的**，只有一个 3D 透视摄像机
-2. **2D 屏幕幕布是摄像机投影平面**，所有内容统一绘制到幕布上
-3. **幕布是 3D 世界中的对象**，含 Transform3D，可操作
-4. **摄像机 target 自动追踪幕布位置**，幕布移动时摄像机跟随
-5. **呈现窗口与 FHRE 主世界独立**，由用户定义
-
-### 2.3 默认位置关系
+### 4. 数据流详解
 
 ```
-Camera:  position = (width/2, height/2, 600)   ← 在幕布正后方 600 单位
-         target   = (width/2, height/2, 0)      ← 看向幕布中心
-Canvas:  position = (width/2, height/2, 0)      ← 幕布在 z=0 平面
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              MAIN LOOP                                       │
+│  (WindowRunner::run)                                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  1. INPUT BRIDGING                                                          │
+│     WindowRunner::bridge_keyboard_input()                                   │
+│     WindowRunner::bridge_mouse_input()                                      │
+│     → Updates ButtonInput<KeyCode>, ButtonInput<MouseButton>, MousePosition │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  2. App::update_and_render()                                                │
+│     ├── initialize_plugins() (first frame only)                             │
+│     ├── main_world.run_startup_systems() (first frame only)                 │
+│     ├── Update Time resource                                                │
+│     └── main_world.run_systems()                                            │
+│         ├── PreUpdate: button_interaction_system, input_system              │
+│         ├── Update: setup_animation, animation_control_system,              │
+│         │           model_switch_system, apply_animations                    │
+│         └── PostUpdate: (empty)                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  3. SYNC PHASE                                                              │
+│     entity_sync_system(&mut main_world, &mut render_world)                  │
+│     → Syncs entities marked with SyncToRenderWorld                          │
+│     → Creates RenderEntity in Main World, MainEntity in Render World        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  4. EXTRACT PHASE                                                           │
+│     extractors.run(&main_world, &mut render_world)                          │
+│     ├── extract_view: Camera → ViewBundle                                   │
+│     ├── extract_3d_components: Cube/SoccerBall → ExtractedMesh              │
+│     ├── extract_buttons: Button → ExtractedUI                               │
+│     ├── queue_meshes: ExtractedMesh → RenderCommand::DrawPolygon/DrawLine   │
+│     └── queue_ui: ExtractedUI → RenderCommand::DrawRect                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  5. RENDER PHASE                                                            │
+│     render_world.execute_render()                                           │
+│     └── SoftwareBackend::execute_commands(&commands)                        │
+│         ├── clear(color)                                                    │
+│         ├── fill_polygon()                                                  │
+│         ├── draw_line()                                                     │
+│         └── fill_rect()                                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  6. PRESENT                                                                 │
+│     window.present(app.framebuffer())                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.4 幕布操作效果
+## 模块详解
+
+### 1. Main World (主世界)
+
+**职责**: 游戏逻辑、场景管理、用户系统
+
+**核心类型**:
+- `Entity`: 实体 ID (u64)
+- `Component`: 组件 trait
+- `System`: 系统 trait
+- `Query<T>`: 组件查询（单组件）
+- `Commands`: 命令缓冲区
+
+**重要限制**:
+- `Query<T>` 要求 `T: Component`，不支持元组查询如 `Query<(A, B)>`
+- 需要关联多个组件时，使用多个独立的 Query，通过 Entity ID 关联
+
+**系统声明宏**:
+```rust
+declare_system!(func_name; Param1, Param2, ...)
+// 展开为 systemN::<P1, P2, ..., _>(func_name)
+```
+
+### 2. Render World (渲染世界)
+
+**职责**: 渲染数据存储、命令生成、帧缓冲输出
+
+**核心类型**:
+- `RenderCommand`: 渲染命令枚举
+- `ExtractedMesh`: 提取的 3D 网格数据
+- `ExtractedUI`: 提取的 UI 数据
+- `ViewBundle`: 视图配置
+
+### 3. Pipeline (渲染管线)
+
+**SoftwareBackend**:
+- Alpha 混合 (Normal 模式)
+- 基本图形绘制 (rect, line, triangle, polygon)
+- 渐变填充
+- 圆角矩形
+- 裁剪区域
+
+**重要**: `blend_lut` 使用堆分配避免栈溢出：
+```rust
+pub struct SoftwareBackend {
+    framebuffer: Vec<u32>,
+    blend_lut: Box<[[u8; 256]]>,  // 堆分配，避免栈溢出
+    // ...
+}
+```
+
+### 4. Node System (节点系统)
+
+**设计理念**: Node 是 FHRE 的统一最小单位。
 
 ```rust
-// 幕布靠近相机 → 呈现窗口放大
-canvas.move_closer(100.0);
-// Camera target 自动追踪到 (width/2, height/2, 100)
-
-// 幕布远离相机 → 呈现窗口缩小
-canvas.move_further(100.0);
-// Camera target 自动追踪到 (width/2, height/2, -100)
+pub enum NodeType {
+    Empty,      // 空节点
+    Sprite,     // 精灵
+    Model,      // 3D 模型
+    Camera,     // 相机
+    Light,      // 灯光
+    Button,     // UI 按钮
+    Text,       // UI 文本
+    Panel,      // UI 面板
+    Custom(u16),
+}
 ```
 
-### 2.5 幕布坐标系
-
-```
-(0,0) ─────────────── (width, 0)
-  │                       │
-  │    幕布平面           │
-  │    原点左上角          │
-  │    Y 轴向下            │
-  │    单位：像素          │
-(0,height) ───────── (width, height)
-```
-
-- 3D 对象经 Camera MVP 投影后输出到此坐标系
-- 2D UI 的 Transform2D 直接使用此坐标系
-
-### 2.6 渲染流程（以 640×480 为例）
-
-```
-1. 初始化
-   App::new(640, 480)
-     → PrimaryScreen::new(640, 480)
-       → transform = Transform3D::from_position(320, 240, 0)  // 幕布中心
-     → CameraPlugin::build()
-       → canvas_pos = (320, 240, 0)
-       → Camera position = (320, 240, 600)  // 幕布正后方 600
-       → Camera target   = (320, 240, 0)    // 看向幕布中心
-
-2. 用户 Setup
-   Cube:  Transform3D::from_position(320, 240, 0)  // 3D 世界坐标
-   Button: Transform2D::from_position(320, 400)    // 幕布像素坐标
-
-3. Extract 阶段
-   a. 读取 canvas_pos = PrimaryScreen.position() = (320, 240, 0)
-   b. 构建 View:
-      view       = look_at_rh((320,240,600), (320,240,0), (0,1,0))
-      projection = perspective_rh(45°, 640/480, 0.1, 1000)
-      VP         = projection × view
-   c. Cube 投影:
-      本地顶点 → 旋转 → + Transform3D.position → 世界坐标
-      世界坐标 × VP → NDC → world_to_screen() → 幕布像素坐标
-      生成 DrawPolygon 命令
-   d. Button 绘制:
-      Transform2D.position 直接作为 Rect 坐标
-      生成 DrawRect 命令
-
-4. 坐标系统一性
-   ✅ Cube 经 MVP 后输出 (0,0)~(640,480) 像素坐标 — 和 Button 相同
-   ✅ 两者都在同一个幕布坐标系上
-```
-
----
-
-## 3. 模块结构
-
-| 模块 | 职责 | 关键类型 |
-|------|------|----------|
-| `app` | 应用生命周期管理 | `App`, `FHRE_VERSION` |
-| `main_world` | ECS 主世界 | `Entity`, `Component`, `System`, `Query`, `Commands` |
-| `render_world` | 渲染世界 | `RenderWorld`, `View`, `RenderCommand`, `RenderComponent` |
-| `extract` | 数据提取 | `ExtractComponent`, `Extractors`, `Extract<P>` |
-| `sync` | 世界同步 | `SyncToRenderWorld`, `RenderEntity`, `MainEntity` |
-| `schedule` | 调度系统 | `Startup`, `Update`, `Schedule`, `ScheduleLabel` |
-| `plugin` | 插件系统 | `Plugin` trait, `DefaultPlugins` |
-| `resources` | 资源管理 | `Time`, `PrimaryScreen`, `Camera`, `Resource` trait |
-| `node` | 节点系统 | `Node`, `Transform2D`, `Transform3D` |
-| `animation` | 动画系统 | `AnimationClip`, `AnimationPlayer`, `KeyframeCurve` |
-| `input` | 输入系统 | `ButtonInput`, `KeyCode`, `MouseButton` |
-| `window` | 窗口抽象 | `Window` trait, `WindowRunner`, `WindowInputAdapter` |
-| `pipeline` | 渲染管线 | `SoftwareBackend`, `RenderBatch` |
-| `math` | 数学工具 | `Vec2`, `Vec3`, `Mat4`, `Color`, `Rect` |
-| `event` | 事件系统 | `Events<T>`, `EventReader`, `EventWriter` |
-
----
-
-## 4. 系统宏
-
-### 4.1 系统参数数量
-
-FHRE 支持 1-9 个参数的系统定义：
-
+**变换组件**:
 ```rust
-// 支持 system1 到 system9
-pub use main_world::{system1, system2, system3, system4, system5, system6, system7, system8, system9};
-```
-
-### 4.2 使用示例
-
-```rust
-use fhre::{system3, Res, ResMut, Query};
-
-fn my_system(time: Res<Time>, mut state: ResMut<State>, query: Query<&Transform>) {
-    // system logic
+// 统一变换组件
+pub struct Transform {
+    pub position: Vec3,
+    pub rotation: Vec3,  // 欧拉角
+    pub scale: Vec3,
 }
 
-app.add_systems(Update, system3::<Res<Time>, ResMut<State>, Query<&Transform>, _>(my_system));
+// 别名
+pub type Transform3D = Transform;
 ```
 
-### 4.3 declare_system! 宏
+### 5. Animation System (动画系统)
 
-简化系统注册：
+**架构**:
+```
+AnimationClip (动画数据)
+    │
+    ▼
+AnimationResources (资源存储)
+    │
+    ▼
+AnimationPlayer (实体组件)
+    │
+    ▼
+apply_animations::<T> (应用到组件)
+```
+
+**支持的属性**:
+```rust
+pub enum AnimationProperty {
+    TranslationX, TranslationY, TranslationZ,
+    RotationX, RotationY, RotationZ,
+    ScaleX, ScaleY, ScaleZ,
+    ColorR, ColorG, ColorB, ColorA,
+    Custom(u32),
+}
+```
+
+### 6. Button Component (按钮组件)
+
+**设计理念**: Button 组件管理交互状态，Picking 系统检测指针碰撞。
 
 ```rust
-use fhre::declare_system;
-
-app.add_systems(Update, declare_system!(my_system; Res<Time>, ResMut<State>, Query<&Transform>));
-```
-
----
-
-## 5. 双世界架构
-
-### 5.1 架构对比
-
-| 组件 | Bevy | FHRE |
-|------|------|------|
-| **Main World** | 完整 ECS | 完整 ECS |
-| **Render World** | 完整 ECS (SubApp) | 完整 ECS |
-| **实体同步** | `SyncToRenderWorld` 标记 + Observer | `SyncToRenderWorld` 标记 + Observer |
-| **实体映射** | `RenderEntity`/`MainEntity` | `RenderEntity`/`MainEntity` |
-| **组件提取** | `ExtractComponent` trait | `ExtractComponent` trait |
-| **提取调度** | `ExtractSchedule` (SubApp Schedule) | `Extractors` + `App::add_extractor()` |
-| **渲染后端** | wgpu (GPU) | SoftwareBackend (CPU) |
-
-### 5.2 提取流程
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Main World Update                         │
-│                                                                  │
-│   Startup → PreUpdate → Update → PostUpdate                     │
-│                                                                  │
-│   系统运行，修改组件数据                                          │
-│   Observer 机制自动检测 SyncToRenderWorld 变化：                  │
-│   - insert_component<SyncToRenderWorld> → Added 记录            │
-│   - remove_component<SyncToRenderWorld> → Removed 记录          │
-│   - despawn 带 RenderEntity 的实体 → Removed 记录               │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        Extract Phase                             │
-│                                                                  │
-│   1. entity_sync_system()                                       │
-│      - 处理 PendingSyncEntity 队列                              │
-│      - Added: 在 Render World 创建对应实体                       │
-│      - Removed: 在 Render World 删除对应实体                     │
-│      - 建立 MainEntity ↔ RenderEntity 映射                       │
-│                                                                  │
-│   2. extractors.run()                                           │
-│      - 运行用户注册的提取函数                                     │
-│      - 从 Main World 读取数据，写入 Render World                 │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        Render Phase                              │
-│                                                                  │
-│   render_world.execute_render()                                  │
-│   - 执行渲染命令                                                  │
-│   - 输出到 framebuffer                                           │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 5.3 同步标记组件
-
-```rust
-/// 标记实体需要同步到 Render World
-pub struct SyncToRenderWorld;
-
-/// Main World 实体持有，指向对应的 Render World 实体
-pub struct RenderEntity(pub Entity);
-
-/// Render World 实体持有，指向对应的 Main World 实体
-pub struct MainEntity(pub Entity);
-```
-
----
-
-## 6. ECS 核心
-
-### 6.1 系统参数
-
-| 参数 | 说明 | Bevy 对齐 |
-|------|------|-----------|
-| `Res<T>` | 只读资源 | ✅ |
-| `ResMut<T>` | 可变资源 | ✅ |
-| `Query<T, F>` | 组件查询 | ✅ |
-| `Commands` | 延迟命令 | ✅ |
-| `Local<T>` | 系统本地状态 | ✅ |
-| `Entity` | 实体 ID | ✅ |
-
-### 6.2 查询过滤器
-
-| 过滤器 | 说明 | Bevy 对齐 |
-|--------|------|-----------|
-| `With<T>` | 要求组件存在 | ✅ |
-| `Without<T>` | 要求组件不存在 | ✅ |
-| `Added<T>` | 组件刚添加 | ✅ |
-| `Changed<T>` | 组件刚修改 | ✅ |
-
-### 6.3 调度系统
-
-```
-Startup → PreUpdate → Update → PostUpdate
-    │          │          │          │
-    │          │          │          └── Commands apply
-    │          │          └── Commands apply
-    │          └── Commands apply
-    └── Commands apply (一次性)
-```
-
----
-
-## 7. Commands 延迟执行
-
-### 7.1 问题背景
-
-`Commands` 是延迟执行的：在系统调用 `commands.spawn()` 后，实体要到当前 Schedule 结束时才会真正创建。这意味着同一帧内后续系统的 `Query` 无法查询到新创建的实体。
-
-### 7.2 示例场景
-
-```rust
-fn model_switch_system(
-    mut commands: Commands,
-    mut players: Query<&mut AnimationPlayer>,
-) {
-    commands.spawn()
-        .insert(AnimationPlayer::new())
-        .insert(SyncToRenderWorld);
+pub struct Button {
+    // 渲染属性
+    pub width: f32,
+    pub height: f32,
+    pub state: ButtonState,
+    pub normal_color: Color,
+    pub hover_color: Color,
+    pub pressed_color: Color,
+    pub text: &'static str,
     
-    // 此时 players.iter_mut() 查询不到新实体！
-    // 因为 Commands 还未 apply
+    // 交互状态
+    pub clicked: bool,  // 本帧是否被点击
+}
+
+pub enum ButtonState {
+    Normal,
+    Hover,
+    Pressed,
+    Disabled,
 }
 ```
 
-### 7.3 解决方案
-
-在创建实体时就完成初始化，而不是依赖后续系统：
-
+**实体创建**:
 ```rust
-fn model_switch_system(
-    mut commands: Commands,
-    clips: Res<AnimationResources>,
+commands.spawn()
+    .insert(Node::ui_control(NodeType::Button))
+    .insert(Transform::from_2d(x, y))
+    .insert(Button::new(width, height).with_text("Click Me"))
+    .insert(PickableBounds::from_size(width, height))
+    .insert(Pickable::DEFAULT);  // 重要：使用 DEFAULT，而非 default()
+```
+
+**完整交互流程 (X11 → 按钮选中)**:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. X11 触摸事件                                                      │
+│    /dev/input0 → read() → TouchEvent { x, y, pressure }             │
+│    pressure > 0 → PRESS, pressure == 0 → RELEASE                    │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│ 2. Window::collect_input_events()                                    │
+│    framebuffer.rs 读取触摸事件，转换为：                              │
+│    - MouseMotionEvent { x, y }                                       │
+│    - MouseButtonEvent { button: 1, pressed, x, y }                   │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│ 3. WindowRunner::bridge_*()                                          │
+│    bridge_mouse_input():                                             │
+│      ButtonInput<MouseButton>.press(MouseButton::Left)              │
+│    bridge_mouse_position():                                          │
+│      MousePosition { x, y }                                          │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│ 4. picking_system (PreUpdate)                                        │
+│    输入: MousePosition, ButtonInput<MouseButton>                     │
+│         Query<Transform>, Query<PickableBounds>, Query<Pickable>     │
+│                                                                      │
+│    a. 收集所有 (Entity, Transform, PickableBounds, Pickable)         │
+│    b. ui_picking_backend():                                          │
+│       for each (entity, transform, bounds):                         │
+│         if bounds.contains_point(transform.position, mouse_pos):     │
+│           hits.push(PointerHits { entity, ... })                    │
+│    c. update_hover_map():                                            │
+│       swap(hover_map, prev_hover_map)                                │
+│       for hit in sorted_hits:                                        │
+│         if pickable.is_hoverable:  // Pickable::DEFAULT = true       │
+│           hover_map.insert(pointer_id, (entity, hit))               │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│ 5. button_interaction_system (PreUpdate)                             │
+│    输入: ButtonInput<MouseButton>, HoverMap, PreviousHoverMap        │
+│         Query<Button>                                                │
+│                                                                      │
+│    a. 清除所有 button.clicked = false                                │
+│    b. if just_released(MouseButton::Left):                          │
+│         if let Some((entity, _)) = prev_hover_map.get(&0):          │
+│           if button.state == Pressed:                               │
+│             button.clicked = true   ← 点击完成！                     │
+│             button.state = Hover                                    │
+│    c. if let Some((entity, _)) = hover_map.get(&0):                 │
+│         if pressed(MouseButton::Left):                              │
+│           button.state = Pressed                                    │
+│         else:                                                        │
+│           button.state = Hover                                      │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│ 6. input_system (Update)                                             │
+│    for (_, button) in button_query.iter():                          │
+│      if button.clicked:                                              │
+│        match button.text:                                            │
+│          "Prev" => 切换模型                                          │
+│          "Pause" => 暂停/恢复                                        │
+│          "Next" => 切换模型                                          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**关键数据流**:
+
+| 阶段 | 数据示例 |
+|------|----------|
+| X11 | TouchEvent { x: 483, y: 396, pressure: 42 } |
+| Window | MouseButtonEvent { button: 1, pressed: true, x: 483, y: 396 } |
+| InputBridge | MousePosition { x: 483, y: 396 }, ButtonInput.pressed(Left) |
+| Picking | hits: [Entity 3], hover_map: { 0 → (Entity 3, ...) } |
+| Button | button.state = Pressed → clicked = true |
+
+**交互系统代码**:
+```rust
+fn button_interaction_system(
+    mouse_input: Res<ButtonInput<MouseButton>>,
+    hover_map: Res<HoverMap>,
+    prev_hover_map: Res<PreviousHoverMap>,
+    mut button_query: Query<Button>,
 ) {
-    let mut player = AnimationPlayer::new();
-    player.play_with_target(clip_handle, target_id);
+    // 1. 清除 clicked
+    for (_, button) in button_query.iter_mut() {
+        button.clicked = false;
+    }
     
-    commands.spawn()
-        .insert(player)
-        .insert(SyncToRenderWorld);
+    // 2. 检测点击完成
+    if mouse_input.just_released(MouseButton::Left) {
+        if let Some((entity, _)) = prev_hover_map.get(&POINTER_ID) {
+            if let Some((_, button)) = button_query.get_pair_mut(*entity) {
+                if button.state == ButtonState::Pressed {
+                    button.clicked = true;
+                    button.state = ButtonState::Hover;
+                }
+            }
+        }
+    }
+    
+    // 3. 更新状态
+    if let Some((entity, _)) = hover_map.get(&POINTER_ID) {
+        if let Some((_, button)) = button_query.get_pair_mut(*entity) {
+            if mouse_input.pressed(MouseButton::Left) {
+                button.state = ButtonState::Pressed;
+            } else {
+                button.state = ButtonState::Hover;
+            }
+        }
+    }
 }
 ```
 
-### 7.4 最佳实践
-
-1. **创建时初始化**：在 spawn 时就设置好所有初始状态
-2. **避免帧内查询新实体**：不要在同一帧内用 Query 查询刚创建的实体
-3. **使用 Added<T>**：下一帧用 `Added<T>` 过滤器处理新实体
-
----
-
-## 8. 动画系统
-
-### 8.1 核心组件
-
-| 类型 | 说明 |
-|------|------|
-| `AnimationClip` | 动画剪辑数据（关键帧曲线集合） |
-| `AnimationClipHandle` | 动画剪辑引用句柄 |
-| `AnimationPlayer` | 动画播放器组件，挂载到实体上 |
-| `AnimationResources` | 动画资源存储（全局资源） |
-| `KeyframeCurve` | 关键帧曲线 |
-
-### 8.2 AnimationPlayer API
-
+**使用示例**:
 ```rust
-// 创建播放器
-let mut player = AnimationPlayer::new();
-
-// 播放动画（一次性）
-player.play(clip_handle);
-
-// 循环播放
-player.play_repeat(clip_handle);
-
-// 播放并设置目标（推荐）
-player.play_with_target(clip_handle, target_id);
-
-// 控制播放
-player.pause_all();
-player.resume_all();
-player.stop_all();
-
-// 设置播放速度
-player.animation_mut(0).unwrap().speed = 2.0;
-```
-
-### 8.3 play_with_target() 方法
-
-`play_with_target()` 是一个便捷方法，同时设置动画剪辑、目标 ID 和循环模式：
-
-```rust
-pub fn play_with_target(&mut self, clip_handle: AnimationClipHandle, target: AnimationTargetId) -> &mut ActiveAnimation {
-    let anim = self.play(clip_handle);
-    anim.target_id = target;
-    anim.repeat = RepeatAnimation::Forever;
-    anim
+fn input_system(button_query: Query<Button>) {
+    for (_, button) in button_query.iter() {
+        if button.clicked {
+            match button.text {
+                "Prev" => { /* 处理 */ }
+                "Pause" => { /* 处理 */ }
+                "Next" => { /* 处理 */ }
+                _ => {}
+            }
+        }
+    }
 }
 ```
 
-这个方法解决了 Commands 延迟执行问题：在创建 AnimationPlayer 时就设置好动画，而不是在后续系统中查询并设置。
+### 7. Input System (输入系统)
 
----
-
-## 9. 渲染后端
-
-### 9.1 软件渲染架构
+**架构原则**: FHRE 核心不知道具体的输入设备，输入类型由平台层定义。
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    SoftwareBackend                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  framebuffer: Vec<u32>  // ARGB8888 像素数组                     │
-│  width: u32, height: u32                                        │
-│  viewport: Rect                                                  │
-│                                                                  │
-│  核心算法:                                                       │
-│  - fill_rect: 逐像素填充矩形                                     │
-│  - fill_triangle: 包围盒 + 重心坐标判断                          │
-│  - draw_line: Bresenham 直线算法                                 │
-│  - fill_polygon: 扫描线填充算法                                  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Application Layer                            │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  User Systems:                                               │   │
+│  │  - button_interaction_system: 更新 Button 状态              │   │
+│  │  - input_system: 检查 button.clicked 执行操作               │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ ECS Resources
+┌─────────────────────────────────────────────────────────────────────┐
+│                          Platform Layer                              │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Input Types: ButtonInput<T>, KeyCode, MouseButton          │   │
+│  │  InputBridge: map_keycode(), map_mouse_button()             │   │
+│  │  WindowRunner: bridge_keyboard_input(), bridge_mouse_input()│   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Window Implementation: collect_input_events()              │   │
+│  │  - NuttX/X11: /dev/input0, /dev/kbd                         │   │
+│  │  - Other platforms: custom implementation                    │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ Window trait
+┌─────────────────────────────────────────────────────────────────────┐
+│                           FHRE Core                                  │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Window trait: collect_input_events(), present()            │   │
+│  │  MousePosition: x, y (resource)                              │   │
+│  │  WindowInputEvents: raw event types                          │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 9.2 渲染命令
+**为什么这样设计？**
+1. 不同平台有不同的输入设备（键盘、触摸屏、游戏手柄）
+2. KeyCode、MouseButton 等类型是平台相关的
+3. FHRE 核心只关心抽象的"指针位置"和"按钮状态"
+4. 平台层负责将原始事件转换为 ECS 资源
+
+**使用示例**:
+```rust
+// 平台层定义输入类型
+pub enum KeyCode { Space, Enter, ... }
+pub enum MouseButton { Left, Right, Middle, ... }
+
+// 平台层实现 InputBridge
+pub struct InputAdapter;
+impl InputBridge for InputAdapter {
+    fn map_keycode(&self, code: u32) -> Option<KeyCode> { ... }
+    fn map_mouse_button(&self, btn: u32) -> Option<MouseButton> { ... }
+}
+
+// 应用层使用
+fn input_system(button_query: Query<Button>) {
+    for (_, button) in button_query.iter() {
+        if button.clicked {
+            // 处理点击
+        }
+    }
+}
+```
+
+### 8. Picking System (拾取系统)
+
+**架构**: Picking 系统检测指针与 UI 元素的碰撞，更新悬停状态。
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Picking System Flow                          │
+├─────────────────────────────────────────────────────────────────────┤
+│  1. picking_system (PreUpdate)                                      │
+│     ├── 收集 (Entity, Transform, PickableBounds, Pickable)          │
+│     ├── ui_picking_backend() → hits                                 │
+│     └── update_hover_map() → HoverMap, PreviousHoverMap             │
+│                                                                      │
+│  2. button_interaction_system (PreUpdate)                           │
+│     ├── 检测 just_released + prev_hover_map                         │
+│     └── 更新 Button.state, Button.clicked                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**核心组件**:
+```rust
+// 可点击区域
+pub struct PickableBounds {
+    pub width: f32,
+    pub height: f32,
+}
+
+// 拾取行为配置
+pub struct Pickable {
+    pub should_block_lower: bool,  // 是否阻挡下层元素
+    pub is_hoverable: bool,        // 是否可悬停
+}
+
+impl Pickable {
+    pub const DEFAULT: Self = Self { should_block_lower: true, is_hoverable: true };
+    pub const IGNORE: Self = Self { should_block_lower: false, is_hoverable: false };
+}
+```
+
+**重要陷阱**: `Pickable::default()` 的 `is_hoverable=false`（bool 默认值），导致 hits 被丢弃。必须使用 `Pickable::DEFAULT`。
+
+**悬停状态管理**:
+```rust
+pub struct HoverMap(pub BTreeMap<PointerId, (Entity, HitData)>);
+pub struct PreviousHoverMap(pub BTreeMap<PointerId, (Entity, HitData)>);
+
+// update_hover_map 流程:
+// 1. 交换 hover_map 和 prev_hover_map
+// 2. 按 order 排序 hits
+// 3. 如果 pickable.is_hoverable=true，插入 hover_map
+// 4. 如果 pickable.should_block_lower=true，停止处理
+```
+
+### 9. Plugin System (插件系统)
+
+```rust
+pub trait Plugin {
+    fn build(&self, app: &mut App);
+}
+
+pub trait PluginGroup {
+    fn build(&self, app: &mut App);
+}
+
+// 默认插件组
+pub struct DefaultPlugins;
+impl PluginGroup for DefaultPlugins {
+    fn build(&self, app: &mut App) {
+        app.add_plugin(EventPlugin)
+           .add_plugin(AnimationPlugin)
+           .add_plugin(CameraPlugin);
+    }
+}
+```
+
+## 渲染命令
 
 ```rust
 pub enum RenderCommand {
+    // 基础绘制
     Clear { color: Color },
     DrawRect { rect: Rect, color: Color },
     DrawLine { start: Vec2, end: Vec2, color: Color, thickness: f32 },
     DrawTriangle { p0: Vec2, p1: Vec2, p2: Vec2, color: Color },
     DrawPolygon { vertices: Vec<Vec2>, color: Color },
+    
+    // 高级绘制
+    DrawRectGradient { rect: Rect, gradient: Gradient },
+    DrawRectRounded { rect: Rect, color: Color, radius: f32 },
+    DrawRectRoundedGradient { rect: Rect, gradient: Gradient, radius: f32 },
+    
+    // 纹理绘制
+    DrawImage { rect: Rect, texture_id: u32, region: TextureRegion, color: Color },
+    DrawImageTransformed { position: Vec2, size: Vec2, ..., rotation: f32, color: Color },
+    
+    // 文本 (占位)
     DrawText { position: Vec2, text: &'static str, color: Color, size: f32 },
+    
+    // 裁剪
     SetScissor { rect: Rect },
     DisableScissor,
+    PushMask,
+    PopMask,
 }
 ```
 
-### 9.3 渲染阶段
+## 使用示例
 
-```
-Background    → 清除/背景绘制
-     ↓
-Opaque2d      → 不透明 2D 物体
-     ↓
-Opaque3d      → 不透明 3D 物体（画家算法排序）
-     ↓
-AlphaMask     → Alpha 测试物体
-     ↓
-Transparent   → 透明物体（从后往前排序）
-     ↓
-Ui            → UI 覆盖层
-```
-
----
-
-## 10. 输入系统
-
-### 10.1 架构设计
-
-```
-底层硬件 (evdev / nuttx input)
-    ↓
-输入驱动 (读取原始事件)
-    ↓
-事件分发 (WindowInputEvents)
-    ↓
-WindowRunner::bridge_input()
-    ↓
-ButtonInput<T> Resources
-    ↓
-游戏/UI 逻辑查询
-```
-
-### 10.2 使用示例
+### 创建应用
 
 ```rust
-fn keyboard_system(keys: Res<ButtonInput<KeyCode>>) {
-    if keys.pressed(KeyCode::KeyW) { /* 移动 */ }
-    if keys.just_pressed(KeyCode::Space) { /* 跳跃 */ }
-}
+let mut app = App::new(width, height);
 
-fn mouse_system(mouse: Res<ButtonInput<MouseButton>>) {
-    if mouse.pressed(MouseButton::Left) { /* 拖拽 */ }
-}
+// 添加插件
+app.add_plugins(DefaultPlugins);
+
+// 注册资源
+app.insert_resource(DemoState::new())
+   .insert_resource(ButtonInput::<KeyCode>::default())
+   .insert_resource(ButtonInput::<MouseButton>::default())
+   .insert_resource(MousePosition::default());
+
+// 注册系统
+app.add_systems(Startup, declare_system!(setup; Commands, Res<PrimaryScreen>))
+   .add_systems(PreUpdate, declare_system!(picking_system; Res<MousePosition>, Res<ButtonInput<MouseButton>>, Query<Transform>, Query<PickableBounds>, Query<Pickable>, ResMut<HoverMap>, ResMut<PreviousHoverMap>))
+   .add_systems(PreUpdate, declare_system!(button_interaction_system; Res<ButtonInput<MouseButton>>, Res<HoverMap>, Res<PreviousHoverMap>, Query<Button>))
+   .add_systems(Update, declare_system!(update; Query<&mut Transform>));
+
+// 添加提取器
+app.add_extractor(extract_meshes)
+   .add_extractor(extract_ui);
+
+// 运行
+WindowRunner::new(&mut app, &mut window, &input_adapter).run();
 ```
 
----
-
-## 11. 核心 API
-
-### 11.1 应用构建
+### 创建实体
 
 ```rust
-use fhre::prelude::*;
-
-let mut app = App::new(640, 480);
-
-app.add_plugins(DefaultPlugins)
-   .insert_resource(MyState::new())
-   .add_systems(Startup, setup)
-   .add_systems(Update, my_system)
-   .add_extractor(extract_view)
-   .add_extractor(extract_my_components);
-```
-
-### 11.2 系统定义
-
-```rust
-fn setup(mut commands: Commands) {
+fn spawn_button(mut commands: Commands) {
     commands.spawn()
-        .insert(Transform2D::from_xy(100.0, 50.0))
-        .insert(Button::new(80, 30))
-        .insert(SyncToRenderWorld);
-}
-
-fn my_system(query: Query<&mut Transform2D, With<Button>>, time: Res<Time>) {
-    for (entity, mut transform) in query.iter_mut() {
-        transform.position.x += 1.0;
-    }
+        .insert(Node::ui_control(NodeType::Button))
+        .insert(Transform::from_2d(100.0, 200.0))
+        .insert(Button::new(100.0, 40.0)
+            .with_text("Click Me")
+            .with_colors(normal, hover, pressed))
+        .insert(PickableBounds::from_size(100.0, 40.0))
+        .insert(Pickable::DEFAULT);  // 重要：使用 DEFAULT
 }
 ```
 
-### 11.3 提取器
+### 动画
 
 ```rust
-fn extract_buttons(main_world: &MainWorld, render_world: &mut RenderWorld) {
-    for (entity, transform) in main_world.query::<Transform2D>() {
-        if let Some(button) = main_world.get_component::<Button>(entity) {
-            let render_entity = render_world.get_or_spawn_synced(entity);
-            
-            let ui = ExtractedUI {
-                position: Vec2::new(transform.position.x, transform.position.y),
-                width: button.width,
-                height: button.height,
-                color: button.current_color(),
-            };
-            
-            render_world.insert_component(render_entity, ui);
+// 创建动画剪辑
+let mut clip = AnimationClip::with_duration(6.0);
+clip.add_curve_to_target(
+    target_id,
+    AnimationProperty::RotationY,
+    KeyframeCurve::new(vec![
+        Keyframe::new(0.0, 0.0, Easing::Linear),
+        Keyframe::new(6.0, 360.0, Easing::Linear),
+    ]),
+);
+
+// 注册并播放
+let handle = anim_resources.insert_clip(clip);
+player.play_with_target(handle, target_id);
+```
+
+## 重要限制与注意事项
+
+### 1. Query 不支持元组查询
+
+```rust
+// ❌ 错误：FHRE Query 不支持元组
+fn system(query: Query<(Transform, Pickable)>) { ... }
+
+// ✅ 正确：使用多个独立 Query，通过 Entity 关联
+fn system(
+    transform_query: Query<Transform>,
+    pickable_query: Query<Pickable>,
+) {
+    for (entity, transform) in transform_query.iter() {
+        if let Some(pickable) = pickable_query.get(entity) {
+            // ...
         }
     }
 }
-
-app.add_extractor(extract_buttons);
 ```
 
-### 11.4 主循环
+### 2. 栈溢出风险
+
+在 no_std 环境下避免大数组栈分配：
+```rust
+// ❌ 危险：64KB 栈数组可能导致栈溢出
+let blend_lut: [[u8; 256]; 256] = [[0; 256]; 256];
+
+// ✅ 安全：使用堆分配
+let blend_lut: Box<[[u8; 256]]> = /* ... */;
+```
+
+### 3. Pickable::default() 陷阱
 
 ```rust
-// 使用 WindowRunner（推荐）
-let mut window = X11Window::new(640, 480, "App")?;
-let input_adapter = InputAdapter;
+// ❌ 错误：default() 的 is_hoverable=false，导致 hits 被丢弃
+.insert(Pickable::default())
 
-WindowRunner::new(&mut app, &mut window, &input_adapter)
-    .with_frame_delay_ms(16)
-    .run();
-
-// 或手动控制
-loop {
-    app.update_and_render();
-    window.present(app.framebuffer());
-}
+// ✅ 正确：使用 DEFAULT 常量
+.insert(Pickable::DEFAULT)
 ```
 
----
+## 未使用模块
 
-## 12. 平台适配
+以下模块已实现但在当前 demo 中未使用，可根据需要启用或移除：
 
-### 12.1 实现 Window trait
+| 模块 | 文件 | 说明 |
+|------|------|------|
+| node/style.rs | Style | CSS 样式系统 |
+| node/layout.rs | Layout | Flexbox 布局 |
+| animation/graph.rs | AnimationGraph | 动画混合图 |
+| animation/transition.rs | AnimationTransitions | 动画过渡 |
+| pipeline/gpu/ | - | GPU 后端占位 |
+| pipeline/batch.rs | RenderBatch | 批处理 |
+| pipeline/texture.rs | Texture | 纹理系统 |
+| schedule/condition.rs | RunCondition | 运行条件 |
+| schedule/set.rs | SystemSet | 系统集 |
+| main_world/query_data.rs | QueryData | 多组件查询数据 |
 
-```rust
-pub struct MyWindow { /* ... */ }
+## 与 Bevy 对比
 
-impl Window for MyWindow {
-    fn is_running(&self) -> bool { true }
-    fn collect_input_events(&mut self) -> WindowInputEvents { /* ... */ }
-    fn present(&mut self, framebuffer: &[u32]) { /* ... */ }
-    fn dimensions(&self) -> (u32, u32) { (self.width, self.height) }
-}
-```
+| 特性 | FHRE | Bevy |
+|------|------|------|
+| 目标平台 | 嵌入式 (no_std) | 桌面/移动端 |
+| ECS | 简化 ECS | 完整 ECS |
+| Query 元组 | ❌ 仅单组件 | ✅ 支持元组 |
+| 双世界 | ✅ | ✅ |
+| 渲染后端 | CPU 软件 | GPU (wgpu) |
+| 调度系统 | 简化 Schedule | 完整 Schedule |
+| 插件系统 | ✅ | ✅ |
+| 动画系统 | ✅ | ✅ |
+| Picking 系统 | ✅ | ✅ |
+| UI 系统 | Node 统一 | bevy_ui |
+| 着色器 | ❌ | WGSL |
+| 多线程 | ❌ | ✅ |
 
-### 12.2 实现 WindowInputAdapter trait
+## 文件统计
 
-```rust
-pub struct MyInputAdapter;
+| 模块 | 文件数 | 代码行数 | 说明 |
+|------|--------|----------|------|
+| main_world | 9 | ~2000 | ECS 核心 |
+| render_world | 7 | ~1200 | 渲染数据 |
+| pipeline | 8 | ~1500 | 渲染管线 |
+| animation | 8 | ~1200 | 动画系统 |
+| node | 5 | ~600 | 节点系统 |
+| math | 6 | ~800 | 数学库 |
+| schedule | 5 | ~400 | 调度系统 |
+| plugin | 5 | ~300 | 插件系统 |
+| sync | 3 | ~200 | 双世界同步 |
+| event | 5 | ~400 | 事件系统 |
+| resources | 5 | ~300 | 资源系统 |
+| app | 1 | ~200 | 应用管理 |
+| window | 1 | ~100 | 窗口抽象 |
+| camera | 1 | ~100 | 相机插件 |
+| picking | 5 | ~300 | Picking 系统 |
+| **FHRE 核心** | **66** | **~8600** | |
+| platform/input | 4 | ~200 | 平台输入类型 |
+| platform/runner | 1 | ~150 | 输入桥接 |
+| platform/framebuffer | 1 | ~400 | 窗口实现 |
+| **平台层** | **6** | **~750** | |
+| components/button | 1 | ~150 | Button 组件 |
+| **应用层** | **1** | **~150** | |
+| **总计** | **73** | **~9500** | |
 
-impl WindowInputAdapter for MyInputAdapter {
-    fn map_keycode(&self, code: u32) -> Option<KeyCode> { /* ... */ }
-    fn map_mouse_button(&self, btn: u32) -> Option<MouseButton> { /* ... */ }
-}
-```
+## 未来规划
 
----
+### 短期
+- [ ] 字体渲染系统
+- [ ] 纹理图集 (TextureAtlas)
+- [ ] 抗锯齿 (AA)
 
-## 13. 与 Bevy 的差异
+### 中期
+- [ ] GPU 后端 (OpenGL ES)
+- [ ] 着色器系统
+- [ ] 后处理效果
 
-| 特性 | Bevy | FHRE | 原因 |
-|------|------|------|------|
-| **过程宏** | 完整支持 | 受限 | `no_std` 环境 |
-| **Archetype 存储** | ✅ | ❌ | 简化为 BTreeMap |
-| **并行系统** | ✅ | ❌ | 嵌入式单线程 |
-| **GPU 渲染** | ✅ | ❌ | 软件渲染 |
-| **Render World** | 完整 ECS (SubApp) | 完整 ECS | 对齐设计 |
-| **ExtractSchedule** | SubApp Schedule | `App::add_extractor()` | 单线程简化 |
-| **渲染后端** | wgpu (GPU) | SoftwareBackend (CPU) | 嵌入式无 GPU |
-
----
-
-## 14. 示例项目结构
-
-```
-examples/fhre/rust/
-├── Cargo.toml              # Rust 包配置
-├── Makefile                # NuttX 构建脚本
-├── src/
-│   ├── lib.rs              # 主入口文件
-│   ├── extract.rs          # 自定义提取器
-│   ├── components/
-│   │   ├── mod.rs          # 组件模块导出
-│   │   ├── button.rs       # 按钮组件
-│   │   ├── cube.rs         # 立方体组件
-│   │   └── soccer_ball.rs  # 足球组件
-│   └── platform/
-│       ├── mod.rs          # 平台模块导出
-│       ├── x11.rs          # X11 模拟器平台
-│       └── framebuffer.rs  # 嵌入式 Framebuffer 平台
-```
-
----
-
-## 15. 版本历史
-
-| 版本 | 变更 |
-|------|------|
-| **v2.4.0** | 扩展系统参数：`system8`/`system9` 支持最多 9 个参数；`AnimationPlayer::play_with_target()` 便捷方法；修复 Commands 延迟执行导致的动画初始化问题 |
-| **v2.3.0** | Observer 机制：自动检测 `SyncToRenderWorld` 变化；统一 ScheduleLabel 定义；废弃 `Transform` 使用 `Transform2D`/`Transform3D`；简化 `Extractors`；修复 XImage 内存泄漏 |
-| **v2.2.0** | 重构提取系统：`App::add_extractor()` 替代 `ExtractSchedule` Resource；移除 UI 组件到示例 |
-| **v2.1.0** | 删除未使用组件；修复潜在 panic；清理硬编码 |
-| **v2.0.0** | 单相机架构重构；移除 `App::run()`, `AppRunner`；重构主循环控制；Bevy ECS 对齐 |
-| **v1.0.0** | 初始版本 |
+### 长期
+- [ ] Vulkan 后端
+- [ ] 多线程渲染
+- [ ] 粒子系统

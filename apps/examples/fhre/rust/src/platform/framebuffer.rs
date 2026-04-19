@@ -11,11 +11,10 @@
 //! Opening `/dev/fb0` triggers `sim_x11openwindow()` which calls `XMapWindow()`
 //! to display the X11 window.
 
-use fhre::{
-    window::{Window as WindowTrait, WindowInputEvents, WindowInputAdapter, 
-             MouseButtonEvent, MouseMotionEvent, KeyboardEvent},
-    input::{KeyCode, MouseButton},
-};
+use fhre::window::{Window as WindowTrait, WindowInputEvents, 
+                   MouseButtonEvent, MouseMotionEvent, KeyboardEvent};
+use super::input::{KeyCode, MouseButton};
+use super::runner::InputBridge;
 use core::ffi::{c_int, c_short};
 use alloc::vec::Vec;
 
@@ -31,7 +30,7 @@ extern "C" {
 }
 
 // ============================================================
-// File Constants
+// File Constants (NuttX values)
 // ============================================================
 
 /// Open for reading and writing
@@ -147,17 +146,21 @@ pub struct Window {
 impl Window {
     /// Create new window by opening framebuffer and input devices
     pub fn new() -> Option<Self> {
+        extern "C" { fn printf(format: *const u8, ...) -> i32; }
+        
         unsafe {
             // Open framebuffer device
             let fb_path = b"/dev/fb0\0";
             let fb_fd = open(fb_path.as_ptr(), O_RDWR);
+            
             if fb_fd < 0 {
                 return None;
             }
             
             // Get video info for dimensions
             let mut vinfo: VideoInfo = core::mem::zeroed();
-            let ret = ioctl(fb_fd, FBIOGET_VIDEOINFO, &mut vinfo as *mut _ as core::ffi::c_ulong);
+            let ret = ioctl(fb_fd, FBIOGET_VIDEOINFO, &mut vinfo as *mut VideoInfo);
+            
             if ret < 0 {
                 close(fb_fd);
                 return None;
@@ -168,7 +171,8 @@ impl Window {
             
             // Get plane info for framebuffer pointer
             let mut pinfo: PlaneInfo = core::mem::zeroed();
-            let ret = ioctl(fb_fd, FBIOGET_PLANEINFO, &mut pinfo as *mut _ as core::ffi::c_ulong);
+            let ret = ioctl(fb_fd, FBIOGET_PLANEINFO, &mut pinfo as *mut PlaneInfo);
+            
             if ret < 0 {
                 close(fb_fd);
                 return None;
@@ -207,7 +211,6 @@ impl Window {
         }
         
         unsafe {
-            // Process X11 events first
             sim_x11events();
             
             let mut sample: TouchSample = core::mem::zeroed();
@@ -218,7 +221,6 @@ impl Window {
                 let y = sample.point.y as i32;
                 let pressure = sample.point.pressure;
                 
-                // Always report motion
                 events.mouse_motion_events.push(MouseMotionEvent {
                     x,
                     y,
@@ -226,7 +228,6 @@ impl Window {
                     delta_y: 0,
                 });
                 
-                // Track touch state for proper press/release events
                 if pressure > 0 {
                     if !self.touch_pressed {
                         self.touch_pressed = true;
@@ -327,14 +328,13 @@ impl Drop for Window {
 }
 
 // ============================================================
-// Input Adapter
+// Input Bridge
 // ============================================================
 
-/// Maps X11 keycodes and mouse buttons to FHRE input types
+/// Maps X11 keycodes and mouse buttons to platform input types
 pub struct InputAdapter;
 
-impl WindowInputAdapter for InputAdapter {
-    /// Map X11 keycode to FHRE KeyCode
+impl InputBridge for InputAdapter {
     fn map_keycode(&self, code: u32) -> Option<KeyCode> {
         match code {
             X11_KEY_SPACE => Some(KeyCode::Space),
@@ -344,7 +344,6 @@ impl WindowInputAdapter for InputAdapter {
         }
     }
     
-    /// Map button number to FHRE MouseButton
     fn map_mouse_button(&self, btn: u32) -> Option<MouseButton> {
         match btn {
             1 => Some(MouseButton::Left),

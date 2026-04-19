@@ -5,12 +5,11 @@
 //! 2. Queue Phase: Generate render commands from extracted components
 
 use fhre::{
-    MainWorld, RenderWorld, RenderCommand, RenderComponent,
-    Transform2D, Transform3D, Color, math::Rect,
+    MainWorld, RenderWorld, RenderCommand,
+    Transform, Transform3D, Color, math::Rect,
     resources::{PrimaryScreen, Camera, ProjectionType},
-    math::{Vec3, Mat4, Vec2},
-    render_world::{View, ViewBundle, ViewTarget, ClearConfig, ExtractedMesh, ExtractedUI, ExtractedView},
-    sync::RenderEntity,
+    math::{Vec3, Mat4},
+    render_world::{View, ViewBundle, ViewTarget, ClearConfig, ExtractedMesh, ExtractedUI},
 };
 use alloc::vec::Vec;
 use crate::components::{Button, Cube, SoccerBall};
@@ -41,8 +40,7 @@ pub fn extract_3d_components(main_world: &MainWorld, render_world: &mut RenderWo
         None => return,
     };
 
-    // Extract Cubes
-    for (entity, transform) in main_world.query::<Transform3D>() {
+    for (entity, transform) in main_world.query::<Transform>() {
         if let Some(cube) = main_world.get_component::<Cube>(entity) {
             let render_entity = render_world.get_or_spawn_synced(entity);
             
@@ -61,6 +59,7 @@ pub fn extract_3d_components(main_world: &MainWorld, render_world: &mut RenderWo
             };
             
             render_world.insert_component(render_entity, mesh);
+            continue;
         }
 
         if let Some(soccer_ball) = main_world.get_component::<SoccerBall>(entity) {
@@ -99,7 +98,7 @@ pub fn extract_3d_components(main_world: &MainWorld, render_world: &mut RenderWo
 
 /// Extract 2D UI components (Button) to Render World ECS
 pub fn extract_buttons(main_world: &MainWorld, render_world: &mut RenderWorld) {
-    for (entity, transform) in main_world.query::<Transform2D>() {
+    for (entity, transform) in main_world.query::<Transform>() {
         if let Some(button) = main_world.get_component::<Button>(entity) {
             let render_entity = render_world.get_or_spawn_synced(entity);
             

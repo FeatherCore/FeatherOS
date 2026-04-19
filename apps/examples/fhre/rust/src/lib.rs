@@ -16,23 +16,25 @@ mod platform;
 extern crate alloc;
 
 use platform::framebuffer;
+use platform::input::{ButtonInput, KeyCode, MouseButton};
+use platform::WindowRunner;
 
 use fhre::{
-    App, FHRE_VERSION,
-    node::{Node, NodeType, Transform2D, Transform3D},
-    math::{Color, Vec3},
+    App,
+    node::{Node, NodeType, Transform, Transform3D},
+    math::{Color, Vec2, Vec3},
     resources::PrimaryScreen,
     window::MousePosition,
     Res, ResMut, Query, Commands, Entity,
-    ButtonInput, MouseButton, KeyCode,
     Update, PreUpdate, Startup,
     DefaultPlugins,
     SyncToRenderWorld,
     declare_system,
+    Pickable, PickableBounds, HoverMap, PointerId,
+    ui_picking_backend, update_hover_map, PointerHitsBuffer, PreviousHoverMap,
 };
 
-use components::{Button, Cube, SoccerBall};
-use fhre::window::WindowRunner;
+use components::{Button, ButtonState, Cube, SoccerBall};
 use fhre::animation::{
     AnimationClip, AnimationClipHandle, AnimationPlayer,
     AnimationProperty, AnimationTargetId, AnimationResources,
@@ -237,26 +239,32 @@ fn setup(mut commands: Commands, screen: Res<PrimaryScreen>) {
     // Previous button (left)
     commands.spawn()
         .insert(Node::ui_control(NodeType::Button))
-        .insert(Transform2D::from_position(center_x - ui::BUTTON_SPACING, button_y))
+        .insert(Transform::from_2d(center_x - ui::BUTTON_SPACING, button_y))
         .insert(Button::new(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT)
             .with_text("Prev")
-            .with_colors(colors::BTN_PREV.0, colors::BTN_PREV.1, colors::BTN_PREV.2));
+            .with_colors(colors::BTN_PREV.0, colors::BTN_PREV.1, colors::BTN_PREV.2))
+        .insert(PickableBounds::from_size(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT))
+        .insert(Pickable::DEFAULT);
     
     // Pause button (center)
     commands.spawn()
         .insert(Node::ui_control(NodeType::Button))
-        .insert(Transform2D::from_position(center_x, button_y))
+        .insert(Transform::from_2d(center_x, button_y))
         .insert(Button::new(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT)
             .with_text("Pause")
-            .with_colors(colors::BTN_PAUSE.0, colors::BTN_PAUSE.1, colors::BTN_PAUSE.2));
+            .with_colors(colors::BTN_PAUSE.0, colors::BTN_PAUSE.1, colors::BTN_PAUSE.2))
+        .insert(PickableBounds::from_size(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT))
+        .insert(Pickable::DEFAULT);
     
     // Next button (right)
     commands.spawn()
         .insert(Node::ui_control(NodeType::Button))
-        .insert(Transform2D::from_position(center_x + ui::BUTTON_SPACING, button_y))
+        .insert(Transform::from_2d(center_x + ui::BUTTON_SPACING, button_y))
         .insert(Button::new(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT)
             .with_text("Next")
-            .with_colors(colors::BTN_NEXT.0, colors::BTN_NEXT.1, colors::BTN_NEXT.2));
+            .with_colors(colors::BTN_NEXT.0, colors::BTN_NEXT.1, colors::BTN_NEXT.2))
+        .insert(PickableBounds::from_size(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT))
+        .insert(Pickable::DEFAULT);
 }
 
 /// Create and assign rotation animation clip to all players
@@ -336,48 +344,115 @@ fn setup_animation(
     initialized.done = true;
 }
 
-/// Handle touch/keyboard input for button presses
-fn input_system(
-    key_input: Res<ButtonInput<KeyCode>>, 
-    mouse_input: Res<ButtonInput<MouseButton>>,
+const MOUSE_POINTER_ID: PointerId = 0u64;
+
+fn picking_system(
     mouse_pos: Res<MousePosition>,
-    mut state: ResMut<DemoState>,
-    mut switch_requested: ResMut<ModelSwitchRequested>,
-    screen: Res<PrimaryScreen>,
+    mouse_input: Res<ButtonInput<MouseButton>>,
+    transform_query: Query<Transform>,
+    bounds_query: Query<PickableBounds>,
+    pickable_query: Query<Pickable>,
+    mut hover_map: ResMut<HoverMap>,
+    mut prev_hover_map: ResMut<PreviousHoverMap>,
 ) {
-    // Handle touch/click input
-    if mouse_input.just_pressed(MouseButton::Left) {
-        let (width, height) = screen.dimensions();
-        let center_x = width as f32 / 2.0;
-        let button_y = height as f32 - ui::BUTTON_BOTTOM_MARGIN;
-        
-        let mx = mouse_pos.x as f32;
-        let my = mouse_pos.y as f32;
-        
-        // Check if touch is within button row
-        if (my - button_y).abs() < ui::BUTTON_TOUCH_RADIUS {
-            // Previous button (left)
-            if (mx - (center_x - ui::BUTTON_SPACING)).abs() < ui::BUTTON_WIDTH / 2.0 {
-                state.current_model = if state.current_model == 0 {
-                    config::MODEL_COUNT - 1
-                } else {
-                    state.current_model - 1
-                };
-                switch_requested.requested = true;
-            }
-            // Pause button (center)
-            else if (mx - center_x).abs() < ui::BUTTON_WIDTH / 2.0 {
-                state.is_rotating = !state.is_rotating;
-            }
-            // Next button (right)
-            else if (mx - (center_x + ui::BUTTON_SPACING)).abs() < ui::BUTTON_WIDTH / 2.0 {
-                state.current_model = (state.current_model + 1) % config::MODEL_COUNT;
-                switch_requested.requested = true;
+    let mut buffer = PointerHitsBuffer::new();
+    
+    let pressed = mouse_input.pressed(MouseButton::Left);
+    let pointers: [(PointerId, f32, f32, bool); 1] = [
+        (MOUSE_POINTER_ID, mouse_pos.x as f32, mouse_pos.y as f32, pressed),
+    ];
+    
+    let mut pickables: alloc::vec::Vec<(Entity, Transform, PickableBounds, Option<Pickable>)> = 
+        alloc::vec::Vec::new();
+    
+    for (entity, transform) in transform_query.iter() {
+        if let Some((_, bounds)) = bounds_query.get_pair(entity) {
+            let pickable = pickable_query.get(entity).cloned();
+            pickables.push((entity, *transform, *bounds, pickable));
+        }
+    }
+    
+    let hits = ui_picking_backend(&pointers, &pickables);
+    
+    for hit in hits {
+        buffer.push(hit);
+    }
+    
+    let pickable_data: alloc::vec::Vec<(Entity, Pickable)> = 
+        pickable_query.iter()
+            .map(|(entity, pickable)| (entity, *pickable))
+            .collect();
+    
+    update_hover_map(buffer.hits(), &pickable_data, &mut hover_map, &mut prev_hover_map);
+}
+
+fn button_interaction_system(
+    mouse_input: Res<ButtonInput<MouseButton>>,
+    hover_map: Res<HoverMap>,
+    prev_hover_map: Res<PreviousHoverMap>,
+    mut button_query: Query<Button>,
+) {
+    let just_released = mouse_input.just_released(MouseButton::Left);
+    
+    for (_, button) in button_query.iter_mut() {
+        button.clicked = false;
+    }
+    
+    if just_released {
+        if let Some((entity, _hit)) = prev_hover_map.0.get(&MOUSE_POINTER_ID) {
+            if let Some((_, button)) = button_query.get_pair_mut(*entity) {
+                if button.state == ButtonState::Pressed {
+                    button.clicked = true;
+                    button.state = ButtonState::Hover;
+                }
             }
         }
     }
     
-    // Handle keyboard input
+    if let Some((entity, _hit)) = hover_map.get(&MOUSE_POINTER_ID) {
+        if let Some((_, button)) = button_query.get_pair_mut(*entity) {
+            if mouse_input.pressed(MouseButton::Left) {
+                button.state = ButtonState::Pressed;
+            } else if button.state != ButtonState::Hover || !just_released {
+                button.state = ButtonState::Hover;
+            }
+        }
+    } else if !just_released {
+        for (_, button) in button_query.iter_mut() {
+            button.state = ButtonState::Normal;
+        }
+    }
+}
+
+fn input_system(
+    key_input: Res<ButtonInput<KeyCode>>, 
+    mut state: ResMut<DemoState>,
+    mut switch_requested: ResMut<ModelSwitchRequested>,
+    button_query: Query<Button>,
+) {
+    for (_, button) in button_query.iter() {
+        if button.clicked {
+            match button.text {
+                "Prev" => {
+                    state.current_model = if state.current_model == 0 {
+                        config::MODEL_COUNT - 1
+                    } else {
+                        state.current_model - 1
+                    };
+                    switch_requested.requested = true;
+                }
+                "Pause" => {
+                    state.is_rotating = !state.is_rotating;
+                }
+                "Next" => {
+                    state.current_model = (state.current_model + 1) % config::MODEL_COUNT;
+                    switch_requested.requested = true;
+                }
+                _ => {}
+            }
+        }
+    }
+    
     if key_input.just_pressed(KeyCode::Space) {
         state.is_rotating = !state.is_rotating;
     }
@@ -501,7 +576,9 @@ pub extern "C" fn fhre_rust_main() -> i32 {
         // Systems
         .add_systems(Startup, declare_system!(setup; Commands, Res<PrimaryScreen>))
         .add_systems(Update, declare_system!(setup_animation; ResMut<AnimationResources>, ResMut<RotationClip>, Query<AnimationPlayer>, ResMut<AnimationInitialized>))
-        .add_systems(PreUpdate, declare_system!(input_system; Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>, Res<MousePosition>, ResMut<DemoState>, ResMut<ModelSwitchRequested>, Res<PrimaryScreen>))
+        .add_systems(PreUpdate, declare_system!(picking_system; Res<MousePosition>, Res<ButtonInput<MouseButton>>, Query<Transform>, Query<PickableBounds>, Query<Pickable>, ResMut<HoverMap>, ResMut<PreviousHoverMap>))
+        .add_systems(PreUpdate, declare_system!(button_interaction_system; Res<ButtonInput<MouseButton>>, Res<HoverMap>, Res<PreviousHoverMap>, Query<Button>))
+        .add_systems(PreUpdate, declare_system!(input_system; Res<ButtonInput<KeyCode>>, ResMut<DemoState>, ResMut<ModelSwitchRequested>, Query<Button>))
         .add_systems(Update, declare_system!(animation_control_system; Res<DemoState>, ResMut<LastRotationState>, Query<AnimationPlayer>))
         .add_systems(Update, declare_system!(model_switch_system; ResMut<DemoState>, ResMut<ModelSwitchRequested>, ResMut<LastRotationState>, Res<RotationClip>, Res<PrimaryScreen>, Commands, Query<Cube>, Query<SoccerBall>));
     

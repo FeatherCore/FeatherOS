@@ -18,7 +18,7 @@ mod query_data;
 // Re-exports
 pub use world::MainWorld;
 pub use entity::Entity;
-pub use component::{Component, Transform, Sprite, Velocity};
+pub use component::{Component, Sprite, Velocity};
 pub use system::{System, IntoSystem, system1, system2, system3, system4, system5, system6, system7, system8, system9};
 pub use system_param::{SystemParam, Res, ResMut, Local, FromWorld, EntityRef, EntityMut};
 pub use commands::{Commands, Command, CommandsState, EntityCommands};

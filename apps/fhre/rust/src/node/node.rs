@@ -14,56 +14,36 @@ use crate::Component;
 
 /// Node 类型枚举
 ///
-/// 定义了 FHRE 支持的所有节点类型，涵盖游戏和 UI 场景。
+/// FHRE 是纯 3D 引擎，NodeType 只区分功能类型，不区分 2D/3D。
+/// 所有实体都在 3D 空间中，2D 只是 z=0 平面的特例。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {
-    // ==================== 游戏类型 ====================
-    /// 2D 精灵
-    Sprite2D,
-    /// 3D 模型
-    Model3D,
-    /// 粒子系统
-    ParticleSystem,
-    /// 摄像机
-    Camera,
-    /// 光源
-    Light,
-    /// 触发器/碰撞体
-    Trigger,
-    /// 空节点（用于分组）
     Empty,
 
-    // ==================== UI 类型 ====================
-    /// 容器
+    Sprite,
+    Model,
+    ParticleSystem,
+    Camera,
+    Light,
+    Trigger,
+
     Container,
-    /// 面板
     Panel,
-    /// 按钮
     Button,
-    /// 标签/文本
     Label,
-    /// 图像
     Image,
-    /// 文本输入框
     TextInput,
-    /// 滑块
     Slider,
-    /// 开关
     Switch,
-    /// 进度条
     ProgressBar,
-    /// 列表
     List,
-    /// 滚动视图
     ScrollView,
 
-    // ==================== 2.5D 混合类型 ====================
-    /// 卡片（支持翻转效果）
     Card,
-    /// 等角块
     IsoBlock,
-    /// 3D UI 元素
     UI3D,
+
+    Custom(u16),
 }
 
 impl Default for NodeType {
@@ -334,21 +314,19 @@ impl Node {
         self.state.disabled = disabled;
     }
 
-    /// 检查是否是游戏类型
     pub fn is_game_type(&self) -> bool {
         matches!(
             self.node_type,
-            NodeType::Sprite2D
-                | NodeType::Model3D
+            NodeType::Empty
+                | NodeType::Sprite
+                | NodeType::Model
                 | NodeType::ParticleSystem
                 | NodeType::Camera
                 | NodeType::Light
                 | NodeType::Trigger
-                | NodeType::Empty
         )
     }
 
-    /// 检查是否是 UI 类型
     pub fn is_ui_type(&self) -> bool {
         matches!(
             self.node_type,
@@ -366,7 +344,6 @@ impl Node {
         )
     }
 
-    /// 检查是否是 2.5D 混合类型
     pub fn is_mixed_type(&self) -> bool {
         matches!(
             self.node_type,
@@ -374,12 +351,11 @@ impl Node {
         )
     }
 
-    /// 检查是否需要 3D 变换
     pub fn needs_3d_transform(&self) -> bool {
         self.state.use_3d
             || matches!(
                 self.node_type,
-                NodeType::Model3D | NodeType::ParticleSystem | NodeType::UI3D
+                NodeType::Model | NodeType::ParticleSystem | NodeType::UI3D | NodeType::Camera | NodeType::Light
             )
     }
 

@@ -5,44 +5,45 @@
 //!
 //! # 设计理念
 //!
-//! 1. **ECS 架构**: 无父子关系，组件扁平存储，符合 Bevy 双世界设计
-//! 2. **SOA 布局**: 数据连续存储，提升缓存命中率，支持 SIMD 批量处理
-//! 3. **统一抽象**: Node 既可以表示 2D 游戏精灵，也可以表示 UI 按钮
-//! 4. **2.5D 支持**: 默认 2D 模式，需要时可启用 3D 变换
+//! 1. **纯 3D 引擎**: 所有实体都在 3D 空间中，2D 只是 z=0 平面的特例
+//! 2. **ECS 架构**: 无父子关系，组件扁平存储，符合 Bevy 双世界设计
+//! 3. **SOA 布局**: 数据连续存储，提升缓存命中率，支持 SIMD 批量处理
+//! 4. **统一抽象**: Node 既可以表示游戏精灵，也可以表示 UI 按钮
 //!
 //! # 使用示例
 //!
 //! ```rust
-//! // 创建 2D 游戏精灵
+//! // 创建游戏精灵 (2D = 3D 的 z=0 特例)
 //! commands.spawn((
-//!     Node::game_entity(NodeType::Sprite2D),
-//!     Node2D::from_position(100.0, 200.0),
+//!     Node::game_entity(NodeType::Sprite),
+//!     Transform::from_2d(100.0, 200.0),
 //!     Sprite::from_image(image_handle),
 //! ));
 //!
 //! // 创建 UI 按钮
 //! commands.spawn((
 //!     Node::ui_control(NodeType::Button),
-//!     Node2D::from_position(50.0, 50.0),
+//!     Transform::from_2d(50.0, 50.0),
 //!     Style::ui_default(),
 //! ));
 //!
 //! // 创建 3D 模型
 //! commands.spawn((
-//!     Node::game_entity(NodeType::Model3D),
-//!     Node3D::from_position(0.0, 0.0, 10.0),
+//!     Node::game_entity(NodeType::Model),
+//!     Transform::from_position(0.0, 0.0, 10.0),
 //!     Model::from_mesh(mesh_handle),
 //! ));
 //! ```
 
 pub mod node;
-pub mod node2d;
 pub mod node3d;
 pub mod style;
 pub mod layout;
 
 pub use node::{Node, NodeType, NodeState, NodeFlags, NodeStateBatch, NodeTransformBatch};
-pub use node2d::{Node2D, Transform2D, GlobalTransform2D, BoundingBox2D};
-pub use node3d::{Node3D, Transform3D, GlobalTransform3D, Camera3D, Light3D, LightType};
+pub use node3d::{
+    Transform, Transform3D, GlobalTransform,
+    Node3D, Camera, Camera3D, Light, Light3D, LightType, BoundingBox,
+};
 pub use style::{Style, Dimension, Rect, Border, Shadow, TextStyle, TextAlignment, Background, Gradient, ImageBackground, ImageScaling, ImageRepeat};
 pub use layout::{Layout, LayoutType, LayoutResult, FlexDirection, JustifyContent, AlignItems, FlexWrap, ListDirection};
