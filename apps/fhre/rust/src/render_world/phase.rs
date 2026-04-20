@@ -191,9 +191,11 @@ impl RenderPhase {
         }
         
         if self.phase_type.requires_sorting() {
-            // Sort by Z depth (back to front for transparent)
+            // Sort by Z depth (back to front for painter's algorithm)
+            // Smaller Z = further from camera, render first
+            // Larger Z = closer to camera, render last (on top)
             self.items.sort_by(|a, b| {
-                b.z_depth.partial_cmp(&a.z_depth)
+                a.z_depth.partial_cmp(&b.z_depth)
                     .unwrap_or(core::cmp::Ordering::Equal)
                     .then_with(|| a.sort_key.cmp(&b.sort_key))
             });

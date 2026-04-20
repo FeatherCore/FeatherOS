@@ -10,43 +10,14 @@ use super::change_detection::{Mut, Ref};
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
-/// Trait for types that can be fetched from a Query
-///
-/// This is the core trait that enables multi-component queries.
-/// Implement this for component references, tuples, and other queryable types.
-///
-/// # Examples
-///
-/// ```rust
-/// // Single component
-/// Query<&Transform>
-///
-/// // Multiple components (tuple)
-/// Query<(&Transform, &Velocity)>
-///
-/// // Mutable access
-/// Query<&mut Transform>
-///
-/// // Mixed access
-/// Query<(&Transform, &mut Velocity)>
-/// ```
 pub trait QueryData {
-    /// The item type returned by the query
     type Item<'w>;
 
-    /// Fetch the data for a specific entity
-    ///
-    /// # Safety
-    /// This function uses unsafe internally. The caller must ensure:
-    /// - The entity has all required components
-    /// - No aliasing mutable references exist
     unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>>;
 
-    /// Check if an entity has all required components
     fn matches(world: &MainWorld, entity: Entity) -> bool;
 }
 
-// Implement QueryData for immutable component references
 impl<T: Component> QueryData for &T {
     type Item<'w> = &'w T;
 
@@ -59,7 +30,6 @@ impl<T: Component> QueryData for &T {
     }
 }
 
-// Implement QueryData for mutable component references
 impl<T: Component> QueryData for &mut T {
     type Item<'w> = &'w mut T;
 
@@ -72,74 +42,6 @@ impl<T: Component> QueryData for &mut T {
     }
 }
 
-// Implement QueryData for tuples (up to 4 elements)
-// This enables Query<(&A, &B)>, Query<(&mut A, &B, &C)>, etc.
-
-impl<A: QueryData> QueryData for (A,) {
-    type Item<'w> = (A::Item<'w>,);
-
-    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
-        let a = A::fetch(world, entity)?;
-        Some((a,))
-    }
-
-    fn matches(world: &MainWorld, entity: Entity) -> bool {
-        A::matches(world, entity)
-    }
-}
-
-impl<A: QueryData, B: QueryData> QueryData for (A, B) {
-    type Item<'w> = (A::Item<'w>, B::Item<'w>);
-
-    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
-        let world_ptr = world as *mut MainWorld;
-        let a = A::fetch(&mut *world_ptr, entity)?;
-        let b = B::fetch(&mut *world_ptr, entity)?;
-        Some((a, b))
-    }
-
-    fn matches(world: &MainWorld, entity: Entity) -> bool {
-        A::matches(world, entity) && B::matches(world, entity)
-    }
-}
-
-impl<A: QueryData, B: QueryData, C: QueryData> QueryData for (A, B, C) {
-    type Item<'w> = (A::Item<'w>, B::Item<'w>, C::Item<'w>);
-
-    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
-        let world_ptr = world as *mut MainWorld;
-        let a = A::fetch(&mut *world_ptr, entity)?;
-        let b = B::fetch(&mut *world_ptr, entity)?;
-        let c = C::fetch(&mut *world_ptr, entity)?;
-        Some((a, b, c))
-    }
-
-    fn matches(world: &MainWorld, entity: Entity) -> bool {
-        A::matches(world, entity) && B::matches(world, entity) && C::matches(world, entity)
-    }
-}
-
-impl<A: QueryData, B: QueryData, C: QueryData, D: QueryData> QueryData for (A, B, C, D) {
-    type Item<'w> = (A::Item<'w>, B::Item<'w>, C::Item<'w>, D::Item<'w>);
-
-    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
-        let world_ptr = world as *mut MainWorld;
-        let a = A::fetch(&mut *world_ptr, entity)?;
-        let b = B::fetch(&mut *world_ptr, entity)?;
-        let c = C::fetch(&mut *world_ptr, entity)?;
-        let d = D::fetch(&mut *world_ptr, entity)?;
-        Some((a, b, c, d))
-    }
-
-    fn matches(world: &MainWorld, entity: Entity) -> bool {
-        A::matches(world, entity)
-            && B::matches(world, entity)
-            && C::matches(world, entity)
-            && D::matches(world, entity)
-    }
-}
-
-// Implement QueryData for Entity (just returns the entity itself)
 impl QueryData for Entity {
     type Item<'w> = Entity;
 
@@ -152,7 +54,6 @@ impl QueryData for Entity {
     }
 }
 
-// Implement QueryData for Mut<T> (mutable access with change detection)
 impl<T: Component> QueryData for Mut<'static, T> {
     type Item<'w> = Mut<'w, T>;
 
@@ -168,7 +69,6 @@ impl<T: Component> QueryData for Mut<'static, T> {
     }
 }
 
-// Implement QueryData for Ref<T> (immutable access with change detection info)
 impl<T: Component> QueryData for Ref<'static, T> {
     type Item<'w> = Ref<'w, T>;
 
@@ -183,6 +83,39 @@ impl<T: Component> QueryData for Ref<'static, T> {
         world.get_component::<T>(entity).is_some()
     }
 }
+
+macro_rules! impl_tuple_query_data {
+    () => {
+        impl QueryData for () {
+            type Item<'w> = ();
+
+            unsafe fn fetch<'w>(_world: &'w mut MainWorld, _entity: Entity) -> Option<Self::Item<'w>> {
+                Some(())
+            }
+
+            fn matches(_world: &MainWorld, _entity: Entity) -> bool {
+                true
+            }
+        }
+    };
+    ($($T:ident),*) => {
+        impl<$($T: QueryData),*> QueryData for ($($T,)*) {
+            type Item<'w> = ($($T::Item<'w>,)*);
+
+            #[allow(unused_variables)]
+            unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
+                let world_ptr = world as *mut MainWorld;
+                Some(($($T::fetch(&mut *world_ptr, entity)?,)*))
+            }
+
+            fn matches(world: &MainWorld, entity: Entity) -> bool {
+                true $(&& $T::matches(world, entity))*
+            }
+        }
+    };
+}
+
+crate::all_tuples!(impl_tuple_query_data, 0, 15, T);
 
 /// A Query that can fetch multiple components using QueryData
 ///

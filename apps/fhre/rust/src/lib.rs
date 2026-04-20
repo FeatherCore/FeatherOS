@@ -92,7 +92,7 @@ pub use main_world::{MainWorld, Entity, Component, System, IntoSystem};
 pub use main_world::{SystemParam, Res, ResMut, Query, Local, system1, system2, system3, system4, system5, system6, system7, system8, system9, system10};
 pub use main_world::{Commands, Command, CommandsState, EntityCommands};
 pub use main_world::query_filter;
-pub use main_world::{Mut, Ref, MultiCompQuery, QueryData};
+pub use main_world::{Mut, Ref, QueryData};
 
 // Re-export render_world types
 pub use render_world::{RenderWorld, RenderCommand, View, ViewBundle, RenderComponent};

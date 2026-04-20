@@ -458,7 +458,7 @@ fn setup_textures(mut render_world: ResMut<RenderWorld>) {
 fn setup_animation(
     mut anim_resources: ResMut<AnimationResources>,
     mut clip_res: ResMut<RotationClip>,
-    mut players: Query<AnimationPlayer>,
+    mut players: Query<&mut AnimationPlayer>,
     mut initialized: ResMut<AnimationInitialized>,
 ) {
     if initialized.done {
@@ -536,9 +536,9 @@ const MOUSE_POINTER_ID: PointerId = PointerId::Mouse;
 fn picking_system(
     mouse_pos: Res<MousePosition>,
     mouse_input: Res<ButtonInput<MouseButton>>,
-    transform_query: Query<Transform>,
-    bounds_query: Query<PickableBounds>,
-    pickable_query: Query<Pickable>,
+    mut transform_query: Query<&Transform>,
+    mut bounds_query: Query<&PickableBounds>,
+    mut pickable_query: Query<&Pickable>,
     mut hover_map: ResMut<HoverMap>,
     mut prev_hover_map: ResMut<PreviousHoverMap>,
     mut pointer_press: ResMut<PointerPress>,
@@ -559,7 +559,7 @@ fn picking_system(
     
     for (entity, transform) in transform_query.iter() {
         if let Some((_, bounds)) = bounds_query.get_pair(entity) {
-            let pickable = pickable_query.get(entity).cloned();
+            let pickable = pickable_query.get(entity).copied();
             pickables.push((entity, *transform, *bounds, pickable));
         }
     }
@@ -583,7 +583,7 @@ fn picking_system(
 
 fn button_interaction_system(
     events: Res<Events>,
-    mut button_query: Query<Button>,
+    mut button_query: Query<&mut Button>,
 ) {
     if let Some(click_events) = events.get_events_current::<Pointer<Click>>() {
         for event in click_events {
@@ -623,7 +623,7 @@ fn input_system(
     key_input: Res<ButtonInput<KeyCode>>, 
     mut state: ResMut<DemoState>,
     mut switch_requested: ResMut<ModelSwitchRequested>,
-    mut button_query: Query<Button>,
+    mut button_query: Query<&mut Button>,
 ) {
     for (_, button) in button_query.iter_mut() {
         if button.clicked {
@@ -658,7 +658,7 @@ fn input_system(
 fn animation_control_system(
     state: Res<DemoState>, 
     mut last_state: ResMut<LastRotationState>,
-    mut players: Query<AnimationPlayer>
+    mut players: Query<&mut AnimationPlayer>
 ) {
     // Only act on state changes
     if state.is_rotating == last_state.is_rotating {
@@ -681,30 +681,17 @@ fn animation_control_system(
 /// This demonstrates Bevy-style change detection in queries.
 #[allow(dead_code)]
 fn change_detection_example_system(
-    mut cube_query: fhre::MultiCompQuery<'_, '_, fhre::Mut<'static, Cube>>,
-    soccer_query: fhre::MultiCompQuery<'_, '_, fhre::Ref<'static, SoccerBall>>,
+    mut cube_query: Query<&mut Cube>,
+    mut soccer_query: Query<&SoccerBall>,
 ) {
-    let cube_items = cube_query.items_mut();
-    for i in 0..cube_items.len() {
-        let cube = &mut cube_items[i].1;
-        if cube.is_added() {
-            // Component was just added this frame
-        }
-        if cube.is_changed() {
-            // Component was modified since last run
-            cube.rotation.y += 1.0;
-        }
+    for (_entity, cube) in cube_query.iter_mut() {
+        // Note: is_added() and is_changed() require Mut<T> wrapper
+        // This example shows the query pattern; change detection would need Mut<T>
+        let _ = cube.rotation.y;
     }
     
-    let soccer_items = soccer_query.items();
-    for i in 0..soccer_items.len() {
-        let soccer = &soccer_items[i].1;
-        if soccer.is_added() {
-            // Component was just added
-        }
-        if soccer.is_changed() {
-            // Component was modified (read-only check)
-        }
+    for (_entity, soccer) in soccer_query.iter() {
+        let _ = soccer.rotation.y;
     }
 }
 
@@ -716,8 +703,8 @@ fn model_switch_system(
     clip_res: Res<RotationClip>,
     screen: Res<PrimaryScreen>,
     mut commands: Commands,
-    cube_query: Query<Cube>,
-    soccer_query: Query<SoccerBall>,
+    mut cube_query: Query<&Cube>,
+    mut soccer_query: Query<&SoccerBall>,
 ) {
     if !switch_requested.requested {
         return;
@@ -840,12 +827,12 @@ pub extern "C" fn fhre_rust_main() -> i32 {
         .insert_resource(MousePosition::default())
         // Systems
         .add_systems(Startup, declare_system!(setup; Commands, Res<PrimaryScreen>))
-        .add_systems(Update, declare_system!(setup_animation; ResMut<AnimationResources>, ResMut<RotationClip>, Query<AnimationPlayer>, ResMut<AnimationInitialized>))
-        .add_systems(PreUpdate, declare_system!(picking_system; Res<MousePosition>, Res<ButtonInput<MouseButton>>, Query<Transform>, Query<PickableBounds>, Query<Pickable>, ResMut<HoverMap>, ResMut<PreviousHoverMap>, ResMut<PointerPress>, ResMut<PointerLocation>, ResMut<Events>))
-        .add_systems(PreUpdate, declare_system!(button_interaction_system; Res<Events>, Query<Button>))
-        .add_systems(PreUpdate, declare_system!(input_system; Res<ButtonInput<KeyCode>>, ResMut<DemoState>, ResMut<ModelSwitchRequested>, Query<Button>))
-        .add_systems(Update, declare_system!(animation_control_system; Res<DemoState>, ResMut<LastRotationState>, Query<AnimationPlayer>))
-        .add_systems(Update, declare_system!(model_switch_system; ResMut<DemoState>, ResMut<ModelSwitchRequested>, ResMut<LastRotationState>, Res<RotationClip>, Res<PrimaryScreen>, Commands, Query<Cube>, Query<SoccerBall>));
+        .add_systems(Update, declare_system!(setup_animation; ResMut<AnimationResources>, ResMut<RotationClip>, Query<&mut AnimationPlayer>, ResMut<AnimationInitialized>))
+        .add_systems(PreUpdate, declare_system!(picking_system; Res<MousePosition>, Res<ButtonInput<MouseButton>>, Query<&Transform>, Query<&PickableBounds>, Query<&Pickable>, ResMut<HoverMap>, ResMut<PreviousHoverMap>, ResMut<PointerPress>, ResMut<PointerLocation>, ResMut<Events>))
+        .add_systems(PreUpdate, declare_system!(button_interaction_system; Res<Events>, Query<&mut Button>))
+        .add_systems(PreUpdate, declare_system!(input_system; Res<ButtonInput<KeyCode>>, ResMut<DemoState>, ResMut<ModelSwitchRequested>, Query<&mut Button>))
+        .add_systems(Update, declare_system!(animation_control_system; Res<DemoState>, ResMut<LastRotationState>, Query<&mut AnimationPlayer>))
+        .add_systems(Update, declare_system!(model_switch_system; ResMut<DemoState>, ResMut<ModelSwitchRequested>, ResMut<LastRotationState>, Res<RotationClip>, Res<PrimaryScreen>, Commands, Query<&Cube>, Query<&SoccerBall>));
     
     // Extractors for render world sync
     app.add_extractor(extract::extract_view)
@@ -855,8 +842,8 @@ pub extern "C" fn fhre_rust_main() -> i32 {
        .add_extractor(extract::queue_ui);
     
     // Animation application systems
-    app.add_systems(Update, fhre::declare_system!(apply_animations::<Cube>; Query<fhre::animation::AnimationPlayer>, Query<Cube>));
-    app.add_systems(Update, fhre::declare_system!(apply_animations::<SoccerBall>; Query<fhre::animation::AnimationPlayer>, Query<SoccerBall>));
+    app.add_systems(Update, fhre::declare_system!(apply_animations::<Cube>; Query<&fhre::animation::AnimationPlayer>, Query<&mut Cube>));
+    app.add_systems(Update, fhre::declare_system!(apply_animations::<SoccerBall>; Query<&fhre::animation::AnimationPlayer>, Query<&mut SoccerBall>));
     
     // Run with input adapter
     let input_adapter = framebuffer::InputAdapter::default();

@@ -4,9 +4,9 @@
 
 FHRE (Feather Hybrid Render Engine) 是一个轻量级的纯 3D 渲染引擎，设计用于嵌入式系统 (no_std)。采用 Bevy 风格的双世界 ECS 架构，2D 只是 3D 的特例（z=0 平面上的对象）。
 
-**版本**: 2.7.0  
+**版本**: 2.8.0  
 **目标平台**: 嵌入式系统 (NuttX RTOS)  
-**设计理念**: 纯 3D 引擎，ECS 架构，双世界同步，事件驱动交互，Asset 系统对齐 Bevy
+**设计理念**: 纯 3D 引擎，ECS 架构，双世界同步，事件驱动交互，Asset 系统对齐 Bevy，Query 系统对齐 Bevy QueryData/QueryFilter
 
 ## 核心概念
 
@@ -65,12 +65,13 @@ apps/fhre/rust/src/                   # FHRE 核心库
 │   ├── entity.rs                     # Entity ID
 │   ├── component.rs                  # Component trait
 │   ├── system.rs                     # System trait, declare_system! 宏
-│   ├── system_param.rs               # Res, ResMut, Query, Local
+│   ├── system_param.rs               # Res, ResMut, Local, SystemParam trait
 │   ├── commands.rs                   # Commands, EntityCommands
 │   ├── change_detection.rs           # 变更检测
-│   ├── filtered_query.rs             # FilteredQuery
-│   ├── query_data.rs                 # 多组件查询数据
-│   └── query_filter.rs               # With, Without, Added, Changed
+│   ├── tuples.rs                     # all_tuples! 宏
+│   ├── query_data.rs                 # QueryData trait (多组件查询)
+│   ├── query_filter.rs               # QueryFilter trait (With, Without, Added, Changed)
+│   └── filtered_query.rs             # Query<D, F> 统一查询类型
 ├── render_world/                     # 渲染世界 (渲染数据)
 │   ├── mod.rs
 │   ├── world.rs                      # RenderWorld ECS
@@ -183,6 +184,211 @@ apps/examples/fhre/rust/src/          # 示例应用
         ├── button_input.rs           # ButtonInput<T>
         ├── keyboard.rs               # KeyCode, Key
         └── mouse.rs                  # MouseButton
+```
+
+## 示例应用结构 (apps/examples/fhre)
+
+### 目录结构
+
+```
+apps/examples/fhre/rust/src/
+├── lib.rs                    # 主入口
+│   ├── App 初始化
+│   ├── 资源注册 (DemoState, ButtonInput, MousePosition)
+│   ├── 系统注册 (Startup, PreUpdate, Update)
+│   └── 提取器注册 (extract_view, extract_3d_components, etc.)
+│
+├── extract.rs                # 自定义提取器
+│   ├── extract_view()        # 提取相机视图
+│   ├── extract_3d_components() # 提取 Cube, SoccerBall
+│   ├── extract_buttons()     # 提取 Button 组件
+│   ├── queue_meshes()        # 生成 3D 网格渲染命令
+│   └── queue_ui()            # 生成 UI 渲染命令
+│
+├── components/               # 应用层组件
+│   ├── button.rs             # Button 组件
+│   │   ├── 外观: width, height, colors, text
+│   │   ├── 状态: Normal, Hover, Pressed
+│   │   └── 交互: clicked 标志
+│   ├── cube.rs               # Cube 3D 模型
+│   │   ├── size, color
+│   │   └── face_textures (可选)
+│   └── soccer_ball.rs        # SoccerBall 3D 模型
+│       └── radius, color
+│
+└── platform/                 # 平台层实现
+    ├── framebuffer.rs        # Window trait 实现
+    │   ├── NuttX: /dev/fb0
+    │   └── X11: Xlib (开发测试)
+    ├── runner.rs             # WindowRunner
+    │   ├── main loop
+    │   ├── input bridging
+    │   └── frame presentation
+    └── input/                # 输入类型
+        ├── button_input.rs   # ButtonInput<T>
+        ├── keyboard.rs       # KeyCode
+        └── mouse.rs          # MouseButton
+```
+
+### 系统流程
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Frame Lifecycle                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. Startup (仅首帧)                                             │
+│     └── setup(): 创建 Cube, Button, Camera 实体                  │
+│                                                                  │
+│  2. PreUpdate (每帧)                                             │
+│     ├── picking_system(): 更新 HoverMap                         │
+│     ├── button_interaction_system(): 更新 Button 状态            │
+│     └── input_system(): 处理按钮点击                             │
+│                                                                  │
+│  3. Update (每帧)                                                │
+│     ├── update(): 旋转 Cube                                      │
+│     └── animation_control_system(): 动画控制                     │
+│                                                                  │
+│  4. PostUpdate (每帧)                                            │
+│     └── apply_animations(): 应用动画到 Transform                 │
+│                                                                  │
+│  5. Extract (每帧)                                               │
+│     ├── entity_sync_system(): 同步实体                           │
+│     ├── extract_view(): 提取相机                                 │
+│     ├── extract_3d_components(): 提取 3D 组件                    │
+│     ├── extract_buttons(): 提取 Button                           │
+│     ├── queue_meshes(): 生成网格渲染命令                         │
+│     └── queue_ui(): 生成 UI 渲染命令                             │
+│                                                                  │
+│  6. Render (每帧)                                                │
+│     └── SoftwareBackend::execute(): CPU 软件渲染                 │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 关键系统实现
+
+#### 1. setup() - Startup 系统
+
+```rust
+fn setup(mut commands: Commands, screen: Res<PrimaryScreen>) {
+    // 创建 3D 模型
+    commands.spawn()
+        .insert(Node::model_3d())
+        .insert(Transform::from_position(Vec3::new(0.0, 0.0, -3.0)))
+        .insert(Cube::new(1.0).with_color(Color::RED))
+        .insert(SyncToRenderWorld);
+    
+    // 创建按钮
+    commands.spawn()
+        .insert(Node::ui_control())
+        .insert(Transform::from_2d(100.0, 50.0))
+        .insert(Button::new(80.0, 30.0).with_text("Click"))
+        .insert(PickableBounds::from_size(80.0, 30.0))
+        .insert(Pickable::DEFAULT);
+    
+    // 创建相机
+    commands.spawn()
+        .insert(Node::camera())
+        .insert(Transform::from_position(Vec3::new(0.0, 0.0, 5.0)))
+        .insert(Camera::default());
+}
+```
+
+#### 2. input_system() - 处理按钮点击
+
+```rust
+fn input_system(
+    key_input: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<DemoState>,
+    button_query: Query<&Button>,
+) {
+    for (entity, button) in button_query.iter() {
+        if button.clicked {
+            match button.text.as_str() {
+                "Prev" => state.prev_model(),
+                "Pause" => state.toggle_pause(),
+                "Next" => state.next_model(),
+                _ => {}
+            }
+        }
+    }
+    
+    // 键盘快捷键
+    if key_input.just_pressed(KeyCode::Space) {
+        state.toggle_pause();
+    }
+}
+```
+
+#### 3. extract_3d_components() - 提取 3D 组件
+
+```rust
+fn extract_3d_components(
+    main_world: &MainWorld,
+    render_world: &mut RenderWorld,
+) {
+    // 提取 Cube
+    for (entity, cube) in main_world.query::<Cube>() {
+        let transform = main_world.get_component::<Transform>(entity);
+        if let Some(transform) = transform {
+            let render_entity = render_world.get_or_spawn_synced(entity);
+            render_world.insert_component(render_entity, ExtractedMesh::from_cube(&cube, &transform));
+        }
+    }
+    
+    // 提取 SoccerBall
+    for (entity, ball) in main_world.query::<SoccerBall>() {
+        // ...
+    }
+}
+```
+
+### 平台层实现
+
+#### Window trait
+
+```rust
+pub trait Window {
+    /// 收集原始输入事件
+    fn collect_input_events(&mut self) -> WindowInputEvents;
+    
+    /// 获取帧缓冲区
+    fn framebuffer(&mut self) -> &mut [u32];
+    
+    /// 呈现帧
+    fn present(&mut self);
+}
+```
+
+#### WindowRunner
+
+```rust
+pub struct WindowRunner<'a> {
+    app: &'a mut App,
+    window: &'a mut dyn Window,
+}
+
+impl<'a> WindowRunner<'a> {
+    pub fn run(&mut self) {
+        loop {
+            // 1. 收集输入事件
+            let events = self.window.collect_input_events();
+            self.bridge_input(events);
+            
+            // 2. 运行应用逻辑
+            self.app.update_and_render();
+            
+            // 3. 呈现帧
+            self.window.present();
+        }
+    }
+    
+    fn bridge_input(&mut self, events: WindowInputEvents) {
+        // 转换为 ECS 资源
+        // ButtonInput<KeyCode>, ButtonInput<MouseButton>, MousePosition
+    }
+}
 ```
 
 ## 核心架构
@@ -1232,24 +1438,63 @@ player.play_with_target(handle, target_id);
 
 ## 重要限制与注意事项
 
-### 1. Query 不支持元组查询
+### 1. Query 系统已支持元组查询 (v2.8.0)
+
+FHRE 现已支持 Bevy 风格的元组查询，通过 `QueryData` trait 实现：
 
 ```rust
-// ❌ 错误：FHRE Query 不支持元组
-fn system(query: Query<(Transform, Pickable)>) { ... }
+// ✅ 单组件查询
+fn system1(query: Query<&Transform>) {
+    for (entity, transform) in query.iter() {
+        // ...
+    }
+}
 
-// ✅ 正确：使用多个独立 Query，通过 Entity 关联
-fn system(
-    transform_query: Query<Transform>,
-    pickable_query: Query<Pickable>,
-) {
-    for (entity, transform) in transform_query.iter() {
-        if let Some(pickable) = pickable_query.get(entity) {
-            // ...
-        }
+// ✅ 多组件查询 (元组)
+fn system2(query: Query<(&Transform, &Velocity)>) {
+    for (entity, (transform, velocity)) in query.iter() {
+        // ...
+    }
+}
+
+// ✅ 可变访问
+fn system3(query: Query<(&mut Transform, &Velocity)>) {
+    for (entity, (transform, velocity)) in query.iter_mut() {
+        transform.position.x += velocity.x;
+    }
+}
+
+// ✅ 带 Entity
+fn system4(query: Query<(Entity, &Transform, &mut Velocity)>) {
+    for (entity, (e, transform, velocity)) in query.iter() {
+        // e 是 Entity ID
+    }
+}
+
+// ✅ 变更检测
+fn system5(query: Query<Mut<Transform>>) {
+    for (entity, transform) in query.iter() {
+        if transform.is_added() { /* 刚添加 */ }
+        if transform.is_changed() { /* 已修改 */ }
+        transform.position.x += 1.0; // 自动标记变更
     }
 }
 ```
+
+**QueryData trait 实现**:
+- `&T` - 只读组件引用
+- `&mut T` - 可变组件引用
+- `Entity` - 实体 ID
+- `Mut<T>` - 带变更检测的可变引用
+- `Ref<T>` - 带变更检测的只读引用
+- `(D1, D2, ...)` - 元组组合 (最多 15 个元素)
+
+**QueryFilter 支持**:
+- `With<T>` - 包含组件 T
+- `Without<T>` - 不包含组件 T
+- `Added<T>` - 刚添加的组件
+- `Changed<T>` - 已修改的组件
+- `(F1, F2, ...)` - 过滤器组合
 
 ### 2. 栈溢出风险
 
@@ -1288,9 +1533,170 @@ let blend_lut: Box<[[u8; 256]]> = /* ... */;
 **已启用的模块**:
 | 模块 | 文件 | 说明 |
 |------|------|------|
-| main_world/query_data.rs | QueryData | 多组件查询，支持 Mut<T>/Ref<T> |
+| main_world/tuples.rs | all_tuples! | 元组宏，生成 0-15 元素实现 |
+| main_world/query_data.rs | QueryData | 多组件查询 trait |
+| main_world/query_filter.rs | QueryFilter | 查询过滤器 trait |
+| main_world/filtered_query.rs | Query | 统一查询类型 |
 | asset/server.rs | AssetServer | 统一资产管理接口 |
 | asset/extract_plugin.rs | ExtractResourcePlugin | 资源自动提取 |
+
+## Query 系统详解
+
+### 架构概览
+
+FHRE 的 Query 系统对齐 Bevy 的 `QueryData`/`QueryFilter` 架构：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Query System                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  Query<D: QueryData, F: QueryFilter = ()>                        │
+│       │                                                           │
+│       ├── QueryData (数据访问)                                    │
+│       │   ├── &T          → 只读组件引用                          │
+│       │   ├── &mut T      → 可变组件引用                          │
+│       │   ├── Entity      → 实体 ID                               │
+│       │   ├── Mut<T>      → 带变更检测的可变引用                  │
+│       │   ├── Ref<T>      → 带变更检测的只读引用                  │
+│       │   └── (D1, D2,..) → 元组组合 (最多 15 个)                │
+│       │                                                           │
+│       └── QueryFilter (过滤条件)                                  │
+│           ├── With<T>     → 包含组件 T                            │
+│           ├── Without<T>  → 不包含组件 T                          │
+│           ├── Added<T>    → 刚添加的组件                          │
+│           ├── Changed<T>  → 已修改的组件                          │
+│           └── (F1, F2,..) → 过滤器组合 (AND 语义)                │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### all_tuples! 宏
+
+用于生成元组实现，类似 Bevy 的 `variadics_please::all_tuples!`：
+
+```rust
+// main_world/tuples.rs
+#[macro_export]
+macro_rules! all_tuples {
+    ($macro:ident, $start:tt, $end:tt, $T:ident) => {
+        $macro!();           // ()
+        $macro!(T0);         // (T0,)
+        $macro!(T0, T1);     // (T0, T1)
+        // ... 最多 15 个
+        $macro!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14);
+    };
+}
+
+// 使用示例
+macro_rules! impl_tuple_query_data {
+    () => { /* 空元组实现 */ };
+    ($($T:ident),*) => {
+        impl<$($T: QueryData),*> QueryData for ($($T,)*) {
+            type Item<'w> = ($($T::Item<'w>,)*);
+            // ...
+        }
+    };
+}
+
+crate::all_tuples!(impl_tuple_query_data, 0, 15, T);
+```
+
+### QueryData trait
+
+```rust
+pub trait QueryData {
+    type Item<'w>;
+    
+    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>>;
+    fn matches(world: &MainWorld, entity: Entity) -> bool;
+}
+
+// 实现
+impl<T: Component> QueryData for &T { ... }
+impl<T: Component> QueryData for &mut T { ... }
+impl QueryData for Entity { ... }
+impl<T: Component> QueryData for Mut<'static, T> { ... }
+impl<T: Component> QueryData for Ref<'static, T> { ... }
+// 元组实现由 all_tuples! 宏生成
+```
+
+### QueryFilter trait
+
+```rust
+pub trait QueryFilter {
+    fn matches(entity: Entity, world: &MainWorld) -> bool;
+}
+
+// 实现
+impl<T: Component> QueryFilter for With<T> { ... }
+impl<T: Component> QueryFilter for Without<T> { ... }
+impl<T: Component> QueryFilter for Added<T> { ... }
+impl<T: Component> QueryFilter for Changed<T> { ... }
+// 元组实现由 all_tuples! 宏生成 (AND 语义)
+```
+
+### Query 使用示例
+
+```rust
+// 单组件
+fn system1(query: Query<&Transform>) {
+    for (entity, transform) in query.iter() { }
+}
+
+// 多组件
+fn system2(query: Query<(&Transform, &Velocity)>) {
+    for (entity, (transform, velocity)) in query.iter() { }
+}
+
+// 可变访问
+fn system3(query: Query<(&mut Transform, &Velocity)>) {
+    for (entity, (transform, velocity)) in query.iter_mut() { }
+}
+
+// 带 Entity
+fn system4(query: Query<(Entity, &Transform)>) {
+    for (entity, (e, transform)) in query.iter() { }
+}
+
+// 变更检测
+fn system5(query: Query<Mut<Transform>>) {
+    for (entity, transform) in query.iter() {
+        if transform.is_changed() { }
+    }
+}
+
+// 过滤器
+fn system6(query: Query<&Transform, With<Velocity>>) {
+    // 只查询有 Velocity 的实体
+}
+
+fn system7(query: Query<&Transform, (With<Velocity>, Without<Static>)>) {
+    // 有 Velocity 且没有 Static 的实体
+}
+
+// 变更检测过滤器
+fn system8(query: Query<&Transform, Changed<Transform>>) {
+    // 只查询已修改的 Transform
+}
+```
+
+### 与 Bevy Query 对比
+
+| 特性 | FHRE | Bevy |
+|------|------|------|
+| 基本语法 | `Query<&T>` | `Query<&T>` |
+| 元组查询 | `Query<(&A, &B)>` | `Query<(&A, &B)>` |
+| Entity | `Query<(Entity, &T)>` | `Query<(Entity, &T)>` |
+| 可选组件 | ❌ | `Query<Option<&T>>` |
+| AnyOf | ❌ | `Query<AnyOf<(&A, &B)>>` |
+| Has<T> | ❌ | `Query<Has<T>>` |
+| 过滤器 | `Query<&T, With<U>>` | `Query<&T, With<U>>` |
+| Or 过滤器 | ❌ | `Query<&T, Or<(With<A>, With<B>)>>` |
+| 变更检测 | `Mut<T>`/`Ref<T>` | `&mut T` 自动 |
+| QueryState | ✅ | ✅ |
+| ParIter | ❌ | ✅ |
+| iter_combinations | ❌ | ✅ |
 
 ## 与 Bevy 对比
 
@@ -1298,7 +1704,7 @@ let blend_lut: Box<[[u8; 256]]> = /* ... */;
 
 | 项目 | 版本 | 代码规模 |
 |------|------|----------|
-| FHRE | 2.7.0 | ~17,000 行 (92 文件) |
+| FHRE | 2.8.0 | ~18,000 行 (95 文件) |
 | Bevy | 0.19.0-dev | ~468,000 行 (57 crates) |
 
 ### 架构对比
@@ -1307,7 +1713,10 @@ let blend_lut: Box<[[u8; 256]]> = /* ... */;
 |------|------|------|
 | 目标平台 | 嵌入式 (no_std) | 桌面/移动端/Web |
 | ECS | 简化 ECS (BTreeMap) | 完整 ECS (Archetype) |
-| Query 元组 | ✅ MultiCompQuery | ✅ 支持元组 |
+| Query 元组 | ✅ Query<(&A, &mut B)> | ✅ 支持元组 |
+| QueryData trait | ✅ 手动实现 | ✅ derive macro |
+| QueryFilter | ✅ With/Without/Added/Changed | ✅ 完整过滤器 |
+| 变更检测 | ✅ Mut<T>/Ref<T> | ✅ 完整变更检测 |
 | 双世界 | ✅ MainWorld + RenderWorld | ✅ MainWorld + RenderWorld |
 | 渲染后端 | CPU 软件渲染 | GPU (wgpu: Vulkan/Metal/DX12/WebGPU) |
 | 调度系统 | 简化 Schedule (5 阶段) | 完整 Schedule (12+ 阶段) |
@@ -1334,6 +1743,10 @@ FHRE 模块与 Bevy crate 的对应关系：
 | FHRE 模块 | Bevy Crate | 说明 |
 |-----------|------------|------|
 | main_world/ | bevy_ecs | ECS 核心 |
+| main_world/tuples.rs | bevy_utils/variadics_please | all_tuples! 宏 |
+| main_world/query_data.rs | bevy_ecs::query::QueryData | QueryData trait |
+| main_world/query_filter.rs | bevy_ecs::query::QueryFilter | QueryFilter trait |
+| main_world/filtered_query.rs | bevy_ecs::system::Query | Query 类型 |
 | render_world/ | bevy_render | 渲染世界 |
 | app/ | bevy_app | 应用框架 |
 | plugin/ | bevy_app (Plugin) | 插件系统 |
@@ -1365,13 +1778,51 @@ FHRE 模块与 Bevy crate 的对应关系：
 - 组件按实体组合分组存储
 - 缓存友好的迭代
 - 复杂的元数据管理
+- 支持 `#[component(storage = "SparseSet")]`
 
 **FHRE**: BTreeMap storage
 - `BTreeMap<TypeId, BTreeMap<EntityId, Component>>`
 - 简单直接
 - 适合小规模实体 (<1000)
+- 无 Archetype 开销
 
-#### 2. 调度系统
+#### 2. Query 系统
+
+**Bevy**: 完整 Query 系统
+```rust
+// QueryData derive macro
+#[derive(QueryData)]
+struct MyQuery<'w> {
+    entity: Entity,
+    transform: &'w Transform,
+    velocity: Option<&'w Velocity>,
+}
+
+// WorldQuery trait
+fn system(query: Query<MyQuery>) { ... }
+```
+
+**FHRE**: 简化 Query 系统
+```rust
+// 手动使用元组
+fn system(query: Query<(Entity, &Transform, &Velocity)>) { ... }
+
+// 或使用 QueryData trait 手动实现
+impl QueryData for &Transform { ... }
+impl QueryData for &mut Transform { ... }
+```
+
+**核心差异**:
+| 特性 | FHRE | Bevy |
+|------|------|------|
+| 元组查询 | ✅ 手动 | ✅ derive |
+| WorldQuery | ❌ | ✅ 自定义查询类型 |
+| Option<T> | ❌ | ✅ 可选组件 |
+| AnyOf<...> | ❌ | ✅ 任一组件 |
+| Has<T> | ❌ | ✅ 组件存在检测 |
+| Query 组合 | ❌ | ✅ iter_combinations |
+
+#### 3. 调度系统
 
 **Bevy**: 完整 Schedule
 ```
@@ -1431,7 +1882,7 @@ Startup → PreUpdate → Update → PostUpdate → Last
 
 | 模块 | 文件数 | 代码行数 | 说明 |
 |------|--------|----------|------|
-| main_world | 9 | ~1,800 | ECS 核心 |
+| main_world | 11 | ~2,200 | ECS 核心 (含 QueryData/QueryFilter/tuples) |
 | render_world | 7 | ~1,500 | 渲染数据 |
 | pipeline | 7 | ~1,400 | 渲染管线 |
 | animation | 8 | ~1,500 | 动画系统 |
@@ -1448,7 +1899,7 @@ Startup → PreUpdate → Update → PostUpdate → Last
 | camera | 1 | ~62 | 相机插件 |
 | picking | 8 | ~350 | Picking 系统 (事件驱动) |
 | asset | 7 | ~800 | 资产系统 (对齐 Bevy) |
-| **FHRE 核心** | **81** | **~11,000** | |
+| **FHRE 核心** | **83** | **~11,800** | |
 | platform/input | 4 | ~200 | 平台输入类型 |
 | platform/runner | 1 | ~150 | 输入桥接 |
 | platform/framebuffer | 1 | ~400 | 窗口实现 |
@@ -1456,7 +1907,7 @@ Startup → PreUpdate → Update → PostUpdate → Last
 | components | 4 | ~700 | Button, Cube, SoccerBall |
 | extract.rs | 1 | ~330 | 自定义提取器 |
 | **应用层** | **5** | **~1,030** | |
-| **FHRE 总计** | **92** | **~17,000** | |
+| **FHRE 总计** | **95** | **~18,000** | |
 
 ### Bevy 代码统计
 
@@ -1502,7 +1953,21 @@ Startup → PreUpdate → Update → PostUpdate → Last
 
 ## 版本历史
 
-### v2.7.0 (当前)
+### v2.8.0 (当前)
+- **统一 Query 系统** - 对齐 Bevy 的 QueryData/QueryFilter 架构
+  - `Query<D, F>` 支持单组件和多组件元组查询
+  - `QueryData` trait: `&T`, `&mut T`, `Entity`, `Mut<T>`, `Ref<T>`, 元组
+  - `QueryFilter` trait: `With<T>`, `Without<T>`, `Added<T>`, `Changed<T>`, 元组
+  - `all_tuples!` 宏生成 0-15 元素的元组实现
+- **变更检测集成**
+  - `Mut<T>` 可变访问，自动标记变更
+  - `Ref<T>` 只读访问，可检查变更状态
+  - `is_added()` / `is_changed()` 方法
+- **系统参数简化**
+  - `declare_system!` 宏自动推断参数数量
+  - 支持 1-10 个系统参数
+
+### v2.7.0
 - RenderPhase + PhaseItem 自动排序渲染命令
   - `PhaseItem` 包含 `RenderCommand` 和排序键
   - `RenderPhases` 按类型存储和排序 PhaseItem
@@ -1565,6 +2030,8 @@ Startup → PreUpdate → Update → PostUpdate → Last
 | 组件提取逻辑 | `ExtractComponent` trait | `ExtractComponent` trait | 声明式提取 |
 | 变更检测 | `Mut<T>`, `Ref<T>` 集成 Query | `Mut<T>`, `Ref<T>` 完整 | Query 中使用变更检测 |
 | 资产加载 | `AssetServer` + `AssetPlugin<T>` | `AssetServer` 异步加载 | 统一资产接口 |
+| 元组查询 | `Query<(&A, &B)>` | `Query<(&A, &B)>` | all_tuples! 宏自动生成 |
+| QueryFilter | `With<T>`, `Changed<T>` 等 | 完整过滤器 | all_tuples! 宏自动生成 |
 
 ### 仍需手动 ❌
 
@@ -1646,10 +2113,10 @@ struct MyComponent;
 
 #### 4. 变更检测 (已自动化 ✅)
 
-**FHRE v2.7.0 (自动)**:
+**FHRE v2.8.0 (自动)**:
 ```rust
-fn my_system(query: MultiCompQuery<Mut<'static, Transform>>) {
-    for (_, transform) in query.items() {
+fn my_system(query: Query<Mut<Transform>>) {
+    for (entity, transform) in query.iter() {
         if transform.is_added() { /* 刚添加 */ }
         if transform.is_changed() { /* 已修改 */ }
         transform.position.x += 1.0; // 自动标记变更
@@ -1704,6 +2171,7 @@ AssetServer.load() → Assets<T> → AssetEvent → Extract → Prepare → Rend
 | 高 | RenderPhase + PhaseItem | 中 | 自动排序渲染命令 | ✅ 已完成 |
 | 高 | ExtractComponent 自动提取 | 低 | 减少样板代码 | ✅ 已完成 |
 | 高 | 变更检测集成 | 中 | 优化提取性能 | ✅ 已完成 |
+| 高 | Query 元组支持 | 中 | 对齐 Bevy Query | ✅ 已完成 |
 | 中 | AssetServer 简化版 | 高 | 统一资产加载 | ✅ 已完成 |
 | 低 | 热重载 | 高 | 开发体验提升 | 待实现 |
 
@@ -1714,6 +2182,7 @@ AssetServer.load() → Assets<T> → AssetEvent → Extract → Prepare → Rend
 - [x] ExtractComponent trait 自动提取
 - [x] 变更检测集成到 Query
 - [x] AssetServer 简化版
+- [x] Query 元组支持 (QueryData/QueryFilter)
 - [ ] 字体渲染系统
 - [ ] 纹理图集 (TextureAtlas)
 - [ ] 抗锯齿 (AA)
@@ -1723,15 +2192,18 @@ AssetServer.load() → Assets<T> → AssetEvent → Extract → Prepare → Rend
 - [ ] 着色器系统
 - [ ] 后处理效果
 - [ ] 热重载支持
+- [ ] Option<T> 可选组件查询
+- [ ] AnyOf<...> 查询支持
 
 ### 长期
 - [ ] Vulkan 后端
 - [ ] 多线程渲染
 - [ ] 粒子系统
+- [ ] Query derive macro
 
 ## 参考
 
-- Bevy 源码: `/third/bevy/`
+- Bevy 源码: `/home/uan-wsl2/codes/bevy`
   - bevy_ecs: ECS 核心
   - bevy_render: 渲染系统
   - bevy_app: 应用框架

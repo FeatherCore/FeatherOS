@@ -36,7 +36,7 @@ use crate::picking::PickingPlugin;
 ///
 /// For custom animatable components, users should register their own apply systems:
 /// ```ignore
-/// app.add_systems(Update, system2::<Query<AnimationPlayer>, Query<MyComponent>, _>(
+/// app.add_systems(Update, system2::<Query<&AnimationPlayer>, Query<&mut MyComponent>, _>(
 ///     fhre::animation::apply_animations::<MyComponent>
 /// ));
 /// ```

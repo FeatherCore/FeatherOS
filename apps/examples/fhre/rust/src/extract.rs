@@ -247,19 +247,10 @@ fn generate_mesh_phase_items(mesh: &ExtractedMesh, view: &View) -> Vec<(RenderPh
             }
         };
 
-        // Determine phase type based on transparency
-        let phase_type = if color.a < 255 {
-            RenderPhaseType::Transparent
-        } else {
-            RenderPhaseType::Opaque3d
-        };
-
-        // Create phase item with appropriate sorting
-        let item = if phase_type == RenderPhaseType::Transparent {
-            PhaseItem::transparent(command, avg_z)
-        } else {
-            PhaseItem::opaque_3d(command, face_idx as i32)
-        };
+        // All 3D faces need depth sorting (painter's algorithm)
+        // Use Transparent phase which sorts by z_depth
+        let phase_type = RenderPhaseType::Transparent;
+        let item = PhaseItem::transparent(command, avg_z);
 
         items.push((phase_type, item));
 
