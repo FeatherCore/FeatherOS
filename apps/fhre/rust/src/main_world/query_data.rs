@@ -6,6 +6,7 @@
 use super::component::Component;
 use super::entity::Entity;
 use super::world::MainWorld;
+use super::change_detection::{Mut, Ref};
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
@@ -39,7 +40,7 @@ pub trait QueryData {
     /// This function uses unsafe internally. The caller must ensure:
     /// - The entity has all required components
     /// - No aliasing mutable references exist
-    unsafe fn fetch<'w>(world: &'w MainWorld, entity: Entity) -> Option<Self::Item<'w>>;
+    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>>;
 
     /// Check if an entity has all required components
     fn matches(world: &MainWorld, entity: Entity) -> bool;
@@ -49,7 +50,7 @@ pub trait QueryData {
 impl<T: Component> QueryData for &T {
     type Item<'w> = &'w T;
 
-    unsafe fn fetch<'w>(world: &'w MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
+    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
         world.get_component::<T>(entity)
     }
 
@@ -62,11 +63,8 @@ impl<T: Component> QueryData for &T {
 impl<T: Component> QueryData for &mut T {
     type Item<'w> = &'w mut T;
 
-    unsafe fn fetch<'w>(world: &'w MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
-        // SAFETY: We use raw pointer to bypass borrow checker
-        // The caller must ensure no aliasing mutable references exist
-        let world_ptr = world as *const MainWorld as *mut MainWorld;
-        (*world_ptr).get_component_mut::<T>(entity)
+    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
+        world.get_component_mut::<T>(entity)
     }
 
     fn matches(world: &MainWorld, entity: Entity) -> bool {
@@ -80,7 +78,7 @@ impl<T: Component> QueryData for &mut T {
 impl<A: QueryData> QueryData for (A,) {
     type Item<'w> = (A::Item<'w>,);
 
-    unsafe fn fetch<'w>(world: &'w MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
+    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
         let a = A::fetch(world, entity)?;
         Some((a,))
     }
@@ -93,12 +91,10 @@ impl<A: QueryData> QueryData for (A,) {
 impl<A: QueryData, B: QueryData> QueryData for (A, B) {
     type Item<'w> = (A::Item<'w>, B::Item<'w>);
 
-    unsafe fn fetch<'w>(world: &'w MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
-        // SAFETY: We fetch each component separately
-        // The caller must ensure no aliasing mutable references exist
-        let world_ptr = world as *const MainWorld as *mut MainWorld;
-        let a = A::fetch(&*world_ptr, entity)?;
-        let b = B::fetch(&*world_ptr, entity)?;
+    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
+        let world_ptr = world as *mut MainWorld;
+        let a = A::fetch(&mut *world_ptr, entity)?;
+        let b = B::fetch(&mut *world_ptr, entity)?;
         Some((a, b))
     }
 
@@ -110,11 +106,11 @@ impl<A: QueryData, B: QueryData> QueryData for (A, B) {
 impl<A: QueryData, B: QueryData, C: QueryData> QueryData for (A, B, C) {
     type Item<'w> = (A::Item<'w>, B::Item<'w>, C::Item<'w>);
 
-    unsafe fn fetch<'w>(world: &'w MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
-        let world_ptr = world as *const MainWorld as *mut MainWorld;
-        let a = A::fetch(&*world_ptr, entity)?;
-        let b = B::fetch(&*world_ptr, entity)?;
-        let c = C::fetch(&*world_ptr, entity)?;
+    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
+        let world_ptr = world as *mut MainWorld;
+        let a = A::fetch(&mut *world_ptr, entity)?;
+        let b = B::fetch(&mut *world_ptr, entity)?;
+        let c = C::fetch(&mut *world_ptr, entity)?;
         Some((a, b, c))
     }
 
@@ -126,12 +122,12 @@ impl<A: QueryData, B: QueryData, C: QueryData> QueryData for (A, B, C) {
 impl<A: QueryData, B: QueryData, C: QueryData, D: QueryData> QueryData for (A, B, C, D) {
     type Item<'w> = (A::Item<'w>, B::Item<'w>, C::Item<'w>, D::Item<'w>);
 
-    unsafe fn fetch<'w>(world: &'w MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
-        let world_ptr = world as *const MainWorld as *mut MainWorld;
-        let a = A::fetch(&*world_ptr, entity)?;
-        let b = B::fetch(&*world_ptr, entity)?;
-        let c = C::fetch(&*world_ptr, entity)?;
-        let d = D::fetch(&*world_ptr, entity)?;
+    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
+        let world_ptr = world as *mut MainWorld;
+        let a = A::fetch(&mut *world_ptr, entity)?;
+        let b = B::fetch(&mut *world_ptr, entity)?;
+        let c = C::fetch(&mut *world_ptr, entity)?;
+        let d = D::fetch(&mut *world_ptr, entity)?;
         Some((a, b, c, d))
     }
 
@@ -147,12 +143,44 @@ impl<A: QueryData, B: QueryData, C: QueryData, D: QueryData> QueryData for (A, B
 impl QueryData for Entity {
     type Item<'w> = Entity;
 
-    unsafe fn fetch<'w>(_world: &'w MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
+    unsafe fn fetch<'w>(_world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
         Some(entity)
     }
 
     fn matches(_world: &MainWorld, _entity: Entity) -> bool {
         true
+    }
+}
+
+// Implement QueryData for Mut<T> (mutable access with change detection)
+impl<T: Component> QueryData for Mut<'static, T> {
+    type Item<'w> = Mut<'w, T>;
+
+    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
+        let world_ptr = world as *mut MainWorld;
+        let component = (*world_ptr).get_component_mut::<T>(entity)?;
+        let change_detection = (*world_ptr).change_detection_mut() as *mut _;
+        Some(Mut::new(component, entity, &mut *change_detection))
+    }
+
+    fn matches(world: &MainWorld, entity: Entity) -> bool {
+        world.get_component::<T>(entity).is_some()
+    }
+}
+
+// Implement QueryData for Ref<T> (immutable access with change detection info)
+impl<T: Component> QueryData for Ref<'static, T> {
+    type Item<'w> = Ref<'w, T>;
+
+    unsafe fn fetch<'w>(world: &'w mut MainWorld, entity: Entity) -> Option<Self::Item<'w>> {
+        let world_ptr = world as *mut MainWorld;
+        let component = (*world_ptr).get_component::<T>(entity)?;
+        let change_detection = (*world_ptr).change_detection() as *const _;
+        Some(Ref::new(component, entity, &*change_detection))
+    }
+
+    fn matches(world: &MainWorld, entity: Entity) -> bool {
+        world.get_component::<T>(entity).is_some()
     }
 }
 

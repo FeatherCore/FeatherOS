@@ -229,6 +229,10 @@ mod textures {
     pub const CUBE_BOTTOM: u32 = 103;
     pub const CUBE_LEFT: u32 = 104;
     pub const CUBE_RIGHT: u32 = 105;
+    
+    // Soccer ball textures
+    pub const SOCCER_PENTAGON: u32 = 200;
+    pub const SOCCER_HEXAGON: u32 = 201;
 }
 
 fn create_checker_texture(width: u32, height: u32, color1: Color, color2: u32) -> Texture {
@@ -281,6 +285,101 @@ fn create_solid_texture(width: u32, height: u32, color: Color) -> Texture {
     }
     
     Texture::from_rgba32(width, height, data)
+}
+
+fn create_pentagon_texture(width: u32, height: u32, color: Color) -> Texture {
+    let mut data = alloc::vec![0u8; (width * height * 4) as usize];
+    
+    let cx = width as f32 / 2.0;
+    let cy = height as f32 / 2.0;
+    let radius = width as f32 / 2.0 - 1.0;
+    
+    for y in 0..height {
+        for x in 0..width {
+            let px = x as f32 - cx;
+            let py = y as f32 - cy;
+            
+            let angle = libm::atan2f(py, px);
+            let normalized_angle = if angle < 0.0 { angle + 6.283185 } else { angle };
+            
+            let dist = libm::sqrtf(px * px + py * py);
+            
+            let angle_step = 6.283185 / 5.0;
+            let half_step = angle_step / 2.0;
+            
+            let segment = libm::floorf(normalized_angle / angle_step) as i32;
+            let segment_start = segment as f32 * angle_step - half_step;
+            let segment_end = segment_start + angle_step;
+            
+            let mid_angle = (segment_start + segment_end) / 2.0;
+            
+            let edge_dist = radius * libm::cosf(angle_step / 2.0) / libm::cosf(normalized_angle - mid_angle);
+            
+            let inside = dist <= edge_dist;
+            
+            let idx = ((y * width + x) * 4) as usize;
+            if inside {
+                data[idx] = color.r;
+                data[idx + 1] = color.g;
+                data[idx + 2] = color.b;
+                data[idx + 3] = color.a;
+            } else {
+                data[idx] = 0;
+                data[idx + 1] = 0;
+                data[idx + 2] = 0;
+                data[idx + 3] = 0;
+            }
+        }
+    }
+    
+    Texture::from_rgba32(width, height, data).with_sampler(Sampler::LINEAR)
+}
+
+fn create_hexagon_texture(width: u32, height: u32, color: Color) -> Texture {
+    let mut data = alloc::vec![0u8; (width * height * 4) as usize];
+    
+    let cx = width as f32 / 2.0;
+    let cy = height as f32 / 2.0;
+    let radius = width as f32 / 2.0 - 1.0;
+    
+    for y in 0..height {
+        for x in 0..width {
+            let px = x as f32 - cx;
+            let py = y as f32 - cy;
+            
+            let angle = libm::atan2f(py, px);
+            let normalized_angle = if angle < 0.0 { angle + 6.283185 } else { angle };
+            
+            let dist = libm::sqrtf(px * px + py * py);
+            
+            let angle_step = 6.283185 / 6.0;
+            
+            let segment = libm::floorf(normalized_angle / angle_step) as i32;
+            let segment_start = segment as f32 * angle_step;
+            let segment_end = segment_start + angle_step;
+            
+            let mid_angle = (segment_start + segment_end) / 2.0;
+            
+            let edge_dist = radius * libm::cosf(angle_step / 2.0) / libm::cosf(normalized_angle - mid_angle);
+            
+            let inside = dist <= edge_dist;
+            
+            let idx = ((y * width + x) * 4) as usize;
+            if inside {
+                data[idx] = color.r;
+                data[idx + 1] = color.g;
+                data[idx + 2] = color.b;
+                data[idx + 3] = color.a;
+            } else {
+                data[idx] = 0;
+                data[idx + 1] = 0;
+                data[idx + 2] = 0;
+                data[idx + 3] = 0;
+            }
+        }
+    }
+    
+    Texture::from_rgba32(width, height, data).with_sampler(Sampler::LINEAR)
 }
 
 /// Setup initial scene: 3D model and UI buttons
@@ -578,6 +677,37 @@ fn animation_control_system(
     }
 }
 
+/// Example system using change detection with Mut<T> and Ref<T>
+/// This demonstrates Bevy-style change detection in queries.
+#[allow(dead_code)]
+fn change_detection_example_system(
+    mut cube_query: fhre::MultiCompQuery<'_, '_, fhre::Mut<'static, Cube>>,
+    soccer_query: fhre::MultiCompQuery<'_, '_, fhre::Ref<'static, SoccerBall>>,
+) {
+    let cube_items = cube_query.items_mut();
+    for i in 0..cube_items.len() {
+        let cube = &mut cube_items[i].1;
+        if cube.is_added() {
+            // Component was just added this frame
+        }
+        if cube.is_changed() {
+            // Component was modified since last run
+            cube.rotation.y += 1.0;
+        }
+    }
+    
+    let soccer_items = soccer_query.items();
+    for i in 0..soccer_items.len() {
+        let soccer = &soccer_items[i].1;
+        if soccer.is_added() {
+            // Component was just added
+        }
+        if soccer.is_changed() {
+            // Component was modified (read-only check)
+        }
+    }
+}
+
 /// Handle model switching when requested
 fn model_switch_system(
     mut state: ResMut<DemoState>,
@@ -638,10 +768,19 @@ fn model_switch_system(
                 .insert(SyncToRenderWorld);
         }
         1 => {
+            let pentagon_textures = [
+                Some(textures::SOCCER_PENTAGON); 12
+            ];
+            let hexagon_textures = [
+                Some(textures::SOCCER_HEXAGON); 20
+            ];
+            
             commands.spawn()
                 .insert(Node::game_entity())
                 .insert(Transform3D::from_position(center_x, center_y, 0.0))
                 .insert(SoccerBall::new(config::MODEL_SIZE)
+                    .with_pentagon_textures(pentagon_textures)
+                    .with_hexagon_textures(hexagon_textures)
                     .with_rotation(Vec3::new(0.0, 0.0, 0.0))
                     .with_wireframe(true, Color::WHITE))
                 .insert(player)
@@ -681,6 +820,13 @@ pub extern "C" fn fhre_rust_main() -> i32 {
     app.render_world.upload_texture(textures::CUBE_BOTTOM, tex_bottom);
     app.render_world.upload_texture(textures::CUBE_LEFT, tex_left);
     app.render_world.upload_texture(textures::CUBE_RIGHT, tex_right);
+    
+    let soccer_tex_size = 64u32;
+    let tex_pentagon = create_pentagon_texture(soccer_tex_size, soccer_tex_size, Color::BLACK);
+    let tex_hexagon = create_hexagon_texture(soccer_tex_size, soccer_tex_size, Color::WHITE);
+    
+    app.render_world.upload_texture(textures::SOCCER_PENTAGON, tex_pentagon);
+    app.render_world.upload_texture(textures::SOCCER_HEXAGON, tex_hexagon);
     
     app.add_plugins(DefaultPlugins)
         // Resources

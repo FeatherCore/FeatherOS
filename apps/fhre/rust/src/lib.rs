@@ -92,6 +92,7 @@ pub use main_world::{MainWorld, Entity, Component, System, IntoSystem};
 pub use main_world::{SystemParam, Res, ResMut, Query, Local, system1, system2, system3, system4, system5, system6, system7, system8, system9, system10};
 pub use main_world::{Commands, Command, CommandsState, EntityCommands};
 pub use main_world::query_filter;
+pub use main_world::{Mut, Ref, MultiCompQuery, QueryData};
 
 // Re-export render_world types
 pub use render_world::{RenderWorld, RenderCommand, View, ViewBundle, RenderComponent};
@@ -100,7 +101,11 @@ pub use render_world::{RenderWorld, RenderCommand, View, ViewBundle, RenderCompo
 pub use pipeline::{Texture, Sampler, TextureRegion};
 
 // Re-export extract
-pub use extract::{ExtractComponent, ExtractSchedule, ExtractPlugin, Extractors, Extract};
+pub use extract::{
+    ExtractComponent, ExtractComponentPlugin, 
+    ExtractComponentWithTransform, ExtractComponentWithTransformPlugin,
+    ExtractSchedule, ExtractPlugin, Extractors, Extract,
+};
 
 // Re-export sync (NEW - aligned with Bevy)
 pub use sync::{SyncToRenderWorld, RenderEntity, MainEntity, PendingSyncEntity, entity_sync_system};
@@ -141,7 +146,11 @@ pub use picking::{
 pub use event::{Events, Event, EventWriter, EventReader};
 
 // Re-export asset types
-pub use asset::{Asset, AssetId, AssetIndex, AssetEvent, Handle, Assets, RenderAsset, RenderAssets, ExtractedAssets, RenderAssetPlugin, ExtractResourcePlugin};
+pub use asset::{
+    Asset, AssetId, AssetIndex, AssetEvent, Handle, Assets, 
+    RenderAsset, RenderAssets, ExtractedAssets, RenderAssetPlugin, ExtractResourcePlugin,
+    AssetServer, AssetRegistry, AssetLoader, AssetPlugin, AppAssetExt,
+};
 
 /// Prelude module for convenient imports
 pub mod prelude {
