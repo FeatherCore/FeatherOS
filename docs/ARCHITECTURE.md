@@ -4,7 +4,7 @@
 
 FHRE (Feather Hybrid Render Engine) 是一个轻量级的纯 3D 渲染引擎，设计用于嵌入式系统 (no_std)。采用 Bevy 风格的双世界 ECS 架构，2D 只是 3D 的特例（z=0 平面上的对象）。
 
-**版本**: 2.6.0  
+**版本**: 2.7.0  
 **目标平台**: 嵌入式系统 (NuttX RTOS)  
 **设计理念**: 纯 3D 引擎，ECS 架构，双世界同步，事件驱动交互，Asset 系统对齐 Bevy
 
@@ -96,6 +96,7 @@ apps/fhre/rust/src/                   # FHRE 核心库
 │   ├── handle.rs                     # Handle<A>, StrongHandle
 │   ├── assets.rs                     # Assets<A> 集合
 │   ├── event.rs                      # AssetEvent<A>
+│   ├── server.rs                     # AssetServer, AssetRegistry
 │   ├── render_asset.rs               # RenderAsset trait, RenderAssets<A>
 │   └── extract_plugin.rs             # RenderAssetPlugin, ExtractResourcePlugin
 ├── sync/                             # 双世界同步
@@ -620,10 +621,32 @@ fn setup(mut images: ResMut<Assets<Image>>) {
 - `Component`: 组件 trait
 - `System`: 系统 trait
 - `Query<T>`: 组件查询（单组件）
+- `MultiCompQuery<D>`: 多组件查询（支持元组）
 - `Commands`: 命令缓冲区
+
+**变更检测**:
+```rust
+// Mut<T> - 可变访问，自动标记变更
+fn my_system(query: MultiCompQuery<Mut<'static, Transform>>) {
+    for (_, transform) in query.items() {
+        if transform.is_added() { /* 刚添加 */ }
+        if transform.is_changed() { /* 已修改 */ }
+        transform.position.x += 1.0; // 自动标记变更
+    }
+}
+
+// Ref<T> - 只读访问，可检查变更状态
+fn read_only_system(query: MultiCompQuery<Ref<'static, Transform>>) {
+    for (_, transform) in query.items() {
+        if transform.is_changed() { /* 检测到变更 */ }
+        // transform.position.x += 1.0; // 编译错误：只读
+    }
+}
+```
 
 **重要限制**:
 - `Query<T>` 要求 `T: Component`，不支持元组查询如 `Query<(A, B)>`
+- 使用 `MultiCompQuery<(A, B)>` 进行多组件查询
 - 需要关联多个组件时，使用多个独立的 Query，通过 Entity ID 关联
 
 **系统声明宏**:
@@ -1261,8 +1284,13 @@ let blend_lut: Box<[[u8; 256]]> = /* ... */;
 | pipeline/batch.rs | HybridScheduler | GPU/CPU 混合调度 |
 | schedule/condition.rs | RunCondition | 运行条件 |
 | schedule/set.rs | SystemSet | 系统集 |
-| main_world/query_data.rs | QueryData | 多组件查询数据 |
-| asset/extract_plugin.rs | ExtractResourcePlugin | 资源自动提取 (已实现，demo 未使用) |
+
+**已启用的模块**:
+| 模块 | 文件 | 说明 |
+|------|------|------|
+| main_world/query_data.rs | QueryData | 多组件查询，支持 Mut<T>/Ref<T> |
+| asset/server.rs | AssetServer | 统一资产管理接口 |
+| asset/extract_plugin.rs | ExtractResourcePlugin | 资源自动提取 |
 
 ## 与 Bevy 对比
 
@@ -1270,7 +1298,7 @@ let blend_lut: Box<[[u8; 256]]> = /* ... */;
 
 | 项目 | 版本 | 代码规模 |
 |------|------|----------|
-| FHRE | 2.6.0 | ~16,500 行 (91 文件) |
+| FHRE | 2.7.0 | ~17,000 行 (92 文件) |
 | Bevy | 0.19.0-dev | ~468,000 行 (57 crates) |
 
 ### 架构对比
@@ -1279,7 +1307,7 @@ let blend_lut: Box<[[u8; 256]]> = /* ... */;
 |------|------|------|
 | 目标平台 | 嵌入式 (no_std) | 桌面/移动端/Web |
 | ECS | 简化 ECS (BTreeMap) | 完整 ECS (Archetype) |
-| Query 元组 | ❌ 仅单组件 | ✅ 支持元组 |
+| Query 元组 | ✅ MultiCompQuery | ✅ 支持元组 |
 | 双世界 | ✅ MainWorld + RenderWorld | ✅ MainWorld + RenderWorld |
 | 渲染后端 | CPU 软件渲染 | GPU (wgpu: Vulkan/Metal/DX12/WebGPU) |
 | 调度系统 | 简化 Schedule (5 阶段) | 完整 Schedule (12+ 阶段) |
@@ -1419,8 +1447,8 @@ Startup → PreUpdate → Update → PostUpdate → Last
 | window | 1 | ~95 | 窗口抽象 |
 | camera | 1 | ~62 | 相机插件 |
 | picking | 8 | ~350 | Picking 系统 (事件驱动) |
-| asset | 6 | ~700 | 资产系统 (对齐 Bevy) |
-| **FHRE 核心** | **80** | **~10,500** | |
+| asset | 7 | ~800 | 资产系统 (对齐 Bevy) |
+| **FHRE 核心** | **81** | **~11,000** | |
 | platform/input | 4 | ~200 | 平台输入类型 |
 | platform/runner | 1 | ~150 | 输入桥接 |
 | platform/framebuffer | 1 | ~400 | 窗口实现 |
@@ -1428,7 +1456,7 @@ Startup → PreUpdate → Update → PostUpdate → Last
 | components | 4 | ~700 | Button, Cube, SoccerBall |
 | extract.rs | 1 | ~330 | 自定义提取器 |
 | **应用层** | **5** | **~1,030** | |
-| **FHRE 总计** | **91** | **~16,500** | |
+| **FHRE 总计** | **92** | **~17,000** | |
 
 ### Bevy 代码统计
 
@@ -1467,14 +1495,35 @@ Startup → PreUpdate → Update → PostUpdate → Last
 
 | 指标 | FHRE | Bevy | 比例 |
 |------|------|------|------|
-| 代码行数 | ~16,500 | ~468,000 | 1:28 |
-| 文件/Crate 数 | 91 | 57 crates | - |
+| 代码行数 | ~17,000 | ~468,000 | 1:27 |
+| 文件/Crate 数 | 92 | 57 crates | - |
 | 外部依赖 | 0 | ~100+ | - |
 | 目标平台 | 嵌入式 | 桌面/移动/Web | - |
 
 ## 版本历史
 
-### v2.6.0 (当前)
+### v2.7.0 (当前)
+- RenderPhase + PhaseItem 自动排序渲染命令
+  - `PhaseItem` 包含 `RenderCommand` 和排序键
+  - `RenderPhases` 按类型存储和排序 PhaseItem
+  - `RenderWorld::add_phase_item()` 添加渲染项
+  - `RenderWorld::execute_render()` 自动排序并执行
+- ExtractComponent trait 自动提取组件
+  - 简化 trait，只需实现 `extract_component()`
+  - `ExtractComponentPlugin<C>` 自动注册提取器
+  - `ExtractComponentWithTransform` 支持带 Transform 的组件
+- 变更检测集成到 Query 系统
+  - `Mut<T>` 可变访问，自动标记变更
+  - `Ref<T>` 只读访问，可检查变更状态
+  - `QueryData` trait 支持 `Mut<T>` 和 `Ref<T>`
+  - `is_added()` / `is_changed()` 方法
+- AssetServer 简化版
+  - `AssetServer` 统一资产管理接口
+  - `AssetRegistry` 按类型存储资产
+  - `AssetPlugin<A>` 自动初始化资产类型
+  - `AppAssetExt::init_asset::<A>()` 扩展方法
+
+### v2.6.0
 - 新增 Asset 系统 (对齐 Bevy bevy_asset)
   - `Asset` trait, `AssetId<A>`, `Handle<A>`, `Assets<A>`
   - `AssetEvent<A>` 资产生命周期事件
@@ -1512,20 +1561,18 @@ Startup → PreUpdate → Update → PostUpdate → Last
 | 事件缓冲 | `Events` 双缓冲 | `Events` 双缓冲 | 自动管理 |
 | 动画应用 | `apply_animations<T>` | `apply_animations<T>` | 自动应用到组件 |
 | Picking 事件 | `pointer_events()` | `pointer_events()` | 自动生成事件 |
+| 渲染阶段排序 | `RenderPhase<T>` + `PhaseItem` | `RenderPhase<T>` 自动排序 | 自动排序渲染命令 |
+| 组件提取逻辑 | `ExtractComponent` trait | `ExtractComponent` trait | 声明式提取 |
+| 变更检测 | `Mut<T>`, `Ref<T>` 集成 Query | `Mut<T>`, `Ref<T>` 完整 | Query 中使用变更检测 |
+| 资产加载 | `AssetServer` + `AssetPlugin<T>` | `AssetServer` 异步加载 | 统一资产接口 |
 
 ### 仍需手动 ❌
 
 | 功能 | FHRE (手动) | Bevy (自动) | 说明 |
 |------|-------------|-------------|------|
 | 提取器注册 | `app.add_extractor(fn)` | 系统自动调度 | 需手动注册每个提取函数 |
-| 渲染命令生成 | 手写 `queue_meshes()` | `RenderPhase<T>` 自动 | 需手动生成 `RenderCommand` |
 | 视图提取 | 手写 `extract_view()` | `ExtractedViews` 自动 | 需手动提取 Camera |
-| 组件提取逻辑 | 手写 `extract_3d_components()` | `ExtractComponent` trait | 需手动实现提取逻辑 |
 | 纹理上传 | `render_world.upload_texture()` | `RenderAssetPlugin<GpuImage>` | 需手动上传到 RenderWorld |
-| 资产加载 | 手动创建 `Texture::new()` | `AssetServer::load()` | 无异步加载系统 |
-| 渲染阶段排序 | 手动 painter's algorithm | `RenderPhase<T>` 自动排序 | 无 PhaseItem 抽象 |
-| 变更检测 | 基础实现，未集成 | `Mut<T>`, `Ref<T>` 完整 | 未在系统中使用 |
-| AssetServer | 无 | `AssetServer` 异步加载 | 无加载队列、依赖管理 |
 | 热重载 | 无 | 文件监视自动重载 | 开发时无热重载 |
 
 ### 代码对比示例
@@ -1547,17 +1594,16 @@ app.add_plugins(RenderAssetPlugin::<GpuImage>::default())
    .add_plugins(ExtractComponentPlugin::<Transform>::default());
 ```
 
-#### 2. 渲染命令生成
+#### 2. 渲染命令生成 (已自动化 ✅)
 
-**FHRE (手动)**:
+**FHRE v2.7.0 (自动)**:
 ```rust
-fn queue_meshes(main_world: &MainWorld, render_world: &mut RenderWorld) {
-    for (_, mesh) in render_world.query::<ExtractedMesh>() {
-        for face in &mesh.faces {
-            render_world.add_command(RenderCommand::DrawPolygon { ... });
-        }
-    }
-}
+// 使用 RenderPhase + PhaseItem 自动排序
+let item = PhaseItem::opaque_3d(command, sort_key);
+render_world.add_phase_item(RenderPhaseType::Opaque3d, item);
+
+// execute_render() 自动排序并执行
+render_world.execute_render();
 ```
 
 **Bevy (自动)**:
@@ -1574,30 +1620,69 @@ pub struct Transparent3d {
 phase.sort_by_key(|item| item.distance);
 ```
 
-#### 3. 纹理上传
+#### 3. 组件提取 (已自动化 ✅)
 
-**FHRE (手动)**:
+**FHRE v2.7.0 (自动)**:
 ```rust
-let texture = Texture::from_rgba32(64, 64, data);
-app.render_world.upload_texture(TEXTURE_ID, texture);
+// 实现 ExtractComponent trait
+impl ExtractComponent for MyComponent {
+    type Out = ExtractedMyComponent;
+    
+    fn extract_component(&self) -> Option<Self::Out> {
+        Some(ExtractedMyComponent { ... })
+    }
+}
 
-// 组件中引用
-Cube::new().with_face_textures([tex_id, ...])
+// 注册插件自动提取
+app.add_plugin(ExtractComponentPlugin::<MyComponent>::default());
+```
+
+**Bevy (自动)**:
+```rust
+// 类似的 ExtractComponent trait
+#[derive(ExtractComponent)]
+struct MyComponent;
+```
+
+#### 4. 变更检测 (已自动化 ✅)
+
+**FHRE v2.7.0 (自动)**:
+```rust
+fn my_system(query: MultiCompQuery<Mut<'static, Transform>>) {
+    for (_, transform) in query.items() {
+        if transform.is_added() { /* 刚添加 */ }
+        if transform.is_changed() { /* 已修改 */ }
+        transform.position.x += 1.0; // 自动标记变更
+    }
+}
+```
+
+**Bevy (自动)**:
+```rust
+fn my_system(query: Query<&mut Transform>) {
+    for mut transform in query {
+        if transform.is_added() { /* 刚添加 */ }
+        if transform.is_changed() { /* 已修改 */ }
+        transform.translation.x += 1.0;
+    }
+}
+```
+
+#### 5. 资产加载 (已自动化 ✅)
+
+**FHRE v2.7.0 (自动)**:
+```rust
+// 使用 AssetServer 统一接口
+let handle: Handle<Image> = asset_server.add(Image { ... });
+
+// 或使用 AssetPlugin 自动初始化
+app.init_asset::<Image>();
 ```
 
 **Bevy (自动)**:
 ```rust
 // AssetServer 异步加载
 let handle: Handle<Image> = asset_server.load("textures/cube.png");
-
-// 组件中引用
-commands.spawn(MaterialMeshBundle {
-    material: materials.add(StandardMaterial {
-        base_color_texture: Some(handle),
-        ..
-    }),
-    ..
-});
 ```
 
 ### 架构流程对比
@@ -1614,35 +1699,35 @@ AssetServer.load() → Assets<T> → AssetEvent → Extract → Prepare → Rend
 
 ### 改进优先级建议
 
-| 优先级 | 功能 | 工作量 | 收益 |
-|--------|------|--------|------|
-| 高 | RenderPhase + PhaseItem | 中 | 自动排序渲染命令 |
-| 高 | ExtractComponent 自动提取 | 低 | 减少样板代码 |
-| 中 | AssetServer 简化版 | 高 | 统一资产加载 |
-| 中 | 变更检测集成 | 中 | 优化提取性能 |
-| 低 | 热重载 | 高 | 开发体验提升 |
+| 优先级 | 功能 | 工作量 | 收益 | 状态 |
+|--------|------|--------|------|------|
+| 高 | RenderPhase + PhaseItem | 中 | 自动排序渲染命令 | ✅ 已完成 |
+| 高 | ExtractComponent 自动提取 | 低 | 减少样板代码 | ✅ 已完成 |
+| 高 | 变更检测集成 | 中 | 优化提取性能 | ✅ 已完成 |
+| 中 | AssetServer 简化版 | 高 | 统一资产加载 | ✅ 已完成 |
+| 低 | 热重载 | 高 | 开发体验提升 | 待实现 |
 
 ## 未来规划
 
 ### 短期
-- [ ] RenderPhase + PhaseItem 自动排序
-- [ ] ExtractComponent trait 自动提取
+- [x] RenderPhase + PhaseItem 自动排序
+- [x] ExtractComponent trait 自动提取
+- [x] 变更检测集成到 Query
+- [x] AssetServer 简化版
 - [ ] 字体渲染系统
 - [ ] 纹理图集 (TextureAtlas)
 - [ ] 抗锯齿 (AA)
 
 ### 中期
-- [ ] AssetServer 简化版
-- [ ] 变更检测集成
 - [ ] GPU 后端 (OpenGL ES)
 - [ ] 着色器系统
 - [ ] 后处理效果
+- [ ] 热重载支持
 
 ### 长期
 - [ ] Vulkan 后端
 - [ ] 多线程渲染
 - [ ] 粒子系统
-- [ ] 热重载支持
 
 ## 参考
 
