@@ -16,8 +16,9 @@
 //! # Render Pipeline
 //!
 //! 1. Extract Phase: Copy components from Main World to Render World
-//! 2. Queue Phase: Generate render commands from extracted components
-//! 3. Render Phase: Execute render commands
+//! 2. Queue Phase: Generate PhaseItems into RenderPhases
+//! 3. Sort Phase: Sort items within each phase
+//! 4. Render Phase: Execute render commands in sorted order
 
 mod world;
 mod command;
@@ -34,8 +35,6 @@ pub use phase::{
     PhaseItem,
     RenderPhase,
     RenderPhases,
-    PhaseBatch,
-    BatchBuilder,
 };
 pub use view::{
     View,

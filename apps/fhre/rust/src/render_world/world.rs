@@ -16,14 +16,15 @@
 //! # Render Pipeline
 //!
 //! 1. Extract Phase: Copy components from Main World to Render World
-//! 2. Queue Phase: Generate render commands from extracted components
-//! 3. Render Phase: Execute render commands
+//! 2. Queue Phase: Generate PhaseItems into RenderPhases
+//! 3. Sort Phase: Sort items within each phase
+//! 4. Render Phase: Execute render commands in sorted order
 //!
 //! This matches Bevy's architecture where Render World has its own ECS.
 
 use super::command::RenderCommand;
 use super::object::RenderObject;
-use super::phase::RenderPhases;
+use super::phase::{RenderPhases, RenderPhaseType, PhaseItem};
 use super::view::ViewBundle;
 use crate::{Entity, Component};
 use crate::sync::MainEntity;
@@ -40,8 +41,8 @@ use core::any::{TypeId, Any};
 /// Contains:
 /// - ECS structure (entities, components) - aligned with Bevy
 /// - Entity mapping with Main World (via MainEntity component)
-/// - Render commands (generated during Queue phase)
-/// - Views and phases
+/// - Render phases (for automatic sorting)
+/// - Views
 pub struct RenderWorld {
     // === ECS Core ===
     next_entity_id: u64,
@@ -59,13 +60,11 @@ pub struct RenderWorld {
     width: u32,
     height: u32,
     objects: Vec<RenderObject>,
-    commands: Vec<RenderCommand>,
     clear_color: Color,
     viewport: Rect,
     phases: RenderPhases,
     views: Vec<ViewBundle>,
     current_view: Option<usize>,
-    use_phases: bool,
     backend: SoftwareBackend,
 }
 
@@ -80,13 +79,11 @@ impl RenderWorld {
             width,
             height,
             objects: Vec::new(),
-            commands: Vec::new(),
             clear_color: Color::BLACK,
             viewport: Rect::new(0.0, 0.0, width as f32, height as f32),
             phases: RenderPhases::new(),
             views: Vec::new(),
             current_view: None,
-            use_phases: true,
             backend: SoftwareBackend::new(width, height),
         }
     }
@@ -260,19 +257,53 @@ impl RenderWorld {
     }
 
     // =========================================================================
-    // Render Commands
+    // Render Phases (Bevy-aligned)
     // =========================================================================
 
+    /// Add a phase item to a specific phase
+    pub fn add_phase_item(&mut self, phase_type: RenderPhaseType, item: PhaseItem) {
+        self.phases.add(phase_type, item);
+    }
+
+    /// Get mutable access to render phases
+    pub fn phases_mut(&mut self) -> &mut RenderPhases {
+        &mut self.phases
+    }
+
+    /// Get render phases
+    pub fn phases(&self) -> &RenderPhases {
+        &self.phases
+    }
+
+    /// Sort all phases
+    pub fn sort_phases(&mut self) {
+        self.phases.sort_all();
+    }
+
+    /// Clear all phases
+    pub fn clear_phases(&mut self) {
+        self.phases.clear_all();
+    }
+
+    // =========================================================================
+    // Legacy Render Commands (deprecated, use phases instead)
+    // =========================================================================
+
+    /// Add a render command directly (legacy, prefer add_phase_item)
+    #[deprecated(note = "Use add_phase_item for automatic sorting")]
     pub fn add_command(&mut self, command: RenderCommand) {
-        self.commands.push(command);
+        let item = PhaseItem::new(command);
+        self.phases.add(RenderPhaseType::Opaque3d, item);
     }
 
-    pub fn commands(&self) -> &[RenderCommand] {
-        &self.commands
+    /// Get all render commands from phases (sorted)
+    pub fn commands(&self) -> Vec<RenderCommand> {
+        self.phases.clone().collect_commands()
     }
 
+    /// Clear all render data
     pub fn clear_commands(&mut self) {
-        self.commands.clear();
+        self.phases.clear_all();
     }
 
     // =========================================================================
@@ -303,9 +334,13 @@ impl RenderWorld {
     // =========================================================================
 
     /// Execute render - runs the render pipeline
+    /// 
+    /// This sorts all phases and executes commands in order.
     pub fn execute_render(&mut self) {
         self.backend.clear(self.clear_color);
-        self.backend.execute_commands(&self.commands);
+        
+        let commands = self.phases.collect_commands();
+        self.backend.execute_commands(&commands);
     }
 
     /// Get the framebuffer

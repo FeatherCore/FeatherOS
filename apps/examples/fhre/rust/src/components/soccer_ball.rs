@@ -45,6 +45,10 @@ pub struct SoccerBall {
     pub pentagon_colors: [Color; NUM_PENTAGONS],
     /// Colors for each of the 20 hexagonal faces
     pub hexagon_colors: [Color; NUM_HEXAGONS],
+    /// Texture IDs for pentagon faces (optional)
+    pub pentagon_textures: [Option<u32>; NUM_PENTAGONS],
+    /// Texture IDs for hexagon faces (optional)
+    pub hexagon_textures: [Option<u32>; NUM_HEXAGONS],
     /// Rotation angles in degrees (Euler angles)
     pub rotation: Vec3,
     /// Whether to draw wireframe overlay
@@ -100,6 +104,8 @@ impl SoccerBall {
             size,
             pentagon_colors,
             hexagon_colors,
+            pentagon_textures: [None; NUM_PENTAGONS],
+            hexagon_textures: [None; NUM_HEXAGONS],
             rotation: Vec3::ZERO,
             wireframe: false,
             wireframe_color: Color::WHITE,
@@ -110,6 +116,18 @@ impl SoccerBall {
     pub fn with_standard_colors(mut self) -> Self {
         self.pentagon_colors = [Color::BLACK; NUM_PENTAGONS];
         self.hexagon_colors = [Color::WHITE; NUM_HEXAGONS];
+        self
+    }
+
+    /// Set texture IDs for pentagon faces
+    pub fn with_pentagon_textures(mut self, textures: [Option<u32>; NUM_PENTAGONS]) -> Self {
+        self.pentagon_textures = textures;
+        self
+    }
+
+    /// Set texture IDs for hexagon faces
+    pub fn with_hexagon_textures(mut self, textures: [Option<u32>; NUM_HEXAGONS]) -> Self {
+        self.hexagon_textures = textures;
         self
     }
 
@@ -371,11 +389,22 @@ impl RenderComponent for SoccerBall {
         for (face_idx, is_pentagon, _, verts) in all_faces {
             if is_pentagon {
                 let color = self.pentagon_colors[face_idx];
+                let texture_id = self.pentagon_textures[face_idx];
                 
-                commands.push(RenderCommand::DrawPolygon {
-                    vertices: verts.clone(),
-                    color,
-                });
+                if let Some(tex_id) = texture_id {
+                    let uvs = Self::generate_pentagon_uvs();
+                    commands.push(RenderCommand::DrawPolygonTextured {
+                        vertices: verts.clone(),
+                        uvs,
+                        texture_id: tex_id,
+                        color,
+                    });
+                } else {
+                    commands.push(RenderCommand::DrawPolygon {
+                        vertices: verts.clone(),
+                        color,
+                    });
+                }
 
                 if self.wireframe {
                     let wf_color = self.wireframe_color;
@@ -390,11 +419,22 @@ impl RenderComponent for SoccerBall {
                 }
             } else {
                 let color = self.hexagon_colors[face_idx];
+                let texture_id = self.hexagon_textures[face_idx];
                 
-                commands.push(RenderCommand::DrawPolygon {
-                    vertices: verts.clone(),
-                    color,
-                });
+                if let Some(tex_id) = texture_id {
+                    let uvs = Self::generate_hexagon_uvs();
+                    commands.push(RenderCommand::DrawPolygonTextured {
+                        vertices: verts.clone(),
+                        uvs,
+                        texture_id: tex_id,
+                        color,
+                    });
+                } else {
+                    commands.push(RenderCommand::DrawPolygon {
+                        vertices: verts.clone(),
+                        color,
+                    });
+                }
 
                 if self.wireframe {
                     let wf_color = self.wireframe_color;
@@ -411,5 +451,39 @@ impl RenderComponent for SoccerBall {
         }
 
         commands
+    }
+}
+
+impl SoccerBall {
+    /// Generate UV coordinates for a pentagon face
+    fn generate_pentagon_uvs() -> Vec<Vec2> {
+        let angle_step = core::f32::consts::TAU / 5.0;
+        let start_angle = -core::f32::consts::FRAC_PI_2;
+        
+        (0..5)
+            .map(|i| {
+                let angle = start_angle + (i as f32 + 0.5) * angle_step;
+                Vec2::new(
+                    0.5 + 0.5 * libm::cosf(angle),
+                    0.5 + 0.5 * libm::sinf(angle),
+                )
+            })
+            .collect()
+    }
+
+    /// Generate UV coordinates for a hexagon face
+    fn generate_hexagon_uvs() -> Vec<Vec2> {
+        let angle_step = core::f32::consts::TAU / 6.0;
+        let start_angle = 0.0;
+        
+        (0..6)
+            .map(|i| {
+                let angle = start_angle + (i as f32 + 0.5) * angle_step;
+                Vec2::new(
+                    0.5 + 0.5 * libm::cosf(angle),
+                    0.5 + 0.5 * libm::sinf(angle),
+                )
+            })
+            .collect()
     }
 }

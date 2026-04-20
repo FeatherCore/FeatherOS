@@ -17,13 +17,13 @@ pub fn extract_components<C: ExtractComponent>(
     main_world: &MainWorld,
     render_world: &mut RenderWorld,
 ) {
-    let extracts: Vec<_> = main_world.query::<C::QueryData>()
+    let extracts: Vec<_> = main_world.query::<C>()
         .filter_map(|(main_entity, component)| {
             main_world.get_component::<RenderEntity>(main_entity)
                 .map(|render_entity| (*render_entity, component))
         })
         .filter_map(|(render_entity, query_data)| {
-            C::extract_component(query_data)
+            query_data.extract_component()
                 .map(|extracted| (render_entity.id(), extracted))
         })
         .collect();
@@ -48,12 +48,10 @@ pub fn extract_components<C: ExtractComponent>(
 /// struct Transform3D { position: Vec3 }
 ///
 /// impl ExtractComponent for Transform3D {
-///     type QueryData = Transform3D;
-///     type QueryFilter = ();
 ///     type Out = Transform3D;
 ///
-///     fn extract_component(item: &Self::QueryData) -> Option<Self::Out> {
-///         Some(item.clone())
+///     fn extract_component(&self) -> Option<Self::Out> {
+///         Some(self.clone())
 ///     }
 /// }
 ///

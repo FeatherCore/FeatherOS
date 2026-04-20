@@ -9,11 +9,13 @@
 //! - `Handle<A>` - Reference-counted handle to an asset
 //! - `Assets<A>` - Collection storing asset instances
 //! - `AssetEvent<A>` - Events for asset lifecycle
+//! - `AssetServer` - Unified asset loading interface
+//! - `RenderAsset` - Trait for GPU-ready assets
 //!
 //! # Example
 //!
 //! ```ignore
-//! use fhre::asset::{Asset, Assets, Handle};
+//! use fhre::asset::{Asset, Assets, Handle, AssetServer};
 //!
 //! #[derive(Clone, Asset)]
 //! struct Texture {
@@ -22,9 +24,14 @@
 //!     data: Vec<u8>,
 //! }
 //!
-//! fn setup(mut textures: ResMut<Assets<Texture>>) {
-//!     let handle: Handle<Texture> = textures.add(Texture { ... });
-//! }
+//! // Using AssetServer
+//! let mut server = AssetServer::new();
+//! server.register_asset::<Texture>();
+//! let handle: Handle<Texture> = server.add(Texture { ... });
+//!
+//! // Or using Assets directly
+//! let mut textures: Assets<Texture> = Assets::new();
+//! let handle = textures.add(Texture { ... });
 //! ```
 
 mod id;
@@ -33,6 +40,7 @@ mod assets;
 mod event;
 mod render_asset;
 mod extract_plugin;
+mod server;
 
 pub use id::*;
 pub use handle::*;
@@ -40,6 +48,7 @@ pub use assets::*;
 pub use event::*;
 pub use render_asset::*;
 pub use extract_plugin::*;
+pub use server::*;
 
 use crate::Component;
 
