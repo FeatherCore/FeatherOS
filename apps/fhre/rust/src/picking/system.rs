@@ -1,10 +1,15 @@
 //! Picking System
 
 use alloc::vec::Vec;
-use crate::{Entity, Component};
+use crate::Entity;
 use crate::math::Vec2;
 use crate::node::Transform;
-use super::{Pickable, PickableBounds, PointerHits, HitData, HoverMap, PreviousHoverMap};
+use crate::event::Events;
+use super::{
+    Pickable, PickableBounds, PointerHits, HitData, HoverMap, PreviousHoverMap,
+    PointerId, PointerButton, PointerPress, PointerLocation,
+    Pointer, Over, Out, Press, Release, Click, Move,
+};
 
 pub fn update_hover_map(
     hits: &[PointerHits],
@@ -44,7 +49,7 @@ pub fn update_hover_map(
 }
 
 pub fn ui_picking_backend(
-    pointers: &[(super::hover::PointerId, f32, f32, bool)],
+    pointers: &[(PointerId, f32, f32, bool)],
     entities: &[(Entity, Transform, PickableBounds, Option<Pickable>)],
 ) -> Vec<PointerHits> {
     let mut hits = Vec::new();
@@ -70,4 +75,88 @@ pub fn ui_picking_backend(
     }
     
     hits
+}
+
+pub fn pointer_events(
+    events: &mut Events,
+    hover_map: &HoverMap,
+    prev_hover_map: &PreviousHoverMap,
+    pointer_press: &PointerPress,
+    prev_pointer_press: &PointerPress,
+    pointer_location: &PointerLocation,
+) {
+    let pointer_id = PointerId::Mouse;
+    
+    let current_hit = hover_map.get(&pointer_id);
+    let prev_hit = prev_hover_map.0.get(&pointer_id);
+    
+    match (prev_hit, current_hit) {
+        (Some((prev_entity, prev_hit_data)), Some((curr_entity, curr_hit_data))) => {
+            if *prev_entity != *curr_entity {
+                events.send(Pointer::new(
+                    pointer_id,
+                    PointerLocation { position: prev_hit_data.position },
+                    Out { hit: *prev_hit_data },
+                    *prev_entity,
+                ));
+                events.send(Pointer::new(
+                    pointer_id,
+                    PointerLocation { position: curr_hit_data.position },
+                    Over { hit: *curr_hit_data },
+                    *curr_entity,
+                ));
+            } else {
+                events.send(Pointer::new(
+                    pointer_id,
+                    *pointer_location,
+                    Move { hit: *curr_hit_data, delta: Vec2::ZERO },
+                    *curr_entity,
+                ));
+            }
+        }
+        (Some((prev_entity, prev_hit_data)), None) => {
+            events.send(Pointer::new(
+                pointer_id,
+                PointerLocation { position: prev_hit_data.position },
+                Out { hit: *prev_hit_data },
+                *prev_entity,
+            ));
+        }
+        (None, Some((curr_entity, curr_hit_data))) => {
+            events.send(Pointer::new(
+                pointer_id,
+                PointerLocation { position: curr_hit_data.position },
+                Over { hit: *curr_hit_data },
+                *curr_entity,
+            ));
+        }
+        (None, None) => {}
+    }
+    
+    if let Some((entity, hit_data)) = current_hit {
+        if pointer_press.primary && !prev_pointer_press.primary {
+            events.send(Pointer::new(
+                pointer_id,
+                PointerLocation { position: hit_data.position },
+                Press { hit: *hit_data, button: PointerButton::Primary },
+                *entity,
+            ));
+        }
+        
+        if !pointer_press.primary && prev_pointer_press.primary {
+            events.send(Pointer::new(
+                pointer_id,
+                PointerLocation { position: hit_data.position },
+                Release { hit: *hit_data, button: PointerButton::Primary },
+                *entity,
+            ));
+            
+            events.send(Pointer::new(
+                pointer_id,
+                PointerLocation { position: hit_data.position },
+                Click { hit: *hit_data, button: PointerButton::Primary },
+                *entity,
+            ));
+        }
+    }
 }

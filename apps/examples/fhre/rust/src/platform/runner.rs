@@ -3,7 +3,7 @@
 //! Bridges raw window events to ECS resources.
 //! This is platform-specific, not part of FHRE core.
 
-use fhre::{App, resources::Resource};
+use fhre::{App, resources::Resource, Events};
 use fhre::window::{Window, WindowInputEvents, MousePosition};
 use super::input::{ButtonInput, KeyCode, MouseButton};
 
@@ -89,6 +89,10 @@ impl<'a, W: Window, B: InputBridge> WindowRunner<'a, W, B> {
             self.app.update_and_render();
             
             self.window.present(self.app.framebuffer());
+            
+            if let Some(events) = self.app.main_world.resources_mut().get_mut::<Events>() {
+                events.update();
+            }
             
             unsafe {
                 usleep(self.frame_delay_ms * 1000);

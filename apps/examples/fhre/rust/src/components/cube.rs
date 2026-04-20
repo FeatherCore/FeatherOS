@@ -2,7 +2,7 @@
 //!
 //! A simple 3D cube UI component for demonstrating 3D rendering effects.
 
-use fhre::{Component, Color, Vec3, Vec2, Mat4, Transform3D, View, RenderCommand, RenderComponent, AnimationReceiver, AnimationProperty};
+use fhre::{Component, Color, Vec3, Vec2, Mat4, Transform3D, View, RenderCommand, RenderComponent, AnimationReceiver, AnimationProperty, TextureRegion};
 use alloc::vec::Vec;
 use alloc::vec;
 
@@ -55,6 +55,8 @@ pub struct Cube {
     pub size: f32,
     /// Color for each of the 6 faces
     pub face_colors: [Color; NUM_FACES],
+    /// Texture ID for each of the 6 faces (optional)
+    pub face_textures: [Option<u32>; NUM_FACES],
     /// Rotation angles in degrees (Euler angles)
     pub rotation: Vec3,
     /// Whether to draw wireframe overlay
@@ -69,13 +71,14 @@ impl Cube {
         Self {
             size,
             face_colors: [
-                Color::rgb(255, 100, 100),  // Red
-                Color::rgb(100, 255, 100),  // Green
-                Color::rgb(100, 100, 255),  // Blue
-                Color::rgb(255, 255, 100),  // Yellow
-                Color::rgb(255, 100, 255),  // Magenta
-                Color::rgb(100, 255, 255),  // Cyan
+                Color::rgb(255, 100, 100),
+                Color::rgb(100, 255, 100),
+                Color::rgb(100, 100, 255),
+                Color::rgb(255, 255, 100),
+                Color::rgb(255, 100, 255),
+                Color::rgb(100, 255, 255),
             ],
+            face_textures: [None; NUM_FACES],
             rotation: Vec3::ZERO,
             wireframe: false,
             wireframe_color: Color::WHITE,
@@ -91,6 +94,12 @@ impl Cube {
     /// Set individual face colors
     pub fn with_face_colors(mut self, colors: [Color; NUM_FACES]) -> Self {
         self.face_colors = colors;
+        self
+    }
+
+    /// Set individual face textures
+    pub fn with_face_textures(mut self, texture_ids: [u32; NUM_FACES]) -> Self {
+        self.face_textures = texture_ids.map(Some);
         self
     }
 

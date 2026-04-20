@@ -28,7 +28,7 @@ mod extracted;
 
 pub use world::RenderWorld;
 pub use command::{RenderCommand, DrawCall, PrimitiveType, Vertex};
-pub use object::{RenderObject, ExtractedTransform, ExtractedSprite};
+pub use object::RenderObject;
 pub use phase::{
     RenderPhaseType,
     PhaseItem,
@@ -43,7 +43,7 @@ pub use view::{
     ClearConfig,
     ViewBundle,
 };
-pub use extracted::{ExtractedMesh, ExtractedUI, ExtractedView};
+pub use extracted::{ExtractedTransform, ExtractedMesh, ExtractedUI, ExtractedView};
 
 use alloc::vec::Vec;
 

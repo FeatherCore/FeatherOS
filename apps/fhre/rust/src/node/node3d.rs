@@ -333,9 +333,12 @@ impl Component for Node3D {
     }
 }
 
-/// 摄像机组件
+/// Camera Component - Attach to entity for multi-camera support
+///
+/// Note: For the main camera, use `resources::Camera` as a Resource.
+/// This component is for entities that represent camera objects in the scene.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Camera {
+pub struct CameraComponent {
     pub fov: f32,
     pub near: f32,
     pub far: f32,
@@ -347,10 +350,14 @@ pub struct Camera {
     pub culling_mask: u32,
 }
 
-/// Camera3D 是 Camera 的别名
-pub type Camera3D = Camera;
+/// Camera3D is an alias for CameraComponent
+pub type Camera3D = CameraComponent;
 
-impl Camera {
+/// Deprecated: Use CameraComponent instead
+#[deprecated(since = "2.3.0", note = "Use CameraComponent instead to avoid confusion with resources::Camera")]
+pub type Camera = CameraComponent;
+
+impl CameraComponent {
     pub fn new() -> Self {
         Self {
             fov: 60.0,
@@ -419,15 +426,15 @@ impl Camera {
     }
 }
 
-impl Default for Camera {
+impl Default for CameraComponent {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Component for Camera {
+impl Component for CameraComponent {
     fn type_name() -> &'static str {
-        "Camera"
+        "CameraComponent"
     }
 }
 

@@ -238,12 +238,10 @@ pub fn cubic_bezier(t: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
     let mut x = t;
     for _ in 0..8 {
         let t2 = x * x;
-        let t3 = t2 * x;
         let nt = 1.0 - x;
         let nt2 = nt * nt;
-        let nt3 = nt2 * nt;
         
-        let current_x = 3.0 * nt2 * x * x1 + 3.0 * nt * t2 * x2 + t3;
+        let current_x = 3.0 * nt2 * x * x1 + 3.0 * nt * t2 * x2 + t2 * x;
         let dx = 3.0 * nt2 * x1 + 6.0 * nt * x * (x2 - x1) + 3.0 * t2 * (1.0 - x2);
         
         if dx.abs() < 0.0001 {
@@ -255,16 +253,14 @@ pub fn cubic_bezier(t: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
     }
     
     let t2 = x * x;
-    let t3 = t2 * x;
     let nt = 1.0 - x;
     let nt2 = nt * nt;
-    let nt3 = nt2 * nt;
     
-    3.0 * nt2 * x * y1 + 3.0 * nt * t2 * y2 + t3
+    3.0 * nt2 * x * y1 + 3.0 * nt * t2 * y2 + t2 * x
 }
 
 /// Easing function enumeration
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub enum Easing {
     Linear,
     EaseIn,

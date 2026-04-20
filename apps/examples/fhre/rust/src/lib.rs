@@ -21,7 +21,7 @@ use platform::WindowRunner;
 
 use fhre::{
     App,
-    node::{Node, NodeType, Transform, Transform3D},
+    node::{Node, Transform, Transform3D},
     math::{Color, Vec2, Vec3},
     resources::PrimaryScreen,
     window::MousePosition,
@@ -30,8 +30,13 @@ use fhre::{
     DefaultPlugins,
     SyncToRenderWorld,
     declare_system,
-    Pickable, PickableBounds, HoverMap, PointerId,
-    ui_picking_backend, update_hover_map, PointerHitsBuffer, PreviousHoverMap,
+    Pickable, PickableBounds, HoverMap, PreviousHoverMap,
+    ui_picking_backend, update_hover_map, PointerHitsBuffer,
+    PointerId, PointerPress, PointerLocation, PointerInput, PointerAction, PointerButton,
+    Pointer, Over, Out, Press, Release, Click,
+    Events, EventReader,
+    RenderWorld,
+    pipeline::{Texture, Sampler},
 };
 
 use components::{Button, ButtonState, Cube, SoccerBall};
@@ -216,29 +221,96 @@ mod colors {
 // Systems
 // ============================================================
 
+/// Texture IDs for cube faces
+mod textures {
+    pub const CUBE_FRONT: u32 = 100;
+    pub const CUBE_BACK: u32 = 101;
+    pub const CUBE_TOP: u32 = 102;
+    pub const CUBE_BOTTOM: u32 = 103;
+    pub const CUBE_LEFT: u32 = 104;
+    pub const CUBE_RIGHT: u32 = 105;
+}
+
+fn create_checker_texture(width: u32, height: u32, color1: Color, color2: u32) -> Texture {
+    let mut data = alloc::vec![0u8; (width * height * 4) as usize];
+    
+    for y in 0..height {
+        for x in 0..width {
+            let checker = ((x / 8) + (y / 8)) % 2;
+            let color = if checker == 0 { color1 } else { Color::from_u32(color2) };
+            
+            let idx = ((y * width + x) * 4) as usize;
+            data[idx] = color.r;
+            data[idx + 1] = color.g;
+            data[idx + 2] = color.b;
+            data[idx + 3] = color.a;
+        }
+    }
+    
+    Texture::from_rgba32(width, height, data).with_sampler(Sampler::NEAREST)
+}
+
+fn create_gradient_texture(width: u32, height: u32, top_color: Color, bottom_color: Color) -> Texture {
+    let mut data = alloc::vec![0u8; (width * height * 4) as usize];
+    
+    for y in 0..height {
+        let t = y as f32 / height as f32;
+        let color = Color::lerp(top_color, bottom_color, t);
+        
+        for x in 0..width {
+            let idx = ((y * width + x) * 4) as usize;
+            data[idx] = color.r;
+            data[idx + 1] = color.g;
+            data[idx + 2] = color.b;
+            data[idx + 3] = color.a;
+        }
+    }
+    
+    Texture::from_rgba32(width, height, data).with_sampler(Sampler::LINEAR)
+}
+
+fn create_solid_texture(width: u32, height: u32, color: Color) -> Texture {
+    let mut data = alloc::vec![0u8; (width * height * 4) as usize];
+    
+    for i in 0..(width * height) {
+        let idx = (i * 4) as usize;
+        data[idx] = color.r;
+        data[idx + 1] = color.g;
+        data[idx + 2] = color.b;
+        data[idx + 3] = color.a;
+    }
+    
+    Texture::from_rgba32(width, height, data)
+}
+
 /// Setup initial scene: 3D model and UI buttons
 fn setup(mut commands: Commands, screen: Res<PrimaryScreen>) {
     let (width, height) = screen.dimensions();
     let center_x = width as f32 / 2.0;
     let center_y = height as f32 / 2.0;
     
-    // Spawn initial 3D model (Cube)
     commands.spawn()
-        .insert(Node::game_entity(NodeType::Empty))
+        .insert(Node::game_entity())
         .insert(Transform3D::from_position(center_x, center_y, 0.0))
         .insert(Cube::new(config::MODEL_SIZE)
             .with_face_colors(colors::CUBE_FACES)
+            .with_face_textures([
+                textures::CUBE_FRONT,
+                textures::CUBE_BACK,
+                textures::CUBE_TOP,
+                textures::CUBE_BOTTOM,
+                textures::CUBE_LEFT,
+                textures::CUBE_RIGHT,
+            ])
             .with_rotation(Vec3::new(config::CUBE_ROT_X, 0.0, config::CUBE_ROT_Z))
             .with_wireframe(true, Color::WHITE))
         .insert(AnimationPlayer::new())
         .insert(SyncToRenderWorld);
     
-    // Spawn UI buttons
     let button_y = height as f32 - ui::BUTTON_BOTTOM_MARGIN;
     
-    // Previous button (left)
     commands.spawn()
-        .insert(Node::ui_control(NodeType::Button))
+        .insert(Node::ui_control())
         .insert(Transform::from_2d(center_x - ui::BUTTON_SPACING, button_y))
         .insert(Button::new(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT)
             .with_text("Prev")
@@ -246,9 +318,8 @@ fn setup(mut commands: Commands, screen: Res<PrimaryScreen>) {
         .insert(PickableBounds::from_size(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT))
         .insert(Pickable::DEFAULT);
     
-    // Pause button (center)
     commands.spawn()
-        .insert(Node::ui_control(NodeType::Button))
+        .insert(Node::ui_control())
         .insert(Transform::from_2d(center_x, button_y))
         .insert(Button::new(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT)
             .with_text("Pause")
@@ -256,15 +327,32 @@ fn setup(mut commands: Commands, screen: Res<PrimaryScreen>) {
         .insert(PickableBounds::from_size(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT))
         .insert(Pickable::DEFAULT);
     
-    // Next button (right)
     commands.spawn()
-        .insert(Node::ui_control(NodeType::Button))
+        .insert(Node::ui_control())
         .insert(Transform::from_2d(center_x + ui::BUTTON_SPACING, button_y))
         .insert(Button::new(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT)
             .with_text("Next")
             .with_colors(colors::BTN_NEXT.0, colors::BTN_NEXT.1, colors::BTN_NEXT.2))
         .insert(PickableBounds::from_size(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT))
         .insert(Pickable::DEFAULT);
+}
+
+fn setup_textures(mut render_world: ResMut<RenderWorld>) {
+    let tex_size = 64u32;
+    
+    let tex_front = create_checker_texture(tex_size, tex_size, Color::rgb(255, 100, 100), 0xFF404040);
+    let tex_back = create_checker_texture(tex_size, tex_size, Color::rgb(100, 255, 100), 0xFF404040);
+    let tex_top = create_gradient_texture(tex_size, tex_size, Color::rgb(100, 100, 255), Color::rgb(200, 200, 255));
+    let tex_bottom = create_gradient_texture(tex_size, tex_size, Color::rgb(255, 255, 100), Color::rgb(255, 200, 50));
+    let tex_left = create_solid_texture(tex_size, tex_size, Color::rgb(255, 100, 255));
+    let tex_right = create_solid_texture(tex_size, tex_size, Color::rgb(100, 255, 255));
+    
+    render_world.upload_texture(textures::CUBE_FRONT, tex_front);
+    render_world.upload_texture(textures::CUBE_BACK, tex_back);
+    render_world.upload_texture(textures::CUBE_TOP, tex_top);
+    render_world.upload_texture(textures::CUBE_BOTTOM, tex_bottom);
+    render_world.upload_texture(textures::CUBE_LEFT, tex_left);
+    render_world.upload_texture(textures::CUBE_RIGHT, tex_right);
 }
 
 /// Create and assign rotation animation clip to all players
@@ -344,7 +432,7 @@ fn setup_animation(
     initialized.done = true;
 }
 
-const MOUSE_POINTER_ID: PointerId = 0u64;
+const MOUSE_POINTER_ID: PointerId = PointerId::Mouse;
 
 fn picking_system(
     mouse_pos: Res<MousePosition>,
@@ -354,12 +442,17 @@ fn picking_system(
     pickable_query: Query<Pickable>,
     mut hover_map: ResMut<HoverMap>,
     mut prev_hover_map: ResMut<PreviousHoverMap>,
+    mut pointer_press: ResMut<PointerPress>,
+    mut pointer_location: ResMut<PointerLocation>,
+    mut events: ResMut<Events>,
 ) {
-    let mut buffer = PointerHitsBuffer::new();
+    pointer_location.position = Vec2::new(mouse_pos.x as f32, mouse_pos.y as f32);
     
-    let pressed = mouse_input.pressed(MouseButton::Left);
+    let prev_press = *pointer_press;
+    pointer_press.primary = mouse_input.pressed(MouseButton::Left);
+    
     let pointers: [(PointerId, f32, f32, bool); 1] = [
-        (MOUSE_POINTER_ID, mouse_pos.x as f32, mouse_pos.y as f32, pressed),
+        (MOUSE_POINTER_ID, mouse_pos.x as f32, mouse_pos.y as f32, pointer_press.primary),
     ];
     
     let mut pickables: alloc::vec::Vec<(Entity, Transform, PickableBounds, Option<Pickable>)> = 
@@ -374,6 +467,7 @@ fn picking_system(
     
     let hits = ui_picking_backend(&pointers, &pickables);
     
+    let mut buffer = PointerHitsBuffer::new();
     for hit in hits {
         buffer.push(hit);
     }
@@ -384,42 +478,44 @@ fn picking_system(
             .collect();
     
     update_hover_map(buffer.hits(), &pickable_data, &mut hover_map, &mut prev_hover_map);
+    
+    fhre::picking::pointer_events(&mut events, &hover_map, &prev_hover_map, &pointer_press, &prev_press, &pointer_location);
 }
 
 fn button_interaction_system(
-    mouse_input: Res<ButtonInput<MouseButton>>,
-    hover_map: Res<HoverMap>,
-    prev_hover_map: Res<PreviousHoverMap>,
+    events: Res<Events>,
     mut button_query: Query<Button>,
 ) {
-    let just_released = mouse_input.just_released(MouseButton::Left);
-    
-    for (_, button) in button_query.iter_mut() {
-        button.clicked = false;
-    }
-    
-    if just_released {
-        if let Some((entity, _hit)) = prev_hover_map.0.get(&MOUSE_POINTER_ID) {
-            if let Some((_, button)) = button_query.get_pair_mut(*entity) {
-                if button.state == ButtonState::Pressed {
-                    button.clicked = true;
-                    button.state = ButtonState::Hover;
-                }
-            }
-        }
-    }
-    
-    if let Some((entity, _hit)) = hover_map.get(&MOUSE_POINTER_ID) {
-        if let Some((_, button)) = button_query.get_pair_mut(*entity) {
-            if mouse_input.pressed(MouseButton::Left) {
-                button.state = ButtonState::Pressed;
-            } else if button.state != ButtonState::Hover || !just_released {
+    if let Some(click_events) = events.get_events_current::<Pointer<Click>>() {
+        for event in click_events {
+            if let Some((_, button)) = button_query.get_pair_mut(event.entity) {
+                button.clicked = true;
                 button.state = ButtonState::Hover;
             }
         }
-    } else if !just_released {
-        for (_, button) in button_query.iter_mut() {
-            button.state = ButtonState::Normal;
+    }
+    
+    if let Some(over_events) = events.get_events_current::<Pointer<Over>>() {
+        for event in over_events {
+            if let Some((_, button)) = button_query.get_pair_mut(event.entity) {
+                button.state = ButtonState::Hover;
+            }
+        }
+    }
+    
+    if let Some(out_events) = events.get_events_current::<Pointer<Out>>() {
+        for event in out_events {
+            if let Some((_, button)) = button_query.get_pair_mut(event.entity) {
+                button.state = ButtonState::Normal;
+            }
+        }
+    }
+    
+    if let Some(press_events) = events.get_events_current::<Pointer<Press>>() {
+        for event in press_events {
+            if let Some((_, button)) = button_query.get_pair_mut(event.entity) {
+                button.state = ButtonState::Pressed;
+            }
         }
     }
 }
@@ -428,10 +524,11 @@ fn input_system(
     key_input: Res<ButtonInput<KeyCode>>, 
     mut state: ResMut<DemoState>,
     mut switch_requested: ResMut<ModelSwitchRequested>,
-    button_query: Query<Button>,
+    mut button_query: Query<Button>,
 ) {
-    for (_, button) in button_query.iter() {
+    for (_, button) in button_query.iter_mut() {
         if button.clicked {
+            button.clicked = false;
             match button.text {
                 "Prev" => {
                     state.current_model = if state.current_model == 0 {
@@ -523,10 +620,18 @@ fn model_switch_system(
     match state.current_model {
         0 => {
             commands.spawn()
-                .insert(Node::game_entity(NodeType::Empty))
+                .insert(Node::game_entity())
                 .insert(Transform3D::from_position(center_x, center_y, 0.0))
                 .insert(Cube::new(config::MODEL_SIZE)
                     .with_face_colors(colors::CUBE_FACES)
+                    .with_face_textures([
+                        textures::CUBE_FRONT,
+                        textures::CUBE_BACK,
+                        textures::CUBE_TOP,
+                        textures::CUBE_BOTTOM,
+                        textures::CUBE_LEFT,
+                        textures::CUBE_RIGHT,
+                    ])
                     .with_rotation(Vec3::new(config::CUBE_ROT_X, 0.0, config::CUBE_ROT_Z))
                     .with_wireframe(true, Color::WHITE))
                 .insert(player)
@@ -534,7 +639,7 @@ fn model_switch_system(
         }
         1 => {
             commands.spawn()
-                .insert(Node::game_entity(NodeType::Empty))
+                .insert(Node::game_entity())
                 .insert(Transform3D::from_position(center_x, center_y, 0.0))
                 .insert(SoccerBall::new(config::MODEL_SIZE)
                     .with_rotation(Vec3::new(0.0, 0.0, 0.0))
@@ -560,8 +665,22 @@ pub extern "C" fn fhre_rust_main() -> i32 {
     
     let (width, height) = window.dimensions();
     
-    // Create application with default plugins
     let mut app = App::new(width, height);
+    
+    let tex_size = 64u32;
+    let tex_front = create_checker_texture(tex_size, tex_size, Color::rgb(255, 100, 100), 0xFF404040);
+    let tex_back = create_checker_texture(tex_size, tex_size, Color::rgb(100, 255, 100), 0xFF404040);
+    let tex_top = create_gradient_texture(tex_size, tex_size, Color::rgb(100, 100, 255), Color::rgb(200, 200, 255));
+    let tex_bottom = create_gradient_texture(tex_size, tex_size, Color::rgb(255, 255, 100), Color::rgb(255, 200, 50));
+    let tex_left = create_solid_texture(tex_size, tex_size, Color::rgb(255, 100, 255));
+    let tex_right = create_solid_texture(tex_size, tex_size, Color::rgb(100, 255, 255));
+    
+    app.render_world.upload_texture(textures::CUBE_FRONT, tex_front);
+    app.render_world.upload_texture(textures::CUBE_BACK, tex_back);
+    app.render_world.upload_texture(textures::CUBE_TOP, tex_top);
+    app.render_world.upload_texture(textures::CUBE_BOTTOM, tex_bottom);
+    app.render_world.upload_texture(textures::CUBE_LEFT, tex_left);
+    app.render_world.upload_texture(textures::CUBE_RIGHT, tex_right);
     
     app.add_plugins(DefaultPlugins)
         // Resources
@@ -576,8 +695,8 @@ pub extern "C" fn fhre_rust_main() -> i32 {
         // Systems
         .add_systems(Startup, declare_system!(setup; Commands, Res<PrimaryScreen>))
         .add_systems(Update, declare_system!(setup_animation; ResMut<AnimationResources>, ResMut<RotationClip>, Query<AnimationPlayer>, ResMut<AnimationInitialized>))
-        .add_systems(PreUpdate, declare_system!(picking_system; Res<MousePosition>, Res<ButtonInput<MouseButton>>, Query<Transform>, Query<PickableBounds>, Query<Pickable>, ResMut<HoverMap>, ResMut<PreviousHoverMap>))
-        .add_systems(PreUpdate, declare_system!(button_interaction_system; Res<ButtonInput<MouseButton>>, Res<HoverMap>, Res<PreviousHoverMap>, Query<Button>))
+        .add_systems(PreUpdate, declare_system!(picking_system; Res<MousePosition>, Res<ButtonInput<MouseButton>>, Query<Transform>, Query<PickableBounds>, Query<Pickable>, ResMut<HoverMap>, ResMut<PreviousHoverMap>, ResMut<PointerPress>, ResMut<PointerLocation>, ResMut<Events>))
+        .add_systems(PreUpdate, declare_system!(button_interaction_system; Res<Events>, Query<Button>))
         .add_systems(PreUpdate, declare_system!(input_system; Res<ButtonInput<KeyCode>>, ResMut<DemoState>, ResMut<ModelSwitchRequested>, Query<Button>))
         .add_systems(Update, declare_system!(animation_control_system; Res<DemoState>, ResMut<LastRotationState>, Query<AnimationPlayer>))
         .add_systems(Update, declare_system!(model_switch_system; ResMut<DemoState>, ResMut<ModelSwitchRequested>, ResMut<LastRotationState>, Res<RotationClip>, Res<PrimaryScreen>, Commands, Query<Cube>, Query<SoccerBall>));

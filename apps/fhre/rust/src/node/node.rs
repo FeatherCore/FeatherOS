@@ -9,48 +9,13 @@
 //! 2. **SOA 布局**: 数据连续存储，提升缓存命中率
 //! 3. **批量处理**: 支持 SIMD 和 GPU 批量处理
 //! 4. **统一抽象**: 游戏实体和 UI 控件使用相同的基础组件
+//!
+//! # 低级引擎设计
+//!
+//! FHRE 是一个低级纯图形引擎，不提供高级类型分类。
+//! 具体的节点类型（如 Sprite、Model、Button 等）应由上层应用定义。
 
 use crate::Component;
-
-/// Node 类型枚举
-///
-/// FHRE 是纯 3D 引擎，NodeType 只区分功能类型，不区分 2D/3D。
-/// 所有实体都在 3D 空间中，2D 只是 z=0 平面的特例。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NodeType {
-    Empty,
-
-    Sprite,
-    Model,
-    ParticleSystem,
-    Camera,
-    Light,
-    Trigger,
-
-    Container,
-    Panel,
-    Button,
-    Label,
-    Image,
-    TextInput,
-    Slider,
-    Switch,
-    ProgressBar,
-    List,
-    ScrollView,
-
-    Card,
-    IsoBlock,
-    UI3D,
-
-    Custom(u16),
-}
-
-impl Default for NodeType {
-    fn default() -> Self {
-        NodeType::Empty
-    }
-}
 
 /// Node 状态 - SOA 友好设计
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -225,10 +190,10 @@ impl NodeFlags {
 ///
 /// 这是 FHRE 的核心组件，所有可渲染、可交互的对象都应该包含此组件。
 /// 采用 ECS 架构，无父子关系，数据扁平存储。
+///
+/// FHRE 是低级引擎，不提供类型分类。应用层可以通过添加自定义组件来区分实体类型。
 #[derive(Debug, Clone)]
 pub struct Node {
-    /// 节点类型
-    pub node_type: NodeType,
     /// 节点状态
     pub state: NodeState,
     /// 节点标志
@@ -241,9 +206,8 @@ pub struct Node {
 
 impl Node {
     /// 创建新的 Node
-    pub fn new(node_type: NodeType) -> Self {
+    pub fn new() -> Self {
         Self {
-            node_type,
             state: NodeState::new(),
             flags: NodeFlags::new(),
             z_order: 0,
@@ -252,9 +216,8 @@ impl Node {
     }
 
     /// 创建游戏实体类型的 Node
-    pub fn game_entity(node_type: NodeType) -> Self {
+    pub fn game_entity() -> Self {
         Self {
-            node_type,
             state: NodeState::game_entity(),
             flags: NodeFlags::game_entity(),
             z_order: 0,
@@ -263,9 +226,8 @@ impl Node {
     }
 
     /// 创建 UI 控件类型的 Node
-    pub fn ui_control(node_type: NodeType) -> Self {
+    pub fn ui_control() -> Self {
         Self {
-            node_type,
             state: NodeState::ui_control(),
             flags: NodeFlags::ui_control(),
             z_order: 0,
@@ -276,7 +238,6 @@ impl Node {
     /// 创建容器类型的 Node
     pub fn container() -> Self {
         Self {
-            node_type: NodeType::Container,
             state: NodeState::ui_control(),
             flags: NodeFlags::container(),
             z_order: 0,
@@ -314,49 +275,9 @@ impl Node {
         self.state.disabled = disabled;
     }
 
-    pub fn is_game_type(&self) -> bool {
-        matches!(
-            self.node_type,
-            NodeType::Empty
-                | NodeType::Sprite
-                | NodeType::Model
-                | NodeType::ParticleSystem
-                | NodeType::Camera
-                | NodeType::Light
-                | NodeType::Trigger
-        )
-    }
-
-    pub fn is_ui_type(&self) -> bool {
-        matches!(
-            self.node_type,
-            NodeType::Container
-                | NodeType::Panel
-                | NodeType::Button
-                | NodeType::Label
-                | NodeType::Image
-                | NodeType::TextInput
-                | NodeType::Slider
-                | NodeType::Switch
-                | NodeType::ProgressBar
-                | NodeType::List
-                | NodeType::ScrollView
-        )
-    }
-
-    pub fn is_mixed_type(&self) -> bool {
-        matches!(
-            self.node_type,
-            NodeType::Card | NodeType::IsoBlock | NodeType::UI3D
-        )
-    }
-
+    /// 检查是否需要 3D 变换
     pub fn needs_3d_transform(&self) -> bool {
         self.state.use_3d
-            || matches!(
-                self.node_type,
-                NodeType::Model | NodeType::ParticleSystem | NodeType::UI3D | NodeType::Camera | NodeType::Light
-            )
     }
 
     /// 检查是否需要布局计算
@@ -367,7 +288,7 @@ impl Node {
 
 impl Default for Node {
     fn default() -> Self {
-        Self::new(NodeType::Empty)
+        Self::new()
     }
 }
 

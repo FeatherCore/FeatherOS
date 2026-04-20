@@ -37,6 +37,8 @@ pub struct ExtractedMesh {
     pub faces: Vec<Vec<usize>>,
     /// Face colors
     pub face_colors: Vec<crate::math::Color>,
+    /// Face texture IDs (optional, per face)
+    pub face_textures: Vec<Option<u32>>,
     /// World position
     pub position: Vec3,
     /// Rotation in degrees (Euler angles)

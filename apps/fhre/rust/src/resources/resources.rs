@@ -2,6 +2,9 @@
 //!
 //! Resources are global data that can be accessed by systems.
 //! They are stored in a type-safe container.
+//!
+//! Note: Res/ResMut are defined in main_world/system_param.rs to avoid
+//! circular dependencies and are re-exported from there.
 
 use alloc::collections::BTreeMap;
 use alloc::boxed::Box;
@@ -87,62 +90,4 @@ impl Default for Resources {
     }
 }
 
-/// Res<T> - Resource reference wrapper
-///
-/// Used as a system parameter to access resources.
-pub struct Res<'a, T: Resource> {
-    resource: &'a T,
-}
 
-impl<'a, T: Resource> Res<'a, T> {
-    /// Create a new resource reference
-    pub fn new(resource: &'a T) -> Self {
-        Self { resource }
-    }
-
-    /// Get the resource reference
-    pub fn get(&self) -> &T {
-        self.resource
-    }
-}
-
-impl<'a, T: Resource> core::ops::Deref for Res<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.resource
-    }
-}
-
-/// ResMut<T> - Mutable resource reference wrapper
-///
-/// Used as a system parameter to mutably access resources.
-pub struct ResMut<'a, T: Resource> {
-    resource: &'a mut T,
-}
-
-impl<'a, T: Resource> ResMut<'a, T> {
-    /// Create a new mutable resource reference
-    pub fn new(resource: &'a mut T) -> Self {
-        Self { resource }
-    }
-
-    /// Get the mutable resource reference
-    pub fn get_mut(&mut self) -> &mut T {
-        self.resource
-    }
-}
-
-impl<'a, T: Resource> core::ops::Deref for ResMut<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.resource
-    }
-}
-
-impl<'a, T: Resource> core::ops::DerefMut for ResMut<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.resource
-    }
-}

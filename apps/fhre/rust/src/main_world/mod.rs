@@ -19,7 +19,7 @@ mod query_data;
 pub use world::MainWorld;
 pub use entity::Entity;
 pub use component::{Component, Sprite, Velocity};
-pub use system::{System, IntoSystem, system1, system2, system3, system4, system5, system6, system7, system8, system9};
+pub use system::{System, IntoSystem, system1, system2, system3, system4, system5, system6, system7, system8, system9, system10};
 pub use system_param::{SystemParam, Res, ResMut, Local, FromWorld, EntityRef, EntityMut};
 pub use commands::{Commands, Command, CommandsState, EntityCommands};
 pub use query_filter::{QueryFilter, With, Without, Or, And, Added, Changed};

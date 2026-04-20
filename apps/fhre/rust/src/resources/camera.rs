@@ -152,9 +152,8 @@ impl Camera {
 
     /// Set custom near/far planes for perspective (chainable)
     pub fn with_depth_planes(mut self, near: f32, far: f32) -> Self {
-        if let ProjectionType::Perspective { ref mut fov_degrees, .. } = self.projection {
-            self.projection = ProjectionType::perspective_full(*fov_degrees, near, far);
-        }
+        let ProjectionType::Perspective { fov_degrees, .. } = self.projection;
+        self.projection = ProjectionType::perspective_full(fov_degrees, near, far);
         self
     }
 }

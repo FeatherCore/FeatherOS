@@ -27,8 +27,9 @@ use super::phase::RenderPhases;
 use super::view::ViewBundle;
 use crate::{Entity, Component};
 use crate::sync::MainEntity;
-use crate::pipeline::SoftwareBackend;
+use crate::pipeline::{SoftwareBackend, Texture};
 use crate::math::{Color, Rect};
+use crate::resources::Resource;
 use alloc::vec::Vec;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -46,6 +47,9 @@ pub struct RenderWorld {
     next_entity_id: u64,
     entities: Vec<Entity>,
     components: BTreeMap<TypeId, BTreeMap<u64, Box<dyn Any>>>,
+    
+    // === Resources ===
+    resources: BTreeMap<TypeId, Box<dyn Any>>,
     
     // === Entity Mapping ===
     /// Map from Main World entity ID to Render World entity ID
@@ -71,6 +75,7 @@ impl RenderWorld {
             next_entity_id: 0,
             entities: Vec::new(),
             components: BTreeMap::new(),
+            resources: BTreeMap::new(),
             main_to_render: BTreeMap::new(),
             width,
             height,
@@ -84,6 +89,40 @@ impl RenderWorld {
             use_phases: true,
             backend: SoftwareBackend::new(width, height),
         }
+    }
+
+    // =========================================================================
+    // Resource Operations
+    // =========================================================================
+
+    /// Initialize a resource with its default value.
+    pub fn init_resource<R: Resource + Default>(&mut self) {
+        self.resources.insert(TypeId::of::<R>(), Box::new(R::default()));
+    }
+
+    /// Insert a resource.
+    pub fn insert_resource<R: Resource>(&mut self, resource: R) {
+        self.resources.insert(TypeId::of::<R>(), Box::new(resource));
+    }
+
+    /// Get a reference to a resource.
+    pub fn get_resource<R: Resource>(&self) -> Option<&R> {
+        self.resources.get(&TypeId::of::<R>())?.downcast_ref::<R>()
+    }
+
+    /// Get a mutable reference to a resource.
+    pub fn get_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
+        self.resources.get_mut(&TypeId::of::<R>())?.downcast_mut::<R>()
+    }
+
+    /// Remove a resource.
+    pub fn remove_resource<R: Resource>(&mut self) -> Option<R> {
+        self.resources.remove(&TypeId::of::<R>())?.downcast::<R>().ok().map(|b| *b)
+    }
+
+    /// Check if a resource exists.
+    pub fn contains_resource<R: Resource>(&self) -> bool {
+        self.resources.contains_key(&TypeId::of::<R>())
     }
 
     // =========================================================================
@@ -277,5 +316,17 @@ impl RenderWorld {
     /// Get dimensions
     pub fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    pub fn upload_texture(&mut self, id: u32, texture: Texture) {
+        self.backend.upload_texture(id, texture);
+    }
+
+    pub fn remove_texture(&mut self, id: u32) -> Option<Texture> {
+        self.backend.remove_texture(id)
+    }
+
+    pub fn get_texture(&self, id: u32) -> Option<&Texture> {
+        self.backend.get_texture(id)
     }
 }

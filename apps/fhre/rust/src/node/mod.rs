@@ -15,35 +15,28 @@
 //! ```rust
 //! // 创建游戏精灵 (2D = 3D 的 z=0 特例)
 //! commands.spawn((
-//!     Node::game_entity(NodeType::Sprite),
+//!     Node::game_entity(),
 //!     Transform::from_2d(100.0, 200.0),
-//!     Sprite::from_image(image_handle),
 //! ));
 //!
 //! // 创建 UI 按钮
 //! commands.spawn((
-//!     Node::ui_control(NodeType::Button),
+//!     Node::ui_control(),
 //!     Transform::from_2d(50.0, 50.0),
-//!     Style::ui_default(),
 //! ));
 //!
 //! // 创建 3D 模型
 //! commands.spawn((
-//!     Node::game_entity(NodeType::Model),
+//!     Node::game_entity(),
 //!     Transform::from_position(0.0, 0.0, 10.0),
-//!     Model::from_mesh(mesh_handle),
 //! ));
 //! ```
 
 pub mod node;
 pub mod node3d;
-pub mod style;
-pub mod layout;
 
-pub use node::{Node, NodeType, NodeState, NodeFlags, NodeStateBatch, NodeTransformBatch};
+pub use node::{Node, NodeState, NodeFlags, NodeStateBatch, NodeTransformBatch};
 pub use node3d::{
     Transform, Transform3D, GlobalTransform,
-    Node3D, Camera, Camera3D, Light, Light3D, LightType, BoundingBox,
+    Node3D, CameraComponent, Camera3D, Light, Light3D, LightType, BoundingBox,
 };
-pub use style::{Style, Dimension, Rect, Border, Shadow, TextStyle, TextAlignment, Background, Gradient, ImageBackground, ImageScaling, ImageRepeat};
-pub use layout::{Layout, LayoutType, LayoutResult, FlexDirection, JustifyContent, AlignItems, FlexWrap, ListDirection};

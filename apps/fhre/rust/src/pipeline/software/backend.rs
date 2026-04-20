@@ -12,9 +12,10 @@
 
 use crate::math::{Color, Rect, Vec2, BlendMode};
 use crate::render_world::RenderCommand;
-use crate::pipeline::{Gradient, TextureRegion};
+use crate::pipeline::{Gradient, TextureRegion, Texture};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use alloc::collections::BTreeMap;
 
 const BLEND_LUT_SIZE: usize = 256;
 
@@ -24,13 +25,13 @@ pub struct SoftwareBackend {
     height: u32,
     viewport: Rect,
     blend_lut: Box<[[u8; BLEND_LUT_SIZE]]>,
+    textures: BTreeMap<u32, Texture>,
 }
 
 impl SoftwareBackend {
     pub fn new(width: u32, height: u32) -> Self {
         let pixel_count = (width * height) as usize;
         
-        // Allocate blend_lut on heap without stack allocation
         let blend_lut = {
             let mut data: Vec<[u8; BLEND_LUT_SIZE]> = Vec::with_capacity(BLEND_LUT_SIZE);
             for _ in 0..BLEND_LUT_SIZE {
@@ -45,6 +46,7 @@ impl SoftwareBackend {
             height,
             viewport: Rect::new(0.0, 0.0, width as f32, height as f32),
             blend_lut,
+            textures: BTreeMap::new(),
         }
     }
 
@@ -91,6 +93,9 @@ impl SoftwareBackend {
             RenderCommand::DrawPolygon { vertices, color } => {
                 self.fill_polygon(vertices, *color);
             }
+            RenderCommand::DrawPolygonTextured { vertices, uvs, texture_id, color } => {
+                self.fill_polygon_textured(vertices, uvs, *texture_id, *color);
+            }
             RenderCommand::DrawText { position, text: _, color, size: _ } => {
                 let rect = Rect::new(position.x, position.y, 100.0, 20.0);
                 self.fill_rect(rect, *color);
@@ -135,6 +140,18 @@ impl SoftwareBackend {
         for pixel in self.framebuffer.iter_mut() {
             *pixel = 0;
         }
+    }
+
+    pub fn upload_texture(&mut self, id: u32, texture: Texture) {
+        self.textures.insert(id, texture);
+    }
+
+    pub fn remove_texture(&mut self, id: u32) -> Option<Texture> {
+        self.textures.remove(&id)
+    }
+
+    pub fn get_texture(&self, id: u32) -> Option<&Texture> {
+        self.textures.get(&id)
     }
 
     // ========== Low-level Software Rasterization ==========
@@ -344,8 +361,8 @@ impl SoftwareBackend {
             max_y = max_y.max(v.y);
         }
 
-        let min_x = min_x.max(self.viewport.x) as i32;
-        let max_x = max_x.min(self.viewport.x + self.viewport.width) as i32;
+        let _min_x = min_x.max(self.viewport.x) as i32;
+        let _max_x = max_x.min(self.viewport.x + self.viewport.width) as i32;
         let min_y = min_y.max(self.viewport.y) as i32;
         let max_y = max_y.min(self.viewport.y + self.viewport.height) as i32;
 
@@ -380,6 +397,112 @@ impl SoftwareBackend {
                                     self.framebuffer[index] = color.to_u32();
                                 } else {
                                     self.blend_pixel_fast(index, color);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn fill_polygon_textured(&mut self, vertices: &[Vec2], uvs: &[Vec2], texture_id: u32, tint: Color) {
+        if vertices.len() < 3 || uvs.len() != vertices.len() {
+            return;
+        }
+
+        let texture = match self.textures.get(&texture_id) {
+            Some(t) => t.clone(),
+            None => {
+                let avg_color = tint;
+                self.fill_polygon(vertices, avg_color);
+                return;
+            }
+        };
+
+        let mut min_x = vertices[0].x;
+        let mut max_x = vertices[0].x;
+        let mut min_y = vertices[0].y;
+        let mut max_y = vertices[0].y;
+
+        for v in vertices.iter().skip(1) {
+            min_x = min_x.min(v.x);
+            max_x = max_x.max(v.x);
+            min_y = min_y.min(v.y);
+            max_y = max_y.max(v.y);
+        }
+
+        let _min_x_i = min_x.max(self.viewport.x) as i32;
+        let _max_x_i = max_x.min(self.viewport.x + self.viewport.width) as i32;
+        let min_y_i = min_y.max(self.viewport.y) as i32;
+        let max_y_i = max_y.min(self.viewport.y + self.viewport.height) as i32;
+
+        for y in min_y_i..=max_y_i {
+            let yf = y as f32;
+            let mut intersections: Vec<(f32, Vec2)> = Vec::new();
+
+            for i in 0..vertices.len() {
+                let j = (i + 1) % vertices.len();
+                let v1 = vertices[i];
+                let v2 = vertices[j];
+                let uv1 = uvs[i];
+                let uv2 = uvs[j];
+
+                if (v1.y <= yf && v2.y > yf) || (v2.y <= yf && v1.y > yf) {
+                    let t = (yf - v1.y) / (v2.y - v1.y);
+                    let x = v1.x + t * (v2.x - v1.x);
+                    let uv = Vec2::new(
+                        uv1.x + t * (uv2.x - uv1.x),
+                        uv1.y + t * (uv2.y - uv1.y),
+                    );
+                    intersections.push((x, uv));
+                }
+            }
+
+            intersections.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+            for i in (0..intersections.len()).step_by(2) {
+                if i + 1 < intersections.len() {
+                    let (x1_start, uv1) = intersections[i];
+                    let (x2_end, uv2) = intersections[i + 1];
+
+                    let x_start = x1_start.max(self.viewport.x) as i32;
+                    let x_end = x2_end.min(self.viewport.x + self.viewport.width) as i32;
+
+                    let dx = x2_end - x1_start;
+                    let duv_dx = if dx.abs() > 0.001 {
+                        Vec2::new((uv2.x - uv1.x) / dx, (uv2.y - uv1.y) / dx)
+                    } else {
+                        Vec2::ZERO
+                    };
+
+                    for x in x_start..=x_end {
+                        if x >= 0 && x < self.width as i32 && y >= 0 && y < self.height as i32 {
+                            let t = (x as f32 - x1_start).max(0.0);
+                            let uv = Vec2::new(
+                                uv1.x + t * duv_dx.x,
+                                uv1.y + t * duv_dx.y,
+                            );
+
+                            let tex_color = texture.sample(uv);
+                            
+                            let final_color = if tint == Color::WHITE {
+                                tex_color
+                            } else {
+                                Color::new(
+                                    (tex_color.r as u16 * tint.r as u16 / 255) as u8,
+                                    (tex_color.g as u16 * tint.g as u16 / 255) as u8,
+                                    (tex_color.b as u16 * tint.b as u16 / 255) as u8,
+                                    (tex_color.a as u16 * tint.a as u16 / 255) as u8,
+                                )
+                            };
+
+                            let index = (y as u32 * self.width + x as u32) as usize;
+                            if index < self.framebuffer.len() {
+                                if final_color.a == 255 {
+                                    self.framebuffer[index] = final_color.to_u32();
+                                } else {
+                                    self.blend_pixel_fast(index, final_color);
                                 }
                             }
                         }
@@ -530,11 +653,85 @@ impl SoftwareBackend {
 
     // ========== Texture Rendering (Placeholder) ==========
 
-    fn fill_rect_tinted(&mut self, rect: Rect, _region: TextureRegion, color: Color) {
-        self.fill_rect(rect, color);
+    fn fill_rect_tinted(&mut self, rect: Rect, region: TextureRegion, color: Color) {
+        let texture = self.textures.get(&region.texture_id).cloned();
+        if let Some(texture) = texture {
+            self.fill_rect_textured(rect, &texture, &region, color);
+        } else {
+            self.fill_rect(rect, color);
+        }
     }
 
-    fn fill_rect_transformed(&mut self, position: Vec2, size: Vec2, _region: TextureRegion, rotation: f32, color: Color) {
+    fn fill_rect_textured(&mut self, rect: Rect, texture: &Texture, region: &TextureRegion, tint: Color) {
+        let x0 = rect.x.max(self.viewport.x) as u32;
+        let y0 = rect.y.max(self.viewport.y) as u32;
+        let x1 = (rect.x + rect.width).min(self.viewport.x + self.viewport.width) as u32;
+        let y1 = (rect.y + rect.height).min(self.viewport.y + self.viewport.height) as u32;
+
+        let rect_width = rect.width.max(1.0);
+        let rect_height = rect.height.max(1.0);
+
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let u = (x as f32 - rect.x) / rect_width;
+                let v = (y as f32 - rect.y) / rect_height;
+                
+                let tex_uv = region.sample_uv(u, v);
+                let tex_color = texture.sample(tex_uv);
+                
+                let final_color = if tint == Color::WHITE {
+                    tex_color
+                } else {
+                    Color::new(
+                        (tex_color.r as u16 * tint.r as u16 / 255) as u8,
+                        (tex_color.g as u16 * tint.g as u16 / 255) as u8,
+                        (tex_color.b as u16 * tint.b as u16 / 255) as u8,
+                        (tex_color.a as u16 * tint.a as u16 / 255) as u8,
+                    )
+                };
+                
+                if final_color.a == 255 {
+                    let index = (y * self.width + x) as usize;
+                    if index < self.framebuffer.len() {
+                        self.framebuffer[index] = final_color.to_u32();
+                    }
+                } else {
+                    self.blend_pixel(x, y, final_color);
+                }
+            }
+        }
+    }
+
+    fn fill_rect_transformed(&mut self, position: Vec2, size: Vec2, region: TextureRegion, rotation: f32, color: Color) {
+        let texture = self.textures.get(&region.texture_id).cloned();
+        if let Some(texture) = texture {
+            self.fill_rect_textured_transformed(position, size, &texture, &region, rotation, color);
+        } else {
+            let cos_r = libm::cosf(rotation);
+            let sin_r = libm::sinf(rotation);
+
+            let cx = position.x + size.x / 2.0;
+            let cy = position.y + size.y / 2.0;
+
+            let corners = [
+                Vec2::new(-size.x / 2.0, -size.y / 2.0),
+                Vec2::new(size.x / 2.0, -size.y / 2.0),
+                Vec2::new(size.x / 2.0, size.y / 2.0),
+                Vec2::new(-size.x / 2.0, size.y / 2.0),
+            ];
+
+            let transformed: [Vec2; 4] = corners.map(|c| {
+                Vec2::new(
+                    cx + c.x * cos_r - c.y * sin_r,
+                    cy + c.x * sin_r + c.y * cos_r,
+                )
+            });
+
+            self.fill_polygon(&transformed, color);
+        }
+    }
+
+    fn fill_rect_textured_transformed(&mut self, position: Vec2, size: Vec2, texture: &Texture, region: &TextureRegion, rotation: f32, tint: Color) {
         let cos_r = libm::cosf(rotation);
         let sin_r = libm::sinf(rotation);
 
@@ -555,7 +752,46 @@ impl SoftwareBackend {
             )
         });
 
-        self.fill_polygon(&transformed, color);
+        let min_x = transformed.iter().map(|p| p.x).fold(f32::INFINITY, f32::min).max(self.viewport.x) as u32;
+        let max_x = transformed.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max).min(self.viewport.x + self.viewport.width) as u32;
+        let min_y = transformed.iter().map(|p| p.y).fold(f32::INFINITY, f32::min).max(self.viewport.y) as u32;
+        let max_y = transformed.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max).min(self.viewport.y + self.viewport.height) as u32;
+
+        let half_size_x = size.x / 2.0;
+        let half_size_y = size.y / 2.0;
+
+        for y in min_y..max_y {
+            for x in min_x..max_x {
+                let px = x as f32 - cx;
+                let py = y as f32 - cy;
+                
+                let local_x = px * cos_r + py * sin_r;
+                let local_y = -px * sin_r + py * cos_r;
+                
+                if local_x < -half_size_x || local_x > half_size_x || local_y < -half_size_y || local_y > half_size_y {
+                    continue;
+                }
+                
+                let u = (local_x + half_size_x) / size.x;
+                let v = (local_y + half_size_y) / size.y;
+                
+                let tex_uv = region.sample_uv(u, v);
+                let tex_color = texture.sample(tex_uv);
+                
+                let final_color = if tint == Color::WHITE {
+                    tex_color
+                } else {
+                    Color::new(
+                        (tex_color.r as u16 * tint.r as u16 / 255) as u8,
+                        (tex_color.g as u16 * tint.g as u16 / 255) as u8,
+                        (tex_color.b as u16 * tint.b as u16 / 255) as u8,
+                        (tex_color.a as u16 * tint.a as u16 / 255) as u8,
+                    )
+                };
+                
+                self.blend_pixel(x, y, final_color);
+            }
+        }
     }
 }
 

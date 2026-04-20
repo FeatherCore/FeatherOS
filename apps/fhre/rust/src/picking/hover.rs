@@ -2,9 +2,7 @@
 
 use alloc::collections::BTreeMap;
 use crate::Entity;
-use super::HitData;
-
-pub type PointerId = u64;
+use super::{HitData, pointer::PointerId};
 
 #[derive(Debug, Clone, Default)]
 pub struct HoverMap(pub BTreeMap<PointerId, (Entity, HitData)>);

@@ -79,6 +79,7 @@ pub mod plugin;
 pub mod window;
 pub mod sync;
 pub mod picking;
+pub mod asset;
 
 // Re-export main types from app
 pub use app::{App, FHRE_VERSION};
@@ -88,12 +89,15 @@ pub use schedule::{Startup, PreUpdate, Update, PostUpdate, Last};
 
 // Re-export main types from main_world
 pub use main_world::{MainWorld, Entity, Component, System, IntoSystem};
-pub use main_world::{SystemParam, Res, ResMut, Query, Local, system1, system2, system3, system4, system5, system6, system7, system8, system9};
+pub use main_world::{SystemParam, Res, ResMut, Query, Local, system1, system2, system3, system4, system5, system6, system7, system8, system9, system10};
 pub use main_world::{Commands, Command, CommandsState, EntityCommands};
 pub use main_world::query_filter;
 
 // Re-export render_world types
 pub use render_world::{RenderWorld, RenderCommand, View, ViewBundle, RenderComponent};
+
+// Re-export pipeline types
+pub use pipeline::{Texture, Sampler, TextureRegion};
 
 // Re-export extract
 pub use extract::{ExtractComponent, ExtractSchedule, ExtractPlugin, Extractors, Extract};
@@ -110,7 +114,7 @@ pub use plugin::{Plugin, PluginGroup, DefaultPlugins, SyncComponentPlugin, SyncC
 pub use camera::CameraPlugin;
 
 // Re-export node types
-pub use node::{Node, NodeType, Transform, Transform3D};
+pub use node::{Node, Transform, Transform3D};
 
 // Re-export animation types
 pub use animation::{AnimationClip, AnimationClipHandle, AnimationPlayer, AnimationResources,
@@ -128,8 +132,16 @@ pub use picking::{
     Pickable, PickableBounds, HitData,
     HoverMap, PreviousHoverMap, PointerId,
     PointerHits, PickingPlugin, PointerHitsBuffer,
-    update_hover_map, ui_picking_backend,
+    update_hover_map, ui_picking_backend, pointer_events,
+    PointerPress, PointerLocation, PointerInput, PointerAction, PointerButton,
+    Pointer, Over, Out, Enter, Leave, Press, Release, Click, Move, DragStart, Drag, DragEnd,
 };
+
+// Re-export event types
+pub use event::{Events, Event, EventWriter, EventReader};
+
+// Re-export asset types
+pub use asset::{Asset, AssetId, AssetIndex, AssetEvent, Handle, Assets, RenderAsset, RenderAssets, ExtractedAssets, RenderAssetPlugin, ExtractResourcePlugin};
 
 /// Prelude module for convenient imports
 pub mod prelude {
@@ -138,7 +150,7 @@ pub mod prelude {
     pub use crate::main_world::{Commands, Query, Res, ResMut, Local, system1, system2, system3, system4};
     pub use crate::resources::{Time, PrimaryScreen};
     pub use crate::plugin::Plugin;
-    pub use crate::node::{Node, NodeType, Transform, Transform3D};
+    pub use crate::node::{Node, Transform, Transform3D};
     pub use crate::math::{Color, Vec2, Vec3};
     
     // Sync markers for Bevy-aligned dual-world architecture

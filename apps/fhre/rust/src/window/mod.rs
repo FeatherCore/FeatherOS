@@ -22,7 +22,6 @@
 //! └─────────────────────────────────────────────────────────────┘
 //! ```
 
-use crate::App;
 use crate::resources::Resource;
 use alloc::vec::Vec;
 

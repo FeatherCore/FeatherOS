@@ -47,6 +47,7 @@ impl<F: FnMut(&mut MainWorld) + 'static> IntoSystem for F {
     }
 }
 
+#[allow(non_snake_case)]
 macro_rules! impl_system {
     (
         struct_name = $struct_name:ident,
@@ -63,6 +64,7 @@ macro_rules! impl_system {
             state: ($($param::State,)+),
         }
 
+        #[allow(non_snake_case)]
         impl<$($param,)+ Func> System for $struct_name<$($param,)+ Func>
         where
             $($param: SystemParam + 'static,)+
@@ -117,6 +119,7 @@ impl_system!(struct_name = DeclarativeSystem6, fn_name = system6, params = [A, B
 impl_system!(struct_name = DeclarativeSystem7, fn_name = system7, params = [A, B, C, D, E, F, G], indices = [0, 1, 2, 3, 4, 5, 6]);
 impl_system!(struct_name = DeclarativeSystem8, fn_name = system8, params = [A, B, C, D, E, F, G, H], indices = [0, 1, 2, 3, 4, 5, 6, 7]);
 impl_system!(struct_name = DeclarativeSystem9, fn_name = system9, params = [A, B, C, D, E, F, G, H, I], indices = [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+impl_system!(struct_name = DeclarativeSystem10, fn_name = system10, params = [A, B, C, D, E, F, G, H, I, J], indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
 /// Macro to simplify system registration with automatic type inference hints
 ///
@@ -201,5 +204,8 @@ macro_rules! system_param_call {
     };
     ($func:expr; $a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty) => {
         $crate::system9::<$a, $b, $c, $d, $e, $f, $g, $h, $i, _>($func)
+    };
+    ($func:expr; $a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty) => {
+        $crate::system10::<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, _>($func)
     };
 }

@@ -36,11 +36,11 @@ pub struct Commands<'w, 's> {
     _world: PhantomData<&'w ()>,
 }
 
-struct SpawnCommand {
+pub(crate) struct SpawnCommand {
     placeholder: Entity,
 }
 
-struct InsertCommand {
+pub(crate) struct InsertCommand {
     placeholder: Entity,
     component_type_id: core::any::TypeId,
     component_ptr: *mut u8,
@@ -123,34 +123,12 @@ impl<'w, 's> Commands<'w, 's> {
 
     /// Apply all queued commands to the world
     pub fn apply(&mut self, world: &mut MainWorld) {
-        // Create a mapping from placeholder entities to real entities
-        let mut entity_map: alloc::collections::BTreeMap<u64, Entity> = alloc::collections::BTreeMap::new();
-        
-        // Process spawns first and build the mapping
-        for cmd in self.spawn_queue.drain(..) {
-            let real_entity = world.spawn();
-            entity_map.insert(cmd.placeholder.id(), real_entity);
-        }
-        
-        // Process inserts - map placeholder entities to real ones
-        for cmd in self.insert_queue.drain(..) {
-            unsafe {
-                // Get the real entity from the mapping
-                let real_entity = if let Some(&entity) = entity_map.get(&cmd.placeholder.id()) {
-                    entity
-                } else {
-                    // If not in mapping, use the placeholder (might be an existing entity)
-                    cmd.placeholder
-                };
-                
-                (cmd.insert_fn)(cmd.component_ptr, real_entity, world);
-            }
-        }
-        
-        // Process despawns last
-        for entity in self.despawn_queue.drain(..) {
-            world.despawn(entity);
-        }
+        apply_commands_internal(
+            &mut self.spawn_queue,
+            &mut self.insert_queue,
+            &mut self.despawn_queue,
+            world,
+        );
     }
 
     /// Check if there are any pending commands
@@ -203,13 +181,13 @@ impl<'a, 'w, 's> EntityCommands<'a, 'w, 's> {
     }
 
     /// Insert a component
-    pub fn insert<C: Component>(mut self, component: C) -> Self {
+    pub fn insert<C: Component>(self, component: C) -> Self {
         self.commands.insert(self.placeholder, component);
         self
     }
 
     /// Despawn the entity
-    pub fn despawn(mut self) {
+    pub fn despawn(self) {
         self.commands.despawn(self.placeholder);
     }
 }
@@ -238,34 +216,12 @@ impl Default for CommandsState {
 impl CommandsState {
     /// Apply all queued commands to the world
     pub fn apply(&mut self, world: &mut MainWorld) {
-        // Create a mapping from placeholder entities to real entities
-        let mut entity_map: alloc::collections::BTreeMap<u64, Entity> = alloc::collections::BTreeMap::new();
-        
-        // Process spawns first and build the mapping
-        for cmd in self.spawn_queue.drain(..) {
-            let real_entity = world.spawn();
-            entity_map.insert(cmd.placeholder.id(), real_entity);
-        }
-        
-        // Process inserts - map placeholder entities to real ones
-        for cmd in self.insert_queue.drain(..) {
-            unsafe {
-                // Get the real entity from the mapping
-                let real_entity = if let Some(&entity) = entity_map.get(&cmd.placeholder.id()) {
-                    entity
-                } else {
-                    // If not in mapping, use the placeholder (might be an existing entity)
-                    cmd.placeholder
-                };
-                
-                (cmd.insert_fn)(cmd.component_ptr, real_entity, world);
-            }
-        }
-        
-        // Process despawns last
-        for entity in self.despawn_queue.drain(..) {
-            world.despawn(entity);
-        }
+        apply_commands_internal(
+            &mut self.spawn_queue,
+            &mut self.insert_queue,
+            &mut self.despawn_queue,
+            world,
+        );
     }
 
     /// Check if there are any pending commands
@@ -290,5 +246,36 @@ impl SystemParam for Commands<'_, '_> {
         _world: &'w mut MainWorld,
     ) -> Self::Item<'w, 's> {
         Commands::new(state)
+    }
+}
+
+/// Internal function to apply commands (shared between Commands and CommandsState)
+fn apply_commands_internal(
+    spawn_queue: &mut Vec<SpawnCommand>,
+    insert_queue: &mut Vec<InsertCommand>,
+    despawn_queue: &mut Vec<Entity>,
+    world: &mut MainWorld,
+) {
+    let mut entity_map: alloc::collections::BTreeMap<u64, Entity> = alloc::collections::BTreeMap::new();
+    
+    for cmd in spawn_queue.drain(..) {
+        let real_entity = world.spawn();
+        entity_map.insert(cmd.placeholder.id(), real_entity);
+    }
+    
+    for cmd in insert_queue.drain(..) {
+        unsafe {
+            let real_entity = if let Some(&entity) = entity_map.get(&cmd.placeholder.id()) {
+                entity
+            } else {
+                cmd.placeholder
+            };
+            
+            (cmd.insert_fn)(cmd.component_ptr, real_entity, world);
+        }
+    }
+    
+    for entity in despawn_queue.drain(..) {
+        world.despawn(entity);
     }
 }

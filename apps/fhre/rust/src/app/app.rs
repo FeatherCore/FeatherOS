@@ -206,8 +206,10 @@ where
     }
 }
 
+#[allow(non_snake_case)]
 macro_rules! impl_into_systems_tuple {
     ($($name:ident),+) => {
+        #[allow(non_snake_case)]
         impl<$($name,)+> IntoSystems for ($($name,)+)
         where
             $($name: IntoSystems,)+

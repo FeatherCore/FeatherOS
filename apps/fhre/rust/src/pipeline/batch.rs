@@ -264,6 +264,7 @@ impl HybridScheduler {
             RenderCommand::DrawLine { .. } => TaskType::Gpu,
             RenderCommand::DrawTriangle { .. } => TaskType::Gpu,
             RenderCommand::DrawPolygon { .. } => TaskType::Cpu,
+            RenderCommand::DrawPolygonTextured { .. } => TaskType::Cpu,
 
             RenderCommand::DrawImage { .. } => TaskType::Gpu,
             RenderCommand::DrawImageTransformed { .. } => TaskType::Cpu,

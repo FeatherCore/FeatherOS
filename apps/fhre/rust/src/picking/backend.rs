@@ -2,6 +2,7 @@
 
 use crate::Entity;
 use crate::math::Vec2;
+use super::pointer::PointerId;
 
 #[derive(Debug, Clone, Copy)]
 pub struct HitData {
@@ -11,7 +12,7 @@ pub struct HitData {
 
 #[derive(Debug, Clone)]
 pub struct PointerHits {
-    pub pointer: super::hover::PointerId,
+    pub pointer: PointerId,
     pub entity: Entity,
     pub hit: HitData,
     pub order: f32,

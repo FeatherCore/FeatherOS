@@ -13,6 +13,13 @@ use alloc::collections::BTreeMap;
 /// All event types must implement this trait.
 pub trait Event: Clone + 'static {}
 
+/// Trait for event storage operations (type-erased)
+trait EventStorageTrait: Any + Send + Sync {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn update_storage(&mut self);
+}
+
 /// Event storage for a specific event type
 struct EventStorage<T: Event> {
     /// Events from the previous frame (available for reading)
@@ -21,6 +28,20 @@ struct EventStorage<T: Event> {
     events_b: VecDeque<T>,
     /// Whether we're using A as current (true) or B (false)
     using_a_as_current: bool,
+}
+
+impl<T: Event + Send + Sync> EventStorageTrait for EventStorage<T> {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    
+    fn update_storage(&mut self) {
+        self.update();
+    }
 }
 
 impl<T: Event> EventStorage<T> {
@@ -59,6 +80,15 @@ impl<T: Event> EventStorage<T> {
         }
     }
 
+    /// Get events from the current frame (for immediate processing)
+    fn get_events_current(&self) -> &VecDeque<T> {
+        if self.using_a_as_current {
+            &self.events_a
+        } else {
+            &self.events_b
+        }
+    }
+
     /// Swap buffers for the next frame
     fn update(&mut self) {
         // Clear the old events (which were read this frame)
@@ -72,6 +102,7 @@ impl<T: Event> EventStorage<T> {
     }
 
     /// Clear all events
+    #[allow(dead_code)]
     fn clear(&mut self) {
         self.events_a.clear();
         self.events_b.clear();
@@ -83,7 +114,7 @@ impl<T: Event> EventStorage<T> {
 /// Stores event queues by type ID for type-safe access.
 pub struct Events {
     /// Storage map: TypeId -> EventStorage (boxed to handle different types)
-    storage: BTreeMap<TypeId, Box<dyn Any + Send + Sync>>,
+    storage: BTreeMap<TypeId, Box<dyn EventStorageTrait>>,
 }
 
 impl Events {
@@ -108,18 +139,19 @@ impl Events {
         self.ensure_storage::<T>();
         let type_id = TypeId::of::<T>();
         if let Some(storage) = self.storage.get_mut(&type_id) {
-            if let Some(typed_storage) = storage.downcast_mut::<EventStorage<T>>() {
+            if let Some(typed_storage) = storage.as_any_mut().downcast_mut::<EventStorage<T>>() {
                 typed_storage.send(event);
             }
         }
     }
 
     /// Send multiple events
+    #[allow(dead_code)]
     pub fn send_batch<T: Event + Send + Sync>(&mut self, events: impl Iterator<Item = T>) {
         self.ensure_storage::<T>();
         let type_id = TypeId::of::<T>();
         if let Some(storage) = self.storage.get_mut(&type_id) {
-            if let Some(typed_storage) = storage.downcast_mut::<EventStorage<T>>() {
+            if let Some(typed_storage) = storage.as_any_mut().downcast_mut::<EventStorage<T>>() {
                 typed_storage.send_batch(events);
             }
         }
@@ -129,51 +161,84 @@ impl Events {
     pub fn get_events<T: Event + Send + Sync>(&self) -> Option<&VecDeque<T>> {
         let type_id = TypeId::of::<T>();
         self.storage.get(&type_id).and_then(|storage| {
-            storage.downcast_ref::<EventStorage<T>>().map(|s| s.get_events())
+            storage.as_any().downcast_ref::<EventStorage<T>>().map(|s| s.get_events())
+        })
+    }
+
+    /// Get events from current frame (for immediate processing)
+    pub fn get_events_current<T: Event + Send + Sync>(&self) -> Option<&VecDeque<T>> {
+        let type_id = TypeId::of::<T>();
+        self.storage.get(&type_id).and_then(|storage| {
+            storage.as_any().downcast_ref::<EventStorage<T>>().map(|s| s.get_events_current())
         })
     }
 
     /// Update all event buffers (call at end of frame)
     pub fn update(&mut self) {
         for storage in self.storage.values_mut() {
-            // Use unsafe to call update on the boxed storage
-            // SAFETY: We know all storages are EventStorage<T> for some T
-            unsafe {
-                let ptr = storage.as_mut() as *mut dyn Any;
-                // We need a different approach - update all known types
-                // For now, this is a limitation of the type-erased storage
-            }
+            storage.update_storage();
         }
     }
 
     /// Update a specific event type
+    #[allow(dead_code)]
     pub fn update_type<T: Event + Send + Sync>(&mut self) {
         let type_id = TypeId::of::<T>();
         if let Some(storage) = self.storage.get_mut(&type_id) {
-            if let Some(typed_storage) = storage.downcast_mut::<EventStorage<T>>() {
+            if let Some(typed_storage) = storage.as_any_mut().downcast_mut::<EventStorage<T>>() {
                 typed_storage.update();
             }
         }
     }
 
     /// Clear all events of a specific type
+    #[allow(dead_code)]
     pub fn clear<T: Event + Send + Sync>(&mut self) {
         let type_id = TypeId::of::<T>();
         if let Some(storage) = self.storage.get_mut(&type_id) {
-            if let Some(typed_storage) = storage.downcast_mut::<EventStorage<T>>() {
+            if let Some(typed_storage) = storage.as_any_mut().downcast_mut::<EventStorage<T>>() {
                 typed_storage.clear();
             }
         }
     }
 
     /// Check if an event type has any events
+    #[allow(dead_code)]
     pub fn has_events<T: Event + Send + Sync>(&self) -> bool {
         self.get_events::<T>().map(|e| !e.is_empty()).unwrap_or(false)
     }
 
     /// Get the number of events for a type
+    #[allow(dead_code)]
     pub fn event_count<T: Event + Send + Sync>(&self) -> usize {
         self.get_events::<T>().map(|e| e.len()).unwrap_or(0)
+    }
+
+    /// Read events of a specific type (returns an iterator-like accessor)
+    pub fn read<T: Event + Send + Sync>(&self) -> Option<EventReader<T>> {
+        self.get_events::<T>().map(|events| EventReader {
+            events: events.clone(),
+        })
+    }
+}
+
+/// Reader for events of a specific type.
+pub struct EventReader<T: Event> {
+    events: VecDeque<T>,
+}
+
+impl<T: Event + Send + Sync> EventReader<T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.events.iter()
+    }
+}
+
+impl<T: Event + Send + Sync> IntoIterator for EventReader<T> {
+    type Item = T;
+    type IntoIter = alloc::collections::vec_deque::IntoIter<T>;
+    
+    fn into_iter(self) -> Self::IntoIter {
+        self.events.into_iter()
     }
 }
 

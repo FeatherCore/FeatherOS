@@ -182,13 +182,13 @@ fn apply_sampled_to<T: AnimationReceiver>(player: &AnimationPlayer, target: &mut
 /// - **AnimationPlugin** = pure animation infrastructure (time + curves + sampling)
 /// - **Component owner** (UI plugin, game plugin) = registers which types receive animation
 pub fn apply_animations<T: AnimationReceiver + Component>(
-    mut players: Query<AnimationPlayer>,
+    players: Query<AnimationPlayer>,
     mut targets: Query<T>,
 ) {
     for (entity, player) in players.iter() {
         if let Some(anim) = player.animation(0) {
             if !anim.sampled_properties.is_empty() {
-                if let Some(mut target) = targets.get_mut(entity) {
+                if let Some(target) = targets.get_mut(entity) {
                     apply_sampled_to(&player, &mut *target);
                 }
             }
@@ -255,7 +255,7 @@ impl AnimationResources {
 /// System that advances all active animations (ECS style - for use with MainWorld systems)
 pub fn animate_system(
     time: &Time,
-    mut resources: core::cell::RefMut<AnimationResources>,
+    resources: core::cell::RefMut<AnimationResources>,
     players: &mut [(Entity, &mut AnimationPlayer)],
 ) {
     for (_entity, player) in players.iter_mut() {

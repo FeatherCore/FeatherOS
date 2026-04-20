@@ -17,6 +17,7 @@ pub enum RenderCommand {
     DrawLine { start: Vec2, end: Vec2, color: Color, thickness: f32 },
     DrawTriangle { p0: Vec2, p1: Vec2, p2: Vec2, color: Color },
     DrawPolygon { vertices: Vec<Vec2>, color: Color },
+    DrawPolygonTextured { vertices: Vec<Vec2>, uvs: Vec<Vec2>, texture_id: u32, color: Color },
     DrawText { position: Vec2, text: &'static str, color: Color, size: f32 },
     DrawImage { rect: Rect, texture_id: u32, region: TextureRegion, color: Color },
     DrawImageTransformed { position: Vec2, size: Vec2, texture_id: u32, region: TextureRegion, rotation: f32, color: Color },
@@ -61,6 +62,10 @@ impl RenderCommand {
 
     pub fn draw_polygon(vertices: Vec<Vec2>, color: Color) -> Self {
         Self::DrawPolygon { vertices, color }
+    }
+
+    pub fn draw_polygon_textured(vertices: Vec<Vec2>, uvs: Vec<Vec2>, texture_id: u32, color: Color) -> Self {
+        Self::DrawPolygonTextured { vertices, uvs, texture_id, color }
     }
 
     pub fn draw_text(position: Vec2, text: &'static str, color: Color, size: f32) -> Self {
