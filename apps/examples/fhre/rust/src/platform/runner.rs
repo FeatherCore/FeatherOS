@@ -73,7 +73,11 @@ impl<'a, W: Window, B: InputBridge> WindowRunner<'a, W, B> {
             fn sched_yield() -> i32;
         }
         
+        let mut frame_count: u32 = 0;
+        
         loop {
+            frame_count += 1;
+            
             unsafe { sched_yield(); }
             
             let events = self.window.collect_input_events();
@@ -96,6 +100,10 @@ impl<'a, W: Window, B: InputBridge> WindowRunner<'a, W, B> {
             
             unsafe {
                 usleep(self.frame_delay_ms * 1000);
+            }
+            
+            if false {  // TEMP: test
+                break;
             }
         }
     }

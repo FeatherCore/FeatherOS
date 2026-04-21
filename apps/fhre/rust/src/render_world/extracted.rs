@@ -3,7 +3,8 @@
 //! These are the components that get extracted from Main World to Render World.
 //! They are simplified versions of Main World components, optimized for rendering.
 
-use crate::{Component, math::{Vec3, Mat4}, node::Transform3D};
+use crate::{Component, Handle, math::{Vec3, Mat4}, node::Transform3D};
+use crate::asset::Image;
 use alloc::vec::Vec;
 
 /// Extracted transform - simplified transform for rendering
@@ -37,8 +38,8 @@ pub struct ExtractedMesh {
     pub faces: Vec<Vec<usize>>,
     /// Face colors
     pub face_colors: Vec<crate::math::Color>,
-    /// Face texture IDs (optional, per face)
-    pub face_textures: Vec<Option<u32>>,
+    /// Face texture handles (optional, per face) - resolved to GPU IDs in queue phase
+    pub face_textures: Vec<Option<Handle<Image>>>,
     /// World position
     pub position: Vec3,
     /// Rotation in degrees (Euler angles)

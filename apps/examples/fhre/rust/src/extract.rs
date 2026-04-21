@@ -10,6 +10,7 @@ use fhre::{
     resources::{PrimaryScreen, Camera, ProjectionType},
     math::{Vec3, Mat4},
     render_world::{View, ViewBundle, ViewTarget, ClearConfig, ExtractedMesh, ExtractedUI, PhaseItem, RenderPhaseType},
+    GpuTextures, Handle, Image,
 };
 use alloc::vec::Vec;
 use alloc::vec;
@@ -84,12 +85,12 @@ pub fn extract_3d_components(main_world: &MainWorld, render_world: &mut RenderWo
                 face_colors.push(*color);
             }
             
-            let mut face_textures: Vec<Option<u32>> = Vec::new();
+            let mut face_textures: Vec<Option<Handle<Image>>> = Vec::new();
             for tex in soccer_ball.hexagon_textures.iter() {
-                face_textures.push(*tex);
+                face_textures.push(tex.clone());
             }
             for tex in soccer_ball.pentagon_textures.iter() {
-                face_textures.push(*tex);
+                face_textures.push(tex.clone());
             }
             
             let mesh = ExtractedMesh {
@@ -143,16 +144,31 @@ pub fn queue_meshes(_main_world: &MainWorld, render_world: &mut RenderWorld) {
         .map(|(_, mesh)| mesh.clone())
         .collect();
     
-    for mesh in meshes {
-        let phase_items = generate_mesh_phase_items(&mesh, &view);
-        for (phase_type, item) in phase_items {
-            render_world.add_phase_item(phase_type, item);
-        }
+    let gpu_textures: Option<GpuTextures>;
+    {
+        let gt = render_world.get_resource::<GpuTextures>();
+        gpu_textures = gt.map(|g| g.clone());
+    }
+    
+    let gpu_tex = gpu_textures.as_ref();
+    
+    let mut all_items: Vec<(RenderPhaseType, PhaseItem)> = Vec::new();
+    for mesh in &meshes {
+        let phase_items = generate_mesh_phase_items(mesh, &view, gpu_tex);
+        all_items.extend(phase_items);
+    }
+    
+    for (phase_type, item) in all_items {
+        render_world.add_phase_item(phase_type, item);
     }
 }
 
 /// Generate phase items from mesh (Bevy-aligned)
-fn generate_mesh_phase_items(mesh: &ExtractedMesh, view: &View) -> Vec<(RenderPhaseType, PhaseItem)> {
+fn generate_mesh_phase_items(
+    mesh: &ExtractedMesh, 
+    view: &View,
+    gpu_textures: Option<&GpuTextures>,
+) -> Vec<(RenderPhaseType, PhaseItem)> {
     use fhre::math::Vec2;
     use alloc::vec;
     
@@ -213,32 +229,40 @@ fn generate_mesh_phase_items(mesh: &ExtractedMesh, view: &View) -> Vec<(RenderPh
 
     for (face_idx, avg_z, screen_face) in visible_faces {
         let color = mesh.face_colors.get(face_idx).copied().unwrap_or(Color::WHITE);
-        let texture_id = mesh.face_textures.get(face_idx).copied().flatten();
+        let texture_handle = mesh.face_textures.get(face_idx).and_then(|h| h.as_ref());
 
-        let command = if let Some(tex_id) = texture_id {
-            let uvs: Vec<Vec2> = match screen_face.len() {
-                4 => vec![
-                    Vec2::new(0.0, 0.0),
-                    Vec2::new(1.0, 0.0),
-                    Vec2::new(1.0, 1.0),
-                    Vec2::new(0.0, 1.0),
-                ],
-                3 => vec![
-                    Vec2::new(0.0, 0.0),
-                    Vec2::new(1.0, 0.0),
-                    Vec2::new(0.5, 1.0),
-                ],
-                _ => screen_face.iter().enumerate().map(|(i, _)| {
-                    let angle = i as f32 / screen_face.len() as f32 * 6.28318;
-                    Vec2::new(0.5 + 0.5 * libm::cosf(angle), 0.5 + 0.5 * libm::sinf(angle))
-                }).collect(),
-            };
-            
-            RenderCommand::DrawPolygonTextured {
-                vertices: screen_face.clone(),
-                uvs,
-                texture_id: tex_id,
-                color,
+        let command = if let (Some(handle), Some(gpu_tex)) = (texture_handle, gpu_textures) {
+            if let Some(gpu_texture) = gpu_tex.get(handle.id()) {
+                let tex_id = gpu_texture.id;
+                let uvs: Vec<Vec2> = match screen_face.len() {
+                    4 => vec![
+                        Vec2::new(0.0, 0.0),
+                        Vec2::new(1.0, 0.0),
+                        Vec2::new(1.0, 1.0),
+                        Vec2::new(0.0, 1.0),
+                    ],
+                    3 => vec![
+                        Vec2::new(0.0, 0.0),
+                        Vec2::new(1.0, 0.0),
+                        Vec2::new(0.5, 1.0),
+                    ],
+                    _ => screen_face.iter().enumerate().map(|(i, _)| {
+                        let angle = i as f32 / screen_face.len() as f32 * 6.28318;
+                        Vec2::new(0.5 + 0.5 * libm::cosf(angle), 0.5 + 0.5 * libm::sinf(angle))
+                    }).collect(),
+                };
+                
+                RenderCommand::DrawPolygonTextured {
+                    vertices: screen_face.clone(),
+                    uvs,
+                    texture_id: tex_id,
+                    color,
+                }
+            } else {
+                RenderCommand::DrawPolygon {
+                    vertices: screen_face.clone(),
+                    color,
+                }
             }
         } else {
             RenderCommand::DrawPolygon {
@@ -247,14 +271,11 @@ fn generate_mesh_phase_items(mesh: &ExtractedMesh, view: &View) -> Vec<(RenderPh
             }
         };
 
-        // All 3D faces need depth sorting (painter's algorithm)
-        // Use Transparent phase which sorts by z_depth
         let phase_type = RenderPhaseType::Transparent;
         let item = PhaseItem::transparent(command, avg_z);
 
         items.push((phase_type, item));
 
-        // Wireframe as separate line commands
         if mesh.wireframe && screen_face.len() >= 2 {
             let wf_color = mesh.wireframe_color;
             for i in 0..screen_face.len() {

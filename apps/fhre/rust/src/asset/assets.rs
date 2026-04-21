@@ -2,6 +2,7 @@
 
 use crate::asset::{Asset, AssetId, AssetIndex, AssetEvent, Handle, StrongHandle};
 use crate::resources::Resource;
+use crate::event::Events;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -61,7 +62,6 @@ pub struct Assets<A: Asset> {
     storage: Vec<Entry<A>>,
     allocator: AssetIndexAllocator,
     uuid_map: BTreeMap<u128, usize>,
-    queued_events: Vec<AssetEvent<A>>,
 }
 
 impl<A: Asset> Resource for Assets<A> {}
@@ -72,7 +72,6 @@ impl<A: Asset> Assets<A> {
             storage: Vec::new(),
             allocator: AssetIndexAllocator::new(),
             uuid_map: BTreeMap::new(),
-            queued_events: Vec::new(),
         }
     }
     
@@ -90,19 +89,26 @@ impl<A: Asset> Assets<A> {
             generation: index.generation,
         };
         
-        self.queued_events.push(AssetEvent::Added { id: AssetId::from(index) });
-        
         Handle::Strong(StrongHandle::new(index))
     }
     
+    /// Add an asset and send event to Events resource.
+    pub fn add_with_event(&mut self, asset: A, events: &mut Events) -> Handle<A> {
+        let handle = self.add(asset);
+        events.send(AssetEvent::Added { id: handle.id() });
+        handle
+    }
+    
     /// Insert an asset with a specific UUID.
-    pub fn insert_with_uuid(&mut self, uuid: u128, asset: A) {
+    pub fn insert_with_uuid(&mut self, uuid: u128, asset: A, events: Option<&mut Events>) {
         if let Some(&idx) = self.uuid_map.get(&uuid) {
             if let Entry::Some { value, .. } = &mut self.storage[idx] {
                 *value = Some(asset);
-                self.queued_events.push(AssetEvent::Modified { 
-                    id: AssetId::from_uuid(uuid) 
-                });
+                if let Some(events) = events {
+                    events.send(AssetEvent::Modified { 
+                        id: AssetId::<A>::from_uuid(uuid) 
+                    });
+                }
             }
         } else {
             let index = self.allocator.allocate();
@@ -118,9 +124,11 @@ impl<A: Asset> Assets<A> {
             };
             
             self.uuid_map.insert(uuid, idx);
-            self.queued_events.push(AssetEvent::Added { 
-                id: AssetId::from_uuid(uuid) 
-            });
+            if let Some(events) = events {
+                events.send(AssetEvent::Added { 
+                    id: AssetId::<A>::from_uuid(uuid) 
+                });
+            }
         }
     }
     
@@ -149,7 +157,7 @@ impl<A: Asset> Assets<A> {
     /// Get a mutable reference to an asset by its ID.
     pub fn get_mut(&mut self, id: impl Into<AssetId<A>>) -> Option<&mut A> {
         let id = id.into();
-        let result = match id {
+        match id {
             AssetId::Index { index, .. } => {
                 let entry = self.storage.get_mut(index.index as usize)?;
                 match entry {
@@ -166,12 +174,16 @@ impl<A: Asset> Assets<A> {
                     Entry::None => None,
                 }
             }
-        };
-        
-        if result.is_some() {
-            self.queued_events.push(AssetEvent::Modified { id });
         }
-        
+    }
+    
+    /// Get a mutable reference and send Modified event.
+    pub fn get_mut_with_event(&mut self, id: impl Into<AssetId<A>>, events: &mut Events) -> Option<&mut A> {
+        let id = id.into();
+        let result = self.get_mut(id);
+        if result.is_some() {
+            events.send(AssetEvent::Modified { id });
+        }
         result
     }
     
@@ -183,7 +195,7 @@ impl<A: Asset> Assets<A> {
     /// Remove an asset by its ID.
     pub fn remove(&mut self, id: impl Into<AssetId<A>>) -> Option<A> {
         let id = id.into();
-        let result = match id {
+        match id {
             AssetId::Index { index, .. } => {
                 let entry = self.storage.get_mut(index.index as usize)?;
                 match entry {
@@ -201,12 +213,16 @@ impl<A: Asset> Assets<A> {
                     Entry::None => None,
                 }
             }
-        };
-        
-        if result.is_some() {
-            self.queued_events.push(AssetEvent::Removed { id });
         }
-        
+    }
+    
+    /// Remove an asset and send Removed event.
+    pub fn remove_with_event(&mut self, id: impl Into<AssetId<A>>, events: &mut Events) -> Option<A> {
+        let id = id.into();
+        let result = self.remove(id);
+        if result.is_some() {
+            events.send(AssetEvent::Removed { id });
+        }
         result
     }
     
@@ -246,11 +262,6 @@ impl<A: Asset> Assets<A> {
                     _ => None,
                 }
             })
-    }
-    
-    /// Drain queued events.
-    pub fn drain_events(&mut self) -> Vec<AssetEvent<A>> {
-        core::mem::take(&mut self.queued_events)
     }
     
     /// Reserve a handle without inserting an asset.

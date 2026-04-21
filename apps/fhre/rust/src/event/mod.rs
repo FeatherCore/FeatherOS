@@ -175,10 +175,5 @@ impl Plugin for EventPlugin {
     fn build(&self, app: &mut App) {
         // Insert Events as a global resource
         app.insert_resource(Events::new());
-        
-        unsafe {
-            extern "C" { fn printf(format: *const u8, ...) -> i32; }
-            printf(b"[EVENT_PLUGIN] Initialized - Events resource registered\n\0".as_ptr());
-        }
     }
 }

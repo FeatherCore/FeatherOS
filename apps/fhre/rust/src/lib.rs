@@ -27,7 +27,16 @@ struct CAllocator;
 
 unsafe impl GlobalAlloc for CAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let ptr = malloc(layout.size()) as *mut u8;
+        extern "C" {
+            fn aligned_alloc(alignment: usize, size: usize) -> *mut core::ffi::c_void;
+        }
+        let size = layout.size();
+        let align = layout.align();
+        let ptr = if align <= 8 {
+            malloc(size) as *mut u8
+        } else {
+            aligned_alloc(align, size) as *mut u8
+        };
         ptr
     }
     
@@ -150,6 +159,7 @@ pub use asset::{
     Asset, AssetId, AssetIndex, AssetEvent, Handle, Assets, 
     RenderAsset, RenderAssets, ExtractedAssets, RenderAssetPlugin, ExtractResourcePlugin,
     AssetServer, AssetRegistry, AssetLoader, AssetPlugin, AppAssetExt,
+    Image, GpuTexture, GpuTextures, ExtractedImages, TextureAssetPlugin,
 };
 
 /// Prelude module for convenient imports

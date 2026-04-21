@@ -35,7 +35,7 @@ use fhre::{
     PointerId, PointerPress, PointerLocation, PointerInput, PointerAction, PointerButton,
     Pointer, Over, Out, Press, Release, Click,
     Events, EventReader,
-    RenderWorld,
+    asset::{Asset, Assets, Handle, Image, GpuTextures, TextureAssetPlugin},
     pipeline::{Texture, Sampler},
 };
 
@@ -154,6 +154,28 @@ pub struct RotationClip {
 
 impl fhre::resources::Resource for RotationClip {}
 
+/// Texture handles for cube faces (declarative asset approach)
+#[derive(Clone, Debug)]
+pub struct CubeTextures {
+    pub front: Handle<Image>,
+    pub back: Handle<Image>,
+    pub top: Handle<Image>,
+    pub bottom: Handle<Image>,
+    pub left: Handle<Image>,
+    pub right: Handle<Image>,
+}
+
+impl fhre::resources::Resource for CubeTextures {}
+
+/// Texture handles for soccer ball faces (declarative asset approach)
+#[derive(Clone, Debug)]
+pub struct SoccerBallTextures {
+    pub pentagon: Handle<Image>,
+    pub hexagon: Handle<Image>,
+}
+
+impl fhre::resources::Resource for SoccerBallTextures {}
+
 /// Flag to track if animation has been initialized
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AnimationInitialized {
@@ -221,21 +243,7 @@ mod colors {
 // Systems
 // ============================================================
 
-/// Texture IDs for cube faces
-mod textures {
-    pub const CUBE_FRONT: u32 = 100;
-    pub const CUBE_BACK: u32 = 101;
-    pub const CUBE_TOP: u32 = 102;
-    pub const CUBE_BOTTOM: u32 = 103;
-    pub const CUBE_LEFT: u32 = 104;
-    pub const CUBE_RIGHT: u32 = 105;
-    
-    // Soccer ball textures
-    pub const SOCCER_PENTAGON: u32 = 200;
-    pub const SOCCER_HEXAGON: u32 = 201;
-}
-
-fn create_checker_texture(width: u32, height: u32, color1: Color, color2: u32) -> Texture {
+fn create_checker_texture(width: u32, height: u32, color1: Color, color2: u32) -> Image {
     let mut data = alloc::vec![0u8; (width * height * 4) as usize];
     
     for y in 0..height {
@@ -251,10 +259,10 @@ fn create_checker_texture(width: u32, height: u32, color1: Color, color2: u32) -
         }
     }
     
-    Texture::from_rgba32(width, height, data).with_sampler(Sampler::NEAREST)
+    Image::from_rgba32(width, height, data).with_sampler(Sampler::NEAREST)
 }
 
-fn create_gradient_texture(width: u32, height: u32, top_color: Color, bottom_color: Color) -> Texture {
+fn create_gradient_texture(width: u32, height: u32, top_color: Color, bottom_color: Color) -> Image {
     let mut data = alloc::vec![0u8; (width * height * 4) as usize];
     
     for y in 0..height {
@@ -270,10 +278,10 @@ fn create_gradient_texture(width: u32, height: u32, top_color: Color, bottom_col
         }
     }
     
-    Texture::from_rgba32(width, height, data).with_sampler(Sampler::LINEAR)
+    Image::from_rgba32(width, height, data).with_sampler(Sampler::LINEAR)
 }
 
-fn create_solid_texture(width: u32, height: u32, color: Color) -> Texture {
+fn create_solid_texture(width: u32, height: u32, color: Color) -> Image {
     let mut data = alloc::vec![0u8; (width * height * 4) as usize];
     
     for i in 0..(width * height) {
@@ -284,10 +292,10 @@ fn create_solid_texture(width: u32, height: u32, color: Color) -> Texture {
         data[idx + 3] = color.a;
     }
     
-    Texture::from_rgba32(width, height, data)
+    Image::from_rgba32(width, height, data)
 }
 
-fn create_pentagon_texture(width: u32, height: u32, color: Color) -> Texture {
+fn create_pentagon_texture(width: u32, height: u32, color: Color) -> Image {
     let mut data = alloc::vec![0u8; (width * height * 4) as usize];
     
     let cx = width as f32 / 2.0;
@@ -332,10 +340,10 @@ fn create_pentagon_texture(width: u32, height: u32, color: Color) -> Texture {
         }
     }
     
-    Texture::from_rgba32(width, height, data).with_sampler(Sampler::LINEAR)
+    Image::from_rgba32(width, height, data).with_sampler(Sampler::LINEAR)
 }
 
-fn create_hexagon_texture(width: u32, height: u32, color: Color) -> Texture {
+fn create_hexagon_texture(width: u32, height: u32, color: Color) -> Image {
     let mut data = alloc::vec![0u8; (width * height * 4) as usize];
     
     let cx = width as f32 / 2.0;
@@ -379,11 +387,11 @@ fn create_hexagon_texture(width: u32, height: u32, color: Color) -> Texture {
         }
     }
     
-    Texture::from_rgba32(width, height, data).with_sampler(Sampler::LINEAR)
+    Image::from_rgba32(width, height, data).with_sampler(Sampler::LINEAR)
 }
 
 /// Setup initial scene: 3D model and UI buttons
-fn setup(mut commands: Commands, screen: Res<PrimaryScreen>) {
+fn setup(mut commands: Commands, screen: Res<PrimaryScreen>, cube_textures: Res<CubeTextures>) {
     let (width, height) = screen.dimensions();
     let center_x = width as f32 / 2.0;
     let center_y = height as f32 / 2.0;
@@ -393,18 +401,37 @@ fn setup(mut commands: Commands, screen: Res<PrimaryScreen>) {
         .insert(Transform3D::from_position(center_x, center_y, 0.0))
         .insert(Cube::new(config::MODEL_SIZE)
             .with_face_colors(colors::CUBE_FACES)
-            .with_face_textures([
-                textures::CUBE_FRONT,
-                textures::CUBE_BACK,
-                textures::CUBE_TOP,
-                textures::CUBE_BOTTOM,
-                textures::CUBE_LEFT,
-                textures::CUBE_RIGHT,
+            .with_face_textures_handles([
+                cube_textures.front.clone(),
+                cube_textures.back.clone(),
+                cube_textures.top.clone(),
+                cube_textures.bottom.clone(),
+                cube_textures.left.clone(),
+                cube_textures.right.clone(),
             ])
             .with_rotation(Vec3::new(config::CUBE_ROT_X, 0.0, config::CUBE_ROT_Z))
             .with_wireframe(true, Color::WHITE))
         .insert(AnimationPlayer::new())
         .insert(SyncToRenderWorld);
+
+    // TEMP: debug crash path by skipping Cube insertion
+    // commands.spawn()
+    //     .insert(Node::game_entity())
+    //     .insert(Transform3D::from_position(center_x, center_y, 0.0))
+    //     .insert(Cube::new(config::MODEL_SIZE)
+    //         .with_face_colors(colors::CUBE_FACES)
+    //         .with_face_textures_handles([
+    //             cube_textures.front.clone(),
+    //             cube_textures.back.clone(),
+    //             cube_textures.top.clone(),
+    //             cube_textures.bottom.clone(),
+    //             cube_textures.left.clone(),
+    //             cube_textures.right.clone(),
+    //         ])
+    //         .with_rotation(Vec3::new(config::CUBE_ROT_X, 0.0, config::CUBE_ROT_Z))
+    //         .with_wireframe(true, Color::WHITE))
+    //     .insert(AnimationPlayer::new())
+    //     .insert(SyncToRenderWorld);
     
     let button_y = height as f32 - ui::BUTTON_BOTTOM_MARGIN;
     
@@ -434,24 +461,31 @@ fn setup(mut commands: Commands, screen: Res<PrimaryScreen>) {
             .with_colors(colors::BTN_NEXT.0, colors::BTN_NEXT.1, colors::BTN_NEXT.2))
         .insert(PickableBounds::from_size(ui::BUTTON_WIDTH, ui::BUTTON_HEIGHT))
         .insert(Pickable::DEFAULT);
+    
+    {
+        extern "C" { fn printf(format: *const u8, ...) -> i32; }
+        unsafe { printf(b"[setup] done\n\0".as_ptr()); }
+    }
 }
 
-fn setup_textures(mut render_world: ResMut<RenderWorld>) {
+/// Setup textures declaratively using Assets<Image> (Bevy-style)
+fn setup_textures(
+    mut images: ResMut<Assets<Image>>,
+    mut cube_textures: ResMut<CubeTextures>,
+    mut soccer_textures: ResMut<SoccerBallTextures>,
+    mut events: ResMut<Events>,
+) {
     let tex_size = 64u32;
     
-    let tex_front = create_checker_texture(tex_size, tex_size, Color::rgb(255, 100, 100), 0xFF404040);
-    let tex_back = create_checker_texture(tex_size, tex_size, Color::rgb(100, 255, 100), 0xFF404040);
-    let tex_top = create_gradient_texture(tex_size, tex_size, Color::rgb(100, 100, 255), Color::rgb(200, 200, 255));
-    let tex_bottom = create_gradient_texture(tex_size, tex_size, Color::rgb(255, 255, 100), Color::rgb(255, 200, 50));
-    let tex_left = create_solid_texture(tex_size, tex_size, Color::rgb(255, 100, 255));
-    let tex_right = create_solid_texture(tex_size, tex_size, Color::rgb(100, 255, 255));
+    cube_textures.front = images.add_with_event(create_checker_texture(tex_size, tex_size, Color::rgb(255, 100, 100), 0xFF404040), &mut events);
+    cube_textures.back = images.add_with_event(create_checker_texture(tex_size, tex_size, Color::rgb(100, 255, 100), 0xFF404040), &mut events);
+    cube_textures.top = images.add_with_event(create_gradient_texture(tex_size, tex_size, Color::rgb(100, 100, 255), Color::rgb(200, 200, 255)), &mut events);
+    cube_textures.bottom = images.add_with_event(create_gradient_texture(tex_size, tex_size, Color::rgb(255, 255, 100), Color::rgb(255, 200, 50)), &mut events);
+    cube_textures.left = images.add_with_event(create_solid_texture(tex_size, tex_size, Color::rgb(255, 100, 255)), &mut events);
+    cube_textures.right = images.add_with_event(create_solid_texture(tex_size, tex_size, Color::rgb(100, 255, 255)), &mut events);
     
-    render_world.upload_texture(textures::CUBE_FRONT, tex_front);
-    render_world.upload_texture(textures::CUBE_BACK, tex_back);
-    render_world.upload_texture(textures::CUBE_TOP, tex_top);
-    render_world.upload_texture(textures::CUBE_BOTTOM, tex_bottom);
-    render_world.upload_texture(textures::CUBE_LEFT, tex_left);
-    render_world.upload_texture(textures::CUBE_RIGHT, tex_right);
+    soccer_textures.pentagon = images.add_with_event(create_pentagon_texture(tex_size, tex_size, Color::BLACK), &mut events);
+    soccer_textures.hexagon = images.add_with_event(create_hexagon_texture(tex_size, tex_size, Color::WHITE), &mut events);
 }
 
 /// Create and assign rotation animation clip to all players
@@ -702,6 +736,8 @@ fn model_switch_system(
     mut last_state: ResMut<LastRotationState>,
     clip_res: Res<RotationClip>,
     screen: Res<PrimaryScreen>,
+    cube_textures: Res<CubeTextures>,
+    soccer_textures: Res<SoccerBallTextures>,
     mut commands: Commands,
     mut cube_query: Query<&Cube>,
     mut soccer_query: Query<&SoccerBall>,
@@ -711,7 +747,6 @@ fn model_switch_system(
     }
     switch_requested.requested = false;
     
-    // Ensure animation plays after switch
     state.is_rotating = true;
     last_state.is_rotating = false;
     
@@ -719,7 +754,6 @@ fn model_switch_system(
     let center_x = width as f32 / 2.0;
     let center_y = height as f32 / 2.0;
     
-    // Despawn existing models
     for (entity, _) in cube_query.iter() {
         commands.despawn(entity);
     }
@@ -727,13 +761,10 @@ fn model_switch_system(
         commands.despawn(entity);
     }
     
-    // Create animation player with clip pre-configured
-    // Note: Must set animation before spawn because Commands are deferred
     let target_id = AnimationTargetId::new(anim::TARGET_ID);
     let mut player = AnimationPlayer::new();
     player.play_with_target(clip_res.handle, target_id);
     
-    // Spawn new model based on current selection
     match state.current_model {
         0 => {
             commands.spawn()
@@ -741,13 +772,13 @@ fn model_switch_system(
                 .insert(Transform3D::from_position(center_x, center_y, 0.0))
                 .insert(Cube::new(config::MODEL_SIZE)
                     .with_face_colors(colors::CUBE_FACES)
-                    .with_face_textures([
-                        textures::CUBE_FRONT,
-                        textures::CUBE_BACK,
-                        textures::CUBE_TOP,
-                        textures::CUBE_BOTTOM,
-                        textures::CUBE_LEFT,
-                        textures::CUBE_RIGHT,
+                    .with_face_textures_handles([
+                        cube_textures.front.clone(),
+                        cube_textures.back.clone(),
+                        cube_textures.top.clone(),
+                        cube_textures.bottom.clone(),
+                        cube_textures.left.clone(),
+                        cube_textures.right.clone(),
                     ])
                     .with_rotation(Vec3::new(config::CUBE_ROT_X, 0.0, config::CUBE_ROT_Z))
                     .with_wireframe(true, Color::WHITE))
@@ -755,20 +786,22 @@ fn model_switch_system(
                 .insert(SyncToRenderWorld);
         }
         1 => {
-            let pentagon_textures = [
-                Some(textures::SOCCER_PENTAGON); 12
-            ];
-            let hexagon_textures = [
-                Some(textures::SOCCER_HEXAGON); 20
-            ];
+            let mut pentagon_textures: [Option<Handle<Image>>; 12] = Default::default();
+            for i in 0..12 {
+                pentagon_textures[i] = Some(soccer_textures.pentagon.clone());
+            }
+            let mut hexagon_textures: [Option<Handle<Image>>; 20] = Default::default();
+            for i in 0..20 {
+                hexagon_textures[i] = Some(soccer_textures.hexagon.clone());
+            }
             
             commands.spawn()
                 .insert(Node::game_entity())
                 .insert(Transform3D::from_position(center_x, center_y, 0.0))
                 .insert(SoccerBall::new(config::MODEL_SIZE)
-                    .with_pentagon_textures(pentagon_textures)
-                    .with_hexagon_textures(hexagon_textures)
-                    .with_rotation(Vec3::new(0.0, 0.0, 0.0))
+                    .with_pentagon_textures_handles(pentagon_textures)
+                    .with_hexagon_textures_handles(hexagon_textures)
+                    .with_rotation(Vec3::new(config::CUBE_ROT_X, 0.0, config::CUBE_ROT_Z))
                     .with_wireframe(true, Color::WHITE))
                 .insert(player)
                 .insert(SyncToRenderWorld);
@@ -783,7 +816,6 @@ fn model_switch_system(
 
 #[no_mangle]
 pub extern "C" fn fhre_rust_main() -> i32 {
-    // Initialize platform window
     let mut window = match framebuffer::Window::new() {
         Some(w) => w,
         None => return 0,
@@ -793,30 +825,8 @@ pub extern "C" fn fhre_rust_main() -> i32 {
     
     let mut app = App::new(width, height);
     
-    let tex_size = 64u32;
-    let tex_front = create_checker_texture(tex_size, tex_size, Color::rgb(255, 100, 100), 0xFF404040);
-    let tex_back = create_checker_texture(tex_size, tex_size, Color::rgb(100, 255, 100), 0xFF404040);
-    let tex_top = create_gradient_texture(tex_size, tex_size, Color::rgb(100, 100, 255), Color::rgb(200, 200, 255));
-    let tex_bottom = create_gradient_texture(tex_size, tex_size, Color::rgb(255, 255, 100), Color::rgb(255, 200, 50));
-    let tex_left = create_solid_texture(tex_size, tex_size, Color::rgb(255, 100, 255));
-    let tex_right = create_solid_texture(tex_size, tex_size, Color::rgb(100, 255, 255));
-    
-    app.render_world.upload_texture(textures::CUBE_FRONT, tex_front);
-    app.render_world.upload_texture(textures::CUBE_BACK, tex_back);
-    app.render_world.upload_texture(textures::CUBE_TOP, tex_top);
-    app.render_world.upload_texture(textures::CUBE_BOTTOM, tex_bottom);
-    app.render_world.upload_texture(textures::CUBE_LEFT, tex_left);
-    app.render_world.upload_texture(textures::CUBE_RIGHT, tex_right);
-    
-    let soccer_tex_size = 64u32;
-    let tex_pentagon = create_pentagon_texture(soccer_tex_size, soccer_tex_size, Color::BLACK);
-    let tex_hexagon = create_hexagon_texture(soccer_tex_size, soccer_tex_size, Color::WHITE);
-    
-    app.render_world.upload_texture(textures::SOCCER_PENTAGON, tex_pentagon);
-    app.render_world.upload_texture(textures::SOCCER_HEXAGON, tex_hexagon);
-    
     app.add_plugins(DefaultPlugins)
-        // Resources
+        .add_plugin(TextureAssetPlugin)
         .insert_resource(DemoState::new())
         .insert_resource(RotationClip { handle: AnimationClipHandle::null() })
         .insert_resource(AnimationInitialized::default())
@@ -825,27 +835,41 @@ pub extern "C" fn fhre_rust_main() -> i32 {
         .insert_resource(ButtonInput::<KeyCode>::default())
         .insert_resource(ButtonInput::<MouseButton>::default())
         .insert_resource(MousePosition::default())
-        // Systems
-        .add_systems(Startup, declare_system!(setup; Commands, Res<PrimaryScreen>))
+        .insert_resource(CubeTextures {
+            front: Handle::default(),
+            back: Handle::default(),
+            top: Handle::default(),
+            bottom: Handle::default(),
+            left: Handle::default(),
+            right: Handle::default(),
+        })
+        .insert_resource(SoccerBallTextures {
+            pentagon: Handle::default(),
+            hexagon: Handle::default(),
+        })
+        .add_systems(Startup, declare_system!(setup_textures; ResMut<Assets<Image>>, ResMut<CubeTextures>, ResMut<SoccerBallTextures>, ResMut<Events>))
+        .add_systems(Startup, declare_system!(setup; Commands, Res<PrimaryScreen>, Res<CubeTextures>))
         .add_systems(Update, declare_system!(setup_animation; ResMut<AnimationResources>, ResMut<RotationClip>, Query<&mut AnimationPlayer>, ResMut<AnimationInitialized>))
         .add_systems(PreUpdate, declare_system!(picking_system; Res<MousePosition>, Res<ButtonInput<MouseButton>>, Query<&Transform>, Query<&PickableBounds>, Query<&Pickable>, ResMut<HoverMap>, ResMut<PreviousHoverMap>, ResMut<PointerPress>, ResMut<PointerLocation>, ResMut<Events>))
         .add_systems(PreUpdate, declare_system!(button_interaction_system; Res<Events>, Query<&mut Button>))
         .add_systems(PreUpdate, declare_system!(input_system; Res<ButtonInput<KeyCode>>, ResMut<DemoState>, ResMut<ModelSwitchRequested>, Query<&mut Button>))
         .add_systems(Update, declare_system!(animation_control_system; Res<DemoState>, ResMut<LastRotationState>, Query<&mut AnimationPlayer>))
-        .add_systems(Update, declare_system!(model_switch_system; ResMut<DemoState>, ResMut<ModelSwitchRequested>, ResMut<LastRotationState>, Res<RotationClip>, Res<PrimaryScreen>, Commands, Query<&Cube>, Query<&SoccerBall>));
+        .add_systems(Update, declare_system!(model_switch_system; ResMut<DemoState>, ResMut<ModelSwitchRequested>, ResMut<LastRotationState>, Res<RotationClip>, Res<PrimaryScreen>, Res<CubeTextures>, Res<SoccerBallTextures>, Commands, Query<&Cube>, Query<&SoccerBall>));
     
-    // Extractors for render world sync
+    {
+        extern "C" { fn printf(format: *const u8, ...) -> i32; }
+        unsafe { printf(b"[main] plugins added\n\0".as_ptr()); }
+    }
+    
     app.add_extractor(extract::extract_view)
        .add_extractor(extract::extract_3d_components)
        .add_extractor(extract::extract_buttons)
        .add_extractor(extract::queue_meshes)
        .add_extractor(extract::queue_ui);
     
-    // Animation application systems
     app.add_systems(Update, fhre::declare_system!(apply_animations::<Cube>; Query<&fhre::animation::AnimationPlayer>, Query<&mut Cube>));
     app.add_systems(Update, fhre::declare_system!(apply_animations::<SoccerBall>; Query<&fhre::animation::AnimationPlayer>, Query<&mut SoccerBall>));
     
-    // Run with input adapter
     let input_adapter = framebuffer::InputAdapter::default();
     
     WindowRunner::new(&mut app, &mut window, &input_adapter)

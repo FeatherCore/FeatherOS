@@ -18,7 +18,7 @@ pub const DEFAULT_FPS: f32 = 60.0;
 pub const DEFAULT_FRAME_TIME: f32 = 1.0 / DEFAULT_FPS;
 
 /// FHRE Version
-pub const FHRE_VERSION: &[u8] = b"2.3.0\0";
+pub const FHRE_VERSION: &[u8] = b"2.8.0\0";
 
 /// The main application struct
 ///
@@ -154,6 +154,11 @@ impl App {
 
         // Run Main World systems
         self.main_world.run_systems();
+
+        // Update Events buffers before extract (so startup events are visible)
+        if let Some(events) = self.main_world.resources_mut().get_mut::<crate::event::Events>() {
+            events.update();
+        }
 
         // Extract Phase - sync Main World to Render World
         crate::sync::entity_sync_system(&mut self.main_world, &mut self.render_world);

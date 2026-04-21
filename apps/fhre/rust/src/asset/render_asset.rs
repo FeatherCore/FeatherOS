@@ -14,7 +14,7 @@ use alloc::vec::Vec;
 /// Similar to Bevy's `RenderAsset` trait. In the Extract phase,
 /// the source asset is transferred from Main World to Render World.
 /// Then in Prepare phase, it's converted to GPU representation.
-pub trait RenderAsset: Send + Sync + 'static + Sized {
+pub trait RenderAsset: Send + Sync + 'static + Sized + Clone {
     /// The source asset type in Main World.
     type SourceAsset: Asset;
     
@@ -31,6 +31,7 @@ pub trait RenderAsset: Send + Sync + 'static + Sized {
 }
 
 /// Stores GPU representations of assets in Render World.
+#[derive(Clone)]
 pub struct RenderAssets<A: RenderAsset> {
     assets: BTreeMap<AssetId<A::SourceAsset>, A>,
 }

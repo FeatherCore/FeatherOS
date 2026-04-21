@@ -3,7 +3,7 @@
 //! A 3D soccer ball UI component based on a truncated icosahedron geometry.
 //! The truncated icosahedron has 12 pentagonal faces and 20 hexagonal faces.
 
-use fhre::{Component, Color, Vec3, Vec2, Mat4, Transform3D, View, RenderCommand, RenderComponent, AnimationReceiver, AnimationProperty};
+use fhre::{Component, Color, Vec3, Vec2, Mat4, Transform3D, View, RenderCommand, RenderComponent, AnimationReceiver, AnimationProperty, Handle, Image};
 use alloc::vec::Vec;
 
 // ============================================================
@@ -45,10 +45,10 @@ pub struct SoccerBall {
     pub pentagon_colors: [Color; NUM_PENTAGONS],
     /// Colors for each of the 20 hexagonal faces
     pub hexagon_colors: [Color; NUM_HEXAGONS],
-    /// Texture IDs for pentagon faces (optional)
-    pub pentagon_textures: [Option<u32>; NUM_PENTAGONS],
-    /// Texture IDs for hexagon faces (optional)
-    pub hexagon_textures: [Option<u32>; NUM_HEXAGONS],
+    /// Texture handles for pentagon faces (optional)
+    pub pentagon_textures: [Option<Handle<Image>>; NUM_PENTAGONS],
+    /// Texture handles for hexagon faces (optional)
+    pub hexagon_textures: [Option<Handle<Image>>; NUM_HEXAGONS],
     /// Rotation angles in degrees (Euler angles)
     pub rotation: Vec3,
     /// Whether to draw wireframe overlay
@@ -104,8 +104,8 @@ impl SoccerBall {
             size,
             pentagon_colors,
             hexagon_colors,
-            pentagon_textures: [None; NUM_PENTAGONS],
-            hexagon_textures: [None; NUM_HEXAGONS],
+            pentagon_textures: Default::default(),
+            hexagon_textures: Default::default(),
             rotation: Vec3::ZERO,
             wireframe: false,
             wireframe_color: Color::WHITE,
@@ -119,14 +119,14 @@ impl SoccerBall {
         self
     }
 
-    /// Set texture IDs for pentagon faces
-    pub fn with_pentagon_textures(mut self, textures: [Option<u32>; NUM_PENTAGONS]) -> Self {
+    /// Set texture handles for pentagon faces
+    pub fn with_pentagon_textures_handles(mut self, textures: [Option<Handle<Image>>; NUM_PENTAGONS]) -> Self {
         self.pentagon_textures = textures;
         self
     }
 
-    /// Set texture IDs for hexagon faces
-    pub fn with_hexagon_textures(mut self, textures: [Option<u32>; NUM_HEXAGONS]) -> Self {
+    /// Set texture handles for hexagon faces
+    pub fn with_hexagon_textures_handles(mut self, textures: [Option<Handle<Image>>; NUM_HEXAGONS]) -> Self {
         self.hexagon_textures = textures;
         self
     }
@@ -389,22 +389,12 @@ impl RenderComponent for SoccerBall {
         for (face_idx, is_pentagon, _, verts) in all_faces {
             if is_pentagon {
                 let color = self.pentagon_colors[face_idx];
-                let texture_id = self.pentagon_textures[face_idx];
                 
-                if let Some(tex_id) = texture_id {
-                    let uvs = Self::generate_pentagon_uvs();
-                    commands.push(RenderCommand::DrawPolygonTextured {
-                        vertices: verts.clone(),
-                        uvs,
-                        texture_id: tex_id,
-                        color,
-                    });
-                } else {
-                    commands.push(RenderCommand::DrawPolygon {
-                        vertices: verts.clone(),
-                        color,
-                    });
-                }
+                // Note: Textures are handled by extract/queue phase, not RenderComponent
+                commands.push(RenderCommand::DrawPolygon {
+                    vertices: verts.clone(),
+                    color,
+                });
 
                 if self.wireframe {
                     let wf_color = self.wireframe_color;
@@ -419,22 +409,12 @@ impl RenderComponent for SoccerBall {
                 }
             } else {
                 let color = self.hexagon_colors[face_idx];
-                let texture_id = self.hexagon_textures[face_idx];
                 
-                if let Some(tex_id) = texture_id {
-                    let uvs = Self::generate_hexagon_uvs();
-                    commands.push(RenderCommand::DrawPolygonTextured {
-                        vertices: verts.clone(),
-                        uvs,
-                        texture_id: tex_id,
-                        color,
-                    });
-                } else {
-                    commands.push(RenderCommand::DrawPolygon {
-                        vertices: verts.clone(),
-                        color,
-                    });
-                }
+                // Note: Textures are handled by extract/queue phase, not RenderComponent
+                commands.push(RenderCommand::DrawPolygon {
+                    vertices: verts.clone(),
+                    color,
+                });
 
                 if self.wireframe {
                     let wf_color = self.wireframe_color;

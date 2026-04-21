@@ -2,7 +2,7 @@
 //!
 //! A simple 3D cube UI component for demonstrating 3D rendering effects.
 
-use fhre::{Component, Color, Vec3, Vec2, Mat4, Transform3D, View, RenderCommand, RenderComponent, AnimationReceiver, AnimationProperty, TextureRegion};
+use fhre::{Component, Color, Vec3, Vec2, Mat4, Transform3D, View, RenderCommand, RenderComponent, AnimationReceiver, AnimationProperty, TextureRegion, Handle, Image};
 use alloc::vec::Vec;
 use alloc::vec;
 
@@ -55,8 +55,8 @@ pub struct Cube {
     pub size: f32,
     /// Color for each of the 6 faces
     pub face_colors: [Color; NUM_FACES],
-    /// Texture ID for each of the 6 faces (optional)
-    pub face_textures: [Option<u32>; NUM_FACES],
+    /// Texture handle for each of the 6 faces (optional)
+    pub face_textures: [Option<Handle<Image>>; NUM_FACES],
     /// Rotation angles in degrees (Euler angles)
     pub rotation: Vec3,
     /// Whether to draw wireframe overlay
@@ -78,7 +78,7 @@ impl Cube {
                 Color::rgb(255, 100, 255),
                 Color::rgb(100, 255, 255),
             ],
-            face_textures: [None; NUM_FACES],
+            face_textures: Default::default(),
             rotation: Vec3::ZERO,
             wireframe: false,
             wireframe_color: Color::WHITE,
@@ -98,8 +98,8 @@ impl Cube {
     }
 
     /// Set individual face textures
-    pub fn with_face_textures(mut self, texture_ids: [u32; NUM_FACES]) -> Self {
-        self.face_textures = texture_ids.map(Some);
+    pub fn with_face_textures_handles(mut self, textures: [Handle<Image>; NUM_FACES]) -> Self {
+        self.face_textures = textures.map(Some);
         self
     }
 

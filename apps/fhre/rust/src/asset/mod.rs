@@ -41,6 +41,7 @@ mod event;
 mod render_asset;
 mod extract_plugin;
 mod server;
+mod image;
 
 pub use id::*;
 pub use handle::*;
@@ -49,6 +50,7 @@ pub use event::*;
 pub use render_asset::*;
 pub use extract_plugin::*;
 pub use server::*;
+pub use image::*;
 
 use crate::Component;
 

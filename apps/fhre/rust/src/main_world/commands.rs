@@ -43,6 +43,8 @@ pub(crate) struct SpawnCommand {
 pub(crate) struct InsertCommand {
     placeholder: Entity,
     component_type_id: core::any::TypeId,
+    component_name_ptr: *const u8,
+    component_name_len: usize,
     component_ptr: *mut u8,
     drop_fn: unsafe fn(*mut u8),
     insert_fn: unsafe fn(*mut u8, Entity, &mut MainWorld),
@@ -110,6 +112,8 @@ impl<'w, 's> Commands<'w, 's> {
         self.insert_queue.push(InsertCommand {
             placeholder,
             component_type_id: core::any::TypeId::of::<C>(),
+            component_name_ptr: C::type_name().as_ptr(),
+            component_name_len: C::type_name().len(),
             component_ptr,
             drop_fn: drop_fn::<C>,
             insert_fn: insert_fn::<C>,

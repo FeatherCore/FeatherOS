@@ -85,9 +85,8 @@ impl<C: ExtractComponent> Default for ExtractComponentPlugin<C> {
 }
 
 impl<C: ExtractComponent> Plugin for ExtractComponentPlugin<C> {
-    fn build(&self, _app: &mut App) {
-        // The extraction system is registered via add_extractor
-        // This plugin is mainly for type registration and documentation
+    fn build(&self, app: &mut App) {
+        app.add_extractor(extract_component::<C>);
     }
 }
 
@@ -195,8 +194,27 @@ impl<R: ExtractResource> Default for ExtractResourcePlugin<R> {
 }
 
 impl<R: ExtractResource> Plugin for ExtractResourcePlugin<R> {
-    fn build(&self, _app: &mut App) {
-        // Resource extraction is registered via add_extractor
+    fn build(&self, app: &mut App) {
+        app.add_extractor(extract_resource::<R>);
+    }
+}
+
+/// Plugin that automatically extracts a component with its Transform.
+pub struct ExtractComponentWithTransformPlugin<C: ExtractComponent> {
+    _marker: PhantomData<C>,
+}
+
+impl<C: ExtractComponent> Default for ExtractComponentWithTransformPlugin<C> {
+    fn default() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<C: ExtractComponent> Plugin for ExtractComponentWithTransformPlugin<C> {
+    fn build(&self, app: &mut App) {
+        app.add_extractor(extract_component_with_transform::<C>);
     }
 }
 

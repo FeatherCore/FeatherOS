@@ -74,6 +74,13 @@ fn extract_assets<A: RenderAsset>(
     }
     let assets = assets.unwrap();
     
+    // If no events, extract all existing assets (first frame case)
+    if needs_extract.is_empty() {
+        for (id, _) in assets.iter() {
+            needs_extract.insert(id);
+        }
+    }
+    
     let extracted: Vec<(AssetId<A::SourceAsset>, A::SourceAsset)> = needs_extract
         .iter()
         .filter_map(|id| {
@@ -92,14 +99,19 @@ fn prepare_assets<A: RenderAsset>(
     _main_world: &MainWorld,
     render_world: &mut RenderWorld,
 ) {
-    let extracted = render_world.get_resource_mut::<ExtractedAssets<A>>();
-    if extracted.is_none() {
-        return;
-    }
+    let to_prepare: Vec<(AssetId<A::SourceAsset>, A::SourceAsset)>;
+    let removed: Vec<AssetId<A::SourceAsset>>;
     
-    let mut extracted = extracted.unwrap();
-    let to_prepare = core::mem::take(&mut extracted.extracted);
-    let removed = core::mem::take(&mut extracted.removed);
+    {
+        let extracted = render_world.get_resource_mut::<ExtractedAssets<A>>();
+        if extracted.is_none() {
+            return;
+        }
+        
+        let mut extracted = extracted.unwrap();
+        to_prepare = core::mem::take(&mut extracted.extracted);
+        removed = core::mem::take(&mut extracted.removed);
+    }
     
     for (id, source) in to_prepare {
         if let Some(prepared) = A::prepare_asset(&source, render_world) {

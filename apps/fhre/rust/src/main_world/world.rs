@@ -86,7 +86,9 @@ impl MainWorld {
         let storage = self.components
             .entry(type_id)
             .or_insert_with(BTreeMap::new);
+
         storage.insert(entity.id(), Box::new(component));
+
         self.change_detection.mark_added::<T>(entity);
         
         if TypeId::of::<T>() == TypeId::of::<SyncToRenderWorld>() {
@@ -246,7 +248,7 @@ impl MainWorld {
         for system in systems.iter_mut() {
             system.run(self);
         }
-
+        
         self.apply_commands();
     }
 
