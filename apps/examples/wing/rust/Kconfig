@@ -1,0 +1,30 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+config EXAMPLES_WING_RUST
+	tristate "Wing Rust desktop demo"
+	default n
+	depends on FHRE_RUST
+	---help---
+		Enable the Wing desktop shell demo built on FHRE
+
+if EXAMPLES_WING_RUST
+
+config EXAMPLES_WING_RUST_PROGNAME
+	string "Program name"
+	default "wing_rust"
+	---help---
+		This is the name of the program that will be used when the
+		program is installed.
+
+config EXAMPLES_WING_RUST_PRIORITY
+	int "Wing Rust task priority"
+	default 100
+
+config EXAMPLES_WING_RUST_STACKSIZE
+	int "Wing Rust stack size"
+	default DEFAULT_TASK_STACKSIZE
+
+endif

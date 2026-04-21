@@ -1,142 +1,141 @@
-//! Desktop Icon Module
-//!
-//! Manages desktop icons and their interactions.
+//! Desktop icons.
 
-use alloc::string::String;
 use alloc::vec::Vec;
-use fhre::math::{Color, Vec2, Rect};
-use fhre::render_world::RenderCommand;
+use fhre::{Color, RenderCommand, Vec2};
+use fhre::math::Rect;
 
-/// Desktop icon
+use crate::launcher::AppInfo;
+use crate::theme::{ThemePalette, shell_palette};
+
+/// Desktop icon.
+#[derive(Clone, Debug)]
 pub struct DesktopIcon {
-    /// Icon name
-    pub name: String,
-    /// Icon position
+    pub app_info: AppInfo,
     pub position: Vec2,
-    /// Icon size
     pub size: f32,
-    /// Icon color
-    pub color: Color,
-    /// Is selected
     pub is_selected: bool,
-    /// Click handler
-    pub on_click: Option<fn()>,
+    pub theme: ThemePalette,
 }
 
 impl DesktopIcon {
-    /// Create a new desktop icon
-    pub fn new(name: String, position: Vec2, size: f32) -> Self {
+    pub fn new(app_info: AppInfo, position: Vec2, size: f32) -> Self {
         Self {
-            name,
+            app_info,
             position,
             size,
-            color: Color::rgb(200, 200, 200),
             is_selected: false,
-            on_click: None,
+            theme: shell_palette(),
         }
     }
 
-    /// Get icon rectangle
+    pub fn apply_theme(&mut self, palette: ThemePalette) {
+        self.theme = palette;
+    }
+
     pub fn get_rect(&self) -> Rect {
+        Rect::from_center_size(self.position, Vec2::new(self.size, self.size))
+    }
+
+    pub fn label_rect(&self) -> Rect {
         Rect::new(
-            self.position.x - self.size / 2.0,
-            self.position.y - self.size / 2.0,
-            self.size,
-            self.size,
+            self.position.x - self.size * 0.75,
+            self.position.y + self.size * 0.5 + 6.0,
+            self.size * 1.5,
+            18.0,
         )
     }
 
-    /// Check if point is inside icon
     pub fn contains(&self, point: Vec2) -> bool {
         self.get_rect().contains(point)
     }
 
-    /// Handle click
-    pub fn on_click(&self) {
-        if let Some(handler) = self.on_click {
-            handler();
-        }
-    }
-
-    /// Generate render commands for this icon
     pub fn generate_render_commands(&self) -> Vec<RenderCommand> {
         let mut commands = Vec::new();
-
         let rect = self.get_rect();
+        let frame = rect.inset(6.0, 6.0);
 
-        // Draw icon background
-        commands.push(RenderCommand::DrawRect {
-            rect,
-            color: if self.is_selected {
-                Color::rgb(100, 150, 200)
-            } else {
-                self.color
-            },
-        });
+        if self.is_selected {
+            commands.push(RenderCommand::draw_rect_rounded(
+                Rect::new(rect.x - 8.0, rect.y - 8.0, rect.width + 16.0, rect.height + 32.0),
+                self.theme.accent_pressed,
+                14.0,
+            ));
+        }
 
-        // Draw icon border
-        let border_width = 2.0;
-        commands.push(RenderCommand::DrawRect {
-            rect: Rect::new(rect.x, rect.y, rect.width, border_width),
-            color: Color::rgb(150, 150, 150),
-        });
-        commands.push(RenderCommand::DrawRect {
-            rect: Rect::new(rect.x, rect.y + rect.height - border_width, rect.width, border_width),
-            color: Color::rgb(150, 150, 150),
-        });
-        commands.push(RenderCommand::DrawRect {
-            rect: Rect::new(rect.x, rect.y, border_width, rect.height),
-            color: Color::rgb(150, 150, 150),
-        });
-        commands.push(RenderCommand::DrawRect {
-            rect: Rect::new(rect.x + rect.width - border_width, rect.y, border_width, rect.height),
-            color: Color::rgb(150, 150, 150),
-        });
-
+        commands.push(RenderCommand::draw_rect_rounded(rect, self.theme.surface_alt, 14.0));
+        commands.push(RenderCommand::draw_rect_rounded(frame, self.app_info.icon_color, 10.0));
+        commands.push(RenderCommand::draw_line_thick(
+            Vec2::new(frame.x + 8.0, frame.y + frame.height * 0.35),
+            Vec2::new(frame.right() - 8.0, frame.y + frame.height * 0.35),
+            Color::rgb(255, 255, 255),
+            3.0,
+        ));
+        commands.push(RenderCommand::draw_line_thick(
+            Vec2::new(frame.x + 8.0, frame.y + frame.height * 0.62),
+            Vec2::new(frame.right() - 14.0, frame.y + frame.height * 0.62),
+            Color::rgb(255, 255, 255),
+            3.0,
+        ));
+        commands.push(RenderCommand::draw_text(
+            Vec2::new(self.label_rect().x + 4.0, self.label_rect().y + 12.0),
+            self.app_info.name,
+            Color::WHITE,
+            12.0,
+        ));
         commands
     }
 }
 
-/// Icon grid for organizing desktop icons
+/// Grid layout for desktop icons.
+#[derive(Clone, Copy, Debug)]
 pub struct IconGrid {
-    /// Screen size
     screen_size: Vec2,
-    /// Grid cell size
     cell_size: f32,
-    /// Grid spacing
     spacing: f32,
+    top_padding: f32,
+    left_padding: f32,
+    reserved_bottom: f32,
 }
 
 impl IconGrid {
-    /// Create a new icon grid
     pub fn new(screen_size: Vec2) -> Self {
         Self {
             screen_size,
-            cell_size: 80.0,
-            spacing: 20.0,
+            cell_size: 92.0,
+            spacing: 22.0,
+            top_padding: 28.0,
+            left_padding: 22.0,
+            reserved_bottom: 0.0,
         }
     }
 
-    /// Get grid position for an icon
+    pub fn set_screen_size(&mut self, screen_size: Vec2) {
+        self.screen_size = screen_size;
+    }
+
+    pub fn set_cell_metrics(&mut self, cell_size: f32, spacing: f32) {
+        self.cell_size = cell_size;
+        self.spacing = spacing;
+    }
+
+    pub fn set_reserved_bottom(&mut self, reserved_bottom: f32) {
+        self.reserved_bottom = reserved_bottom;
+    }
+
     pub fn get_grid_position(&self, row: u32, col: u32) -> Vec2 {
         Vec2::new(
-            self.spacing + col as f32 * (self.cell_size + self.spacing),
-            self.spacing + row as f32 * (self.cell_size + self.spacing),
+            self.left_padding + self.cell_size * 0.5 + col as f32 * (self.cell_size + self.spacing),
+            self.top_padding + self.cell_size * 0.5 + row as f32 * (self.cell_size + self.spacing),
         )
     }
 
-    /// Get grid cell at position
-    pub fn get_cell_at(&self, position: Vec2) -> Option<(u32, u32)> {
-        let col = (position.x / (self.cell_size + self.spacing)) as u32;
-        let row = (position.y / (self.cell_size + self.spacing)) as u32;
+    pub fn max_rows(&self) -> u32 {
+        let usable_height = (self.screen_size.y - self.reserved_bottom - self.top_padding).max(self.cell_size);
+        (usable_height / (self.cell_size + self.spacing)).max(1.0) as u32
+    }
 
-        let max_cols = (self.screen_size.x / (self.cell_size + self.spacing)) as u32;
-        let max_rows = (self.screen_size.y / (self.cell_size + self.spacing)) as u32;
-
-        if col < max_cols && row < max_rows {
-            Some((row, col))
-        } else {
-            None
-        }
+    pub fn max_cols(&self) -> u32 {
+        let usable_width = (self.screen_size.x - self.left_padding).max(self.cell_size);
+        (usable_width / (self.cell_size + self.spacing)).max(1.0) as u32
     }
 }

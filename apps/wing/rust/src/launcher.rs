@@ -1,31 +1,23 @@
-//! Application Launcher Module
-//!
-//! Provides an application launcher/menu for starting applications.
+//! Application launcher.
 
-use alloc::string::String;
 use alloc::vec::Vec;
-use fhre::math::{Color, Vec2, Rect};
-use fhre::render_world::RenderCommand;
-use crate::window::WindowId;
+use fhre::{Color, RenderCommand, Vec2};
+use fhre::math::Rect;
 
-/// Application information
-#[derive(Clone, Debug)]
+use crate::theme::{ThemePalette, shell_palette};
+
+/// Application information.
+#[derive(Clone, Debug, PartialEq)]
 pub struct AppInfo {
-    /// Application name
     pub name: &'static str,
-    /// Application description
     pub description: &'static str,
-    /// Default window size
     pub default_size: Vec2,
-    /// Initial window position
     pub initial_position: Vec2,
-    /// Application icon (placeholder)
     pub icon_color: Color,
 }
 
 impl AppInfo {
-    /// Create a new application info
-    pub fn new(
+    pub const fn new(
         name: &'static str,
         description: &'static str,
         default_size: Vec2,
@@ -42,18 +34,14 @@ impl AppInfo {
     }
 }
 
-/// Launcher item
+/// Launcher item.
 pub struct LauncherItem {
-    /// Application info
     pub app_info: AppInfo,
-    /// Item rectangle
     pub rect: Rect,
-    /// Is hovered
     pub is_hovered: bool,
 }
 
 impl LauncherItem {
-    /// Create a new launcher item
     pub fn new(app_info: AppInfo, rect: Rect) -> Self {
         Self {
             app_info,
@@ -62,212 +50,223 @@ impl LauncherItem {
         }
     }
 
-    /// Generate render commands
-    pub fn generate_render_commands(&self) -> Vec<RenderCommand> {
+    pub fn generate_render_commands(&self, palette: ThemePalette) -> Vec<RenderCommand> {
         let mut commands = Vec::new();
-
-        let color = if self.is_hovered {
-            Color::rgb(80, 80, 80)
+        let background = if self.is_hovered {
+            palette.accent_hover
         } else {
-            Color::rgb(60, 60, 60)
+            Color::rgb(42, 48, 64)
         };
 
-        commands.push(RenderCommand::DrawRect {
-            rect: self.rect,
-            color,
-        });
-
-        // Draw icon placeholder
-        let icon_size = 32.0;
-        commands.push(RenderCommand::DrawRect {
-            rect: Rect::new(
-                self.rect.x + 8.0,
-                self.rect.y + (self.rect.height - icon_size) / 2.0,
-                icon_size,
-                icon_size,
-            ),
-            color: self.app_info.icon_color,
-        });
-
+        commands.push(RenderCommand::draw_rect_rounded(self.rect, background, 10.0));
+        commands.push(RenderCommand::draw_rect_rounded(
+            Rect::new(self.rect.x + 10.0, self.rect.y + 8.0, 32.0, 32.0),
+            self.app_info.icon_color,
+            8.0,
+        ));
+        commands.push(RenderCommand::draw_text(
+            Vec2::new(self.rect.x + 52.0, self.rect.y + 13.0),
+            self.app_info.name,
+            Color::WHITE,
+            16.0,
+        ));
+        commands.push(RenderCommand::draw_text(
+            Vec2::new(self.rect.x + 52.0, self.rect.y + 29.0),
+            self.app_info.description,
+            palette.text_muted,
+            12.0,
+        ));
         commands
     }
 }
 
-/// Application launcher
+/// Application launcher.
 pub struct AppLauncher {
-    /// Is launcher visible
     is_open: bool,
-    /// Launcher rectangle
     rect: Rect,
-    /// Launcher items
     items: Vec<LauncherItem>,
-    /// Selected item index
     selected_index: Option<usize>,
+    theme: ThemePalette,
 }
 
 impl AppLauncher {
-    /// Create a new application launcher
     pub fn new() -> Self {
         let mut launcher = Self {
             is_open: false,
-            rect: Rect::new(0.0, 0.0, 300.0, 400.0),
+            rect: Rect::new(16.0, 120.0, 320.0, 360.0),
             items: Vec::new(),
             selected_index: None,
+            theme: shell_palette(),
         };
-
         launcher.add_default_apps();
+        launcher.relayout_items();
         launcher
     }
 
-    /// Add default applications
-    fn add_default_apps(&mut self) {
-        let apps = [
-            AppInfo::new(
-                "Calculator",
-                "Simple calculator application",
-                Vec2::new(300.0, 400.0),
-                Vec2::new(100.0, 100.0),
-                Color::rgb(100, 200, 100),
-            ),
-            AppInfo::new(
-                "Text Editor",
-                "Edit text files",
-                Vec2::new(600.0, 400.0),
-                Vec2::new(150.0, 150.0),
-                Color::rgb(100, 100, 200),
-            ),
-            AppInfo::new(
-                "File Manager",
-                "Browse and manage files",
-                Vec2::new(500.0, 400.0),
-                Vec2::new(200.0, 100.0),
-                Color::rgb(200, 200, 100),
-            ),
-            AppInfo::new(
-                "Settings",
-                "System settings",
-                Vec2::new(400.0, 500.0),
-                Vec2::new(250.0, 150.0),
-                Color::rgb(200, 100, 200),
-            ),
-            AppInfo::new(
-                "Terminal",
-                "Command line interface",
-                Vec2::new(500.0, 300.0),
-                Vec2::new(300.0, 200.0),
-                Color::rgb(50, 50, 50),
-            ),
-        ];
-
-        let item_height = 48.0;
-        for (i, app) in apps.iter().enumerate() {
-            let item = LauncherItem::new(
-                app.clone(),
-                Rect::new(
-                    self.rect.x + 8.0,
-                    self.rect.y + 8.0 + i as f32 * (item_height + 4.0),
-                    self.rect.width - 16.0,
-                    item_height,
-                ),
-            );
-            self.items.push(item);
-        }
+    pub fn apps(&self) -> &[LauncherItem] {
+        &self.items
     }
 
-    /// Toggle launcher visibility
+    pub fn find_app(&self, name: &str) -> Option<AppInfo> {
+        self.items
+            .iter()
+            .find(|item| item.app_info.name == name)
+            .map(|item| item.app_info.clone())
+    }
+
+    pub fn add_app(&mut self, app_info: AppInfo) {
+        self.items.push(LauncherItem::new(app_info, Rect::ZERO));
+        self.relayout_items();
+    }
+
+    pub fn set_layout(&mut self, screen_size: Vec2, taskbar_rect: Rect) {
+        let width = 340.0;
+        let max_height = (screen_size.y - taskbar_rect.height - 48.0).max(220.0);
+        let desired_height = (self.items.len() as f32 * 56.0 + 20.0).min(max_height);
+        self.rect = Rect::new(16.0, screen_size.y - taskbar_rect.height - desired_height - 12.0, width, desired_height);
+        self.relayout_items();
+    }
+
+    pub fn apply_theme(&mut self, palette: ThemePalette) {
+        self.theme = palette;
+    }
+
     pub fn toggle(&mut self) {
         self.is_open = !self.is_open;
     }
 
-    /// Open launcher
     pub fn open(&mut self) {
         self.is_open = true;
     }
 
-    /// Close launcher
     pub fn close(&mut self) {
         self.is_open = false;
+        self.selected_index = None;
+        for item in &mut self.items {
+            item.is_hovered = false;
+        }
     }
 
-    /// Check if launcher is open
     pub fn is_open(&self) -> bool {
         self.is_open
     }
 
-    /// Get selected application
-    pub fn get_selected_app(&self) -> Option<&AppInfo> {
-        self.selected_index.map(|index| &self.items[index].app_info)
+    pub fn contains(&self, position: Vec2) -> bool {
+        self.is_open && self.rect.contains(position)
     }
 
-    /// Handle mouse move
     pub fn handle_mouse_move(&mut self, position: Vec2) {
         if !self.is_open {
             return;
         }
 
-        for (i, item) in self.items.iter_mut().enumerate() {
+        self.selected_index = None;
+        for (index, item) in self.items.iter_mut().enumerate() {
             item.is_hovered = item.rect.contains(position);
             if item.is_hovered {
-                self.selected_index = Some(i);
+                self.selected_index = Some(index);
             }
         }
     }
 
-    /// Handle click
-    pub fn handle_click(&mut self, position: Vec2) -> Option<&AppInfo> {
+    pub fn handle_click(&mut self, position: Vec2) -> Option<AppInfo> {
         if !self.is_open {
             return None;
         }
 
-        for item in &self.items {
-            if item.rect.contains(position) {
-                self.close();
-                return Some(&item.app_info);
-            }
+        let selected = self
+            .items
+            .iter()
+            .find(|item| item.rect.contains(position))
+            .map(|item| item.app_info.clone());
+        if selected.is_some() {
+            self.close();
         }
-
-        None
+        selected
     }
 
-    /// Generate render commands
     pub fn generate_render_commands(&self) -> Vec<RenderCommand> {
         let mut commands = Vec::new();
-
         if !self.is_open {
             return commands;
         }
 
-        // Draw launcher background
-        commands.push(RenderCommand::DrawRect {
-            rect: self.rect,
-            color: Color::rgb(40, 40, 40),
-        });
+        let palette = self.theme;
 
-        // Draw launcher border
-        let border_width = 2.0;
-        commands.push(RenderCommand::DrawRect {
-            rect: Rect::new(self.rect.x, self.rect.y, self.rect.width, border_width),
-            color: Color::rgb(100, 100, 100),
-        });
-        commands.push(RenderCommand::DrawRect {
-            rect: Rect::new(self.rect.x, self.rect.y + self.rect.height - border_width, self.rect.width, border_width),
-            color: Color::rgb(100, 100, 100),
-        });
-        commands.push(RenderCommand::DrawRect {
-            rect: Rect::new(self.rect.x, self.rect.y, border_width, self.rect.height),
-            color: Color::rgb(100, 100, 100),
-        });
-        commands.push(RenderCommand::DrawRect {
-            rect: Rect::new(self.rect.x + self.rect.width - border_width, self.rect.y, border_width, self.rect.height),
-            color: Color::rgb(100, 100, 100),
-        });
+        commands.push(RenderCommand::draw_rect_rounded(
+            self.rect,
+            palette.background,
+            16.0,
+        ));
+        commands.push(RenderCommand::draw_text(
+            Vec2::new(self.rect.x + 16.0, self.rect.y + 16.0),
+            "Applications",
+            Color::WHITE,
+            18.0,
+        ));
 
-        // Draw items
         for item in &self.items {
-            commands.extend(item.generate_render_commands());
+            commands.extend(item.generate_render_commands(palette));
         }
 
         commands
+    }
+
+    fn add_default_apps(&mut self) {
+        let apps = [
+            AppInfo::new(
+                "Calculator",
+                "Quick arithmetic workspace",
+                Vec2::new(300.0, 360.0),
+                Vec2::new(96.0, 96.0),
+                Color::rgb(88, 201, 126),
+            ),
+            AppInfo::new(
+                "Files",
+                "Browse project assets",
+                Vec2::new(480.0, 340.0),
+                Vec2::new(136.0, 120.0),
+                Color::rgb(255, 194, 77),
+            ),
+            AppInfo::new(
+                "Terminal",
+                "Low level system console",
+                Vec2::new(520.0, 300.0),
+                Vec2::new(180.0, 160.0),
+                Color::rgb(82, 88, 102),
+            ),
+            AppInfo::new(
+                "Settings",
+                "Shell and display preferences",
+                Vec2::new(420.0, 420.0),
+                Vec2::new(220.0, 110.0),
+                Color::rgb(180, 136, 255),
+            ),
+            AppInfo::new(
+                "Gallery",
+                "Recent screenshots and media",
+                Vec2::new(460.0, 320.0),
+                Vec2::new(260.0, 144.0),
+                Color::rgb(110, 187, 255),
+            ),
+        ];
+
+        for app in apps {
+            self.add_app(app);
+        }
+    }
+
+    fn relayout_items(&mut self) {
+        let item_height = 48.0;
+        let start_y = self.rect.y + 44.0;
+        for (index, item) in self.items.iter_mut().enumerate() {
+            item.rect = Rect::new(
+                self.rect.x + 10.0,
+                start_y + index as f32 * (item_height + 8.0),
+                self.rect.width - 20.0,
+                item_height,
+            );
+        }
     }
 }
 

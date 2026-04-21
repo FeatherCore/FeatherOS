@@ -17,7 +17,7 @@ extern crate alloc;
 
 use platform::framebuffer;
 use platform::input::{ButtonInput, KeyCode, MouseButton};
-use platform::WindowRunner;
+use platform::runner::PlatformInputPlugin;
 
 use fhre::{
     App,
@@ -870,11 +870,9 @@ pub extern "C" fn fhre_rust_main() -> i32 {
     app.add_systems(Update, fhre::declare_system!(apply_animations::<Cube>; Query<&fhre::animation::AnimationPlayer>, Query<&mut Cube>));
     app.add_systems(Update, fhre::declare_system!(apply_animations::<SoccerBall>; Query<&fhre::animation::AnimationPlayer>, Query<&mut SoccerBall>));
     
-    let input_adapter = framebuffer::InputAdapter::default();
+    let input_plugin = PlatformInputPlugin::new(framebuffer::InputAdapter);
     
-    WindowRunner::new(&mut app, &mut window, &input_adapter)
-        .with_frame_delay_ms(timing::FRAME_DELAY_MS)
-        .run();
+    app.run(&mut window, &input_plugin, timing::FRAME_DELAY_MS);
     
     0
 }

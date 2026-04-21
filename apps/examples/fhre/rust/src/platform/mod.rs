@@ -6,4 +6,4 @@ pub mod framebuffer;
 pub mod input;
 pub mod runner;
 
-pub use runner::{InputBridge, DefaultInputBridge, WindowRunner};
+pub use runner::{InputBridge, PlatformInputPlugin};

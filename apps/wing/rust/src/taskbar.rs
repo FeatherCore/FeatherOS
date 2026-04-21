@@ -1,118 +1,111 @@
-//! Taskbar Module
-//!
-//! Provides a taskbar with application launcher and window switcher.
+//! Taskbar and window switcher.
 
-use alloc::string::String;
 use alloc::vec::Vec;
-use fhre::math::{Color, Vec2, Rect};
-use fhre::render_world::RenderCommand;
-use crate::window::WindowId;
-use crate::launcher::AppInfo;
+use fhre::{Color, RenderCommand, Vec2};
+use fhre::math::Rect;
 
-/// Taskbar configuration
+use crate::theme::{ThemePalette, shell_palette};
+use crate::window::{Window, WindowId, WindowState};
+
+/// Taskbar configuration.
 pub struct TaskbarConfig {
-    /// Taskbar height
     pub height: f32,
-    /// Taskbar color
     pub background_color: Color,
-    /// Button color
     pub button_color: Color,
-    /// Button hover color
     pub button_hover_color: Color,
-    /// Position (true = bottom, false = top)
     pub position_bottom: bool,
 }
 
 impl Default for TaskbarConfig {
     fn default() -> Self {
+        let palette = shell_palette();
         Self {
-            height: 48.0,
-            background_color: Color::rgb(40, 40, 40),
-            button_color: Color::rgb(60, 60, 60),
-            button_hover_color: Color::rgb(80, 80, 80),
+            height: 52.0,
+            background_color: palette.background,
+            button_color: Color::rgb(44, 56, 80),
+            button_hover_color: palette.accent_hover,
             position_bottom: true,
         }
     }
 }
 
-/// Taskbar button
+impl TaskbarConfig {
+    pub fn apply_theme(&mut self, palette: ThemePalette) {
+        self.background_color = palette.background;
+        self.button_hover_color = palette.accent_hover;
+    }
+}
+
+/// Taskbar interaction result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskbarAction {
+    ToggleLauncher,
+    FocusWindow(WindowId),
+}
+
+/// Taskbar button.
 pub struct TaskbarButton {
-    /// Button text
-    pub text: String,
-    /// Button rectangle
+    pub text: &'static str,
     pub rect: Rect,
-    /// Associated window ID
     pub window_id: Option<WindowId>,
-    /// Is hovered
     pub is_hovered: bool,
-    /// Is active
     pub is_active: bool,
+    pub accent_color: Color,
 }
 
 impl TaskbarButton {
-    /// Create a new taskbar button
-    pub fn new(text: String, rect: Rect, window_id: Option<WindowId>) -> Self {
+    pub fn new(text: &'static str, rect: Rect, window_id: Option<WindowId>) -> Self {
         Self {
             text,
             rect,
             window_id,
             is_hovered: false,
             is_active: false,
+            accent_color: Color::rgb(88, 142, 255),
         }
     }
 
-    /// Generate render commands
     pub fn generate_render_commands(&self, config: &TaskbarConfig) -> Vec<RenderCommand> {
         let mut commands = Vec::new();
-
-        let color = if self.is_active {
-            Color::rgb(100, 150, 200)
+        let background = if self.is_active {
+            self.accent_color
         } else if self.is_hovered {
             config.button_hover_color
         } else {
             config.button_color
         };
 
-        commands.push(RenderCommand::DrawRect {
-            rect: self.rect,
-            color,
-        });
-
+        commands.push(RenderCommand::draw_rect_rounded(self.rect, background, 10.0));
+        commands.push(RenderCommand::draw_text(
+            Vec2::new(self.rect.x + 12.0, self.rect.y + self.rect.height * 0.55),
+            self.text,
+            Color::WHITE,
+            13.0,
+        ));
         commands
     }
 }
 
-/// Taskbar
+/// Taskbar.
 pub struct Taskbar {
-    /// Configuration
     config: TaskbarConfig,
-    /// Taskbar rectangle
     rect: Rect,
-    /// Start button
     start_button: TaskbarButton,
-    /// Window buttons
     window_buttons: Vec<TaskbarButton>,
-    /// Is launcher open
     launcher_open: bool,
 }
 
 impl Taskbar {
-    /// Create a new taskbar
     pub fn new(config: TaskbarConfig) -> Self {
         Self {
             config,
-            rect: Rect::new(0.0, 0.0, 0.0, 0.0),
-            start_button: TaskbarButton::new(
-                String::from("Start"),
-                Rect::new(0.0, 0.0, 80.0, 48.0),
-                None,
-            ),
+            rect: Rect::ZERO,
+            start_button: TaskbarButton::new("Start", Rect::ZERO, None),
             window_buttons: Vec::new(),
             launcher_open: false,
         }
     }
 
-    /// Initialize the taskbar
     pub fn init(&mut self, screen_size: Vec2) {
         let y = if self.config.position_bottom {
             screen_size.y - self.config.height
@@ -121,93 +114,97 @@ impl Taskbar {
         };
 
         self.rect = Rect::new(0.0, y, screen_size.x, self.config.height);
-        self.start_button.rect = Rect::new(8.0, y + 4.0, 80.0, self.config.height - 8.0);
+        self.start_button.rect = Rect::new(10.0, y + 8.0, 88.0, self.config.height - 16.0);
+        self.recalculate_button_positions();
     }
 
-    /// Update the taskbar
-    pub fn update(&mut self, _delta_time: f32) {
-        // Update animations, etc.
+    pub fn apply_theme(&mut self, palette: ThemePalette) {
+        self.config.apply_theme(palette);
+        self.start_button.accent_color = palette.accent;
     }
 
-    /// Add an application to the taskbar
-    pub fn add_app(&mut self, app_info: AppInfo, window_id: WindowId) {
-        let button_width = 120.0;
-        let button_x = self.start_button.rect.x + self.start_button.rect.width + 8.0 +
-            self.window_buttons.len() as f32 * (button_width + 4.0);
+    pub fn update(&mut self, _delta_time: f32) {}
 
-        let button = TaskbarButton::new(
-            String::from(app_info.name),
-            Rect::new(
-                button_x,
-                self.rect.y + 4.0,
-                button_width,
-                self.config.height - 8.0,
-            ),
-            Some(window_id),
-        );
-
-        self.window_buttons.push(button);
+    pub fn rect(&self) -> Rect {
+        self.rect
     }
 
-    /// Remove a window from the taskbar
-    pub fn remove_window(&mut self, window_id: WindowId) {
-        if let Some(index) = self.window_buttons.iter().position(|b| b.window_id == Some(window_id)) {
-            self.window_buttons.remove(index);
-            // Recalculate positions
-            self.recalculate_button_positions();
+    pub fn height(&self) -> f32 {
+        self.config.height
+    }
+
+    pub fn set_launcher_open(&mut self, open: bool) {
+        self.launcher_open = open;
+        self.start_button.is_active = open;
+    }
+
+    pub fn sync_windows(&mut self, windows: &[Window], active_window: Option<WindowId>) {
+        self.window_buttons.clear();
+        for window in windows {
+            if window.state == WindowState::Closed {
+                continue;
+            }
+
+            let mut button = TaskbarButton::new(window.title, Rect::ZERO, Some(window.id));
+            button.is_active = active_window == Some(window.id) && window.state != WindowState::Minimized;
+            button.accent_color = window.accent_color;
+            self.window_buttons.push(button);
         }
+        self.recalculate_button_positions();
     }
 
-    /// Recalculate button positions
-    fn recalculate_button_positions(&mut self) {
-        let button_width = 120.0;
-        for (i, button) in self.window_buttons.iter_mut().enumerate() {
-            button.rect.x = self.start_button.rect.x + self.start_button.rect.width + 8.0 +
-                i as f32 * (button_width + 4.0);
-        }
-    }
-
-    /// Check if point is inside taskbar
     pub fn contains(&self, point: Vec2) -> bool {
         self.rect.contains(point)
     }
 
-    /// Handle click
-    pub fn handle_click(&mut self, position: Vec2) {
-        // Check start button
-        if self.start_button.rect.contains(position) {
-            self.launcher_open = !self.launcher_open;
-            return;
-        }
-
-        // Check window buttons
+    pub fn handle_mouse_move(&mut self, position: Vec2) {
+        self.start_button.is_hovered = self.start_button.rect.contains(position);
         for button in &mut self.window_buttons {
-            if button.rect.contains(position) {
-                button.is_active = !button.is_active;
-                // TODO: Focus/minimize window
-                break;
-            }
+            button.is_hovered = button.rect.contains(position);
         }
     }
 
-    /// Generate render commands for the taskbar
+    pub fn handle_click(&mut self, position: Vec2) -> Option<TaskbarAction> {
+        if self.start_button.rect.contains(position) {
+            return Some(TaskbarAction::ToggleLauncher);
+        }
+
+        for button in &self.window_buttons {
+            if button.rect.contains(position) {
+                if let Some(window_id) = button.window_id {
+                    return Some(TaskbarAction::FocusWindow(window_id));
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn generate_render_commands(&self) -> Vec<RenderCommand> {
         let mut commands = Vec::new();
-
-        // Draw taskbar background
-        commands.push(RenderCommand::DrawRect {
-            rect: self.rect,
-            color: self.config.background_color,
-        });
-
-        // Draw start button
+        commands.push(RenderCommand::draw_rect(self.rect, self.config.background_color));
+        commands.push(RenderCommand::draw_line_thick(
+            Vec2::new(self.rect.x, self.rect.y),
+            Vec2::new(self.rect.right(), self.rect.y),
+            shell_palette().border,
+            1.0,
+        ));
         commands.extend(self.start_button.generate_render_commands(&self.config));
-
-        // Draw window buttons
         for button in &self.window_buttons {
             commands.extend(button.generate_render_commands(&self.config));
         }
-
         commands
+    }
+
+    fn recalculate_button_positions(&mut self) {
+        let button_width = 128.0;
+        for (index, button) in self.window_buttons.iter_mut().enumerate() {
+            button.rect = Rect::new(
+                self.start_button.rect.right() + 10.0 + index as f32 * (button_width + 6.0),
+                self.rect.y + 8.0,
+                button_width,
+                self.config.height - 16.0,
+            );
+        }
     }
 }

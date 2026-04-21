@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 [lib]
 name = "wing"
 path = "src/lib.rs"
+crate-type = ["staticlib", "rlib"]
 
 [profile.dev]
 panic = "abort"
@@ -20,7 +21,7 @@ codegen-units = 1
 opt-level = 'z'
 
 [dependencies]
-fhre = { path = "../../../../apps/fhre/rust", default-features = false }
+fhre = { path = "../../fhre/rust", default-features = false }
 libm = "0.2"
 
 [features]

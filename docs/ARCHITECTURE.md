@@ -4,7 +4,7 @@
 
 FHRE (Feather Hybrid Render Engine) 是一个轻量级的纯 3D 渲染引擎，设计用于嵌入式系统 (no_std)。采用 Bevy 风格的双世界 ECS 架构。
 
-**版本**: 2.8.2  
+**版本**: 2.8.3  
 **目标平台**: 嵌入式系统 (NuttX RTOS)  
 **代码规模**: ~19,000 行 (107 文件)  
 **依赖**: 0 外部 crate (仅 `alloc`)
@@ -200,7 +200,7 @@ app.insert_resource(screen);
 │  - KeyboardEvent { keycode, pressed }                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
-                                    │ WindowRunner::bridge_*()
+                                    │ InputPlugin::bridge() (FHRE 提供)
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         ECS Resources (FHRE Core)                            │
@@ -256,7 +256,7 @@ impl Window for MyWindow {
     }
 }
 
-// 平台层实现 InputBridge
+// 平台层实现 InputBridge (映射平台按键码)
 impl InputBridge for MyInputBridge {
     fn map_mouse_button(&self, button: u32) -> Option<MouseButton> {
         match button {
@@ -265,6 +265,10 @@ impl InputBridge for MyInputBridge {
         }
     }
 }
+
+// 使用 PlatformInputPlugin 组合 InputBridge
+let input_plugin = PlatformInputPlugin::new(MyInputBridge);
+app.run(&mut window, &input_plugin, 16);
 ```
 
 ---
@@ -481,7 +485,9 @@ fn fhre_rust_main() -> i32 {
         .add_extractor(extract::queue_meshes)
         .add_extractor(extract::queue_ui);
     
-    WindowRunner::new(&mut app, &mut window, &input_adapter).run();
+    // 使用 App::run() 自动化主循环
+    let input_plugin = PlatformInputPlugin::new(framebuffer::InputAdapter);
+    app.run(&mut window, &input_plugin, 16);
 }
 ```
 
@@ -521,6 +527,641 @@ commands.spawn()
 | **呈现窗口** | 外部传入 (平台层实现) | 内置 (winit) | 输出/输入与引擎解耦 |
 | **事件循环** | 无 (裸机循环) | 有 (winit event loop) | 嵌入式通常没有 OS 事件系统 |
 | **资产加载** | 同步 (Flash/ROM) | 异步 (文件系统) | 嵌入式无文件系统 |
+| **反射系统** | 无 | 有 (bevy_reflect) | 无 derive 宏，需手动实现 trait |
+| **多线程** | 无 | 有 (bevy_tasks) | 单线程简化设计 |
+
+### 必须手动实现的设计
+
+基于 FHRE 与 Bevy 的核心差异，以下功能**必须由应用层手动实现**：
+
+---
+
+#### 1. Window Trait 实现（平台相关）
+
+**原因**: 输出目标和输入设备由硬件平台决定，嵌入式系统没有统一的窗口系统。
+
+**Bevy 自动化方式**:
+```rust
+// bevy/crates/bevy_winit/src/lib.rs
+impl Plugin for WinitPlugin {
+    fn build(&self, app: &mut App) {
+        // 自动创建 winit EventLoop
+        let event_loop = EventLoop::<WinitUserEvent>::with_user_event().build();
+        
+        // 设置 runner，自动管理窗口生命周期
+        app.set_runner(|app| winit_runner(app, event_loop));
+    }
+}
+
+// bevy_winit 自动处理:
+// - X11/Wayland/Windows/macOS 窗口创建
+// - 事件循环管理
+// - 输入事件收集
+// - 帧缓冲呈现
+```
+
+**FHRE 手动实现**:
+```rust
+// apps/examples/fhre/rust/src/platform/framebuffer.rs
+pub struct Window {
+    fb_fd: c_int,      // /dev/fb0 (平台相关)
+    input_fd: c_int,   // /dev/input0 (平台相关)
+    kbd_fd: c_int,     // /dev/kbd (平台相关)
+    fb_ptr: *mut u32,  // framebuffer 内存映射
+}
+
+impl WindowTrait for Window {
+    fn collect_input_events(&mut self) -> WindowInputEvents {
+        // 必须手动: 从平台设备读取
+        unsafe {
+            read(self.input_fd, &mut sample, size);  // 触摸事件
+            read(self.kbd_fd, &mut kbd_event, size); // 键盘事件
+        }
+    }
+    
+    fn present(&mut self, framebuffer: &[u32]) {
+        // 必须手动: 输出到平台设备
+        unsafe {
+            core::ptr::copy_nonoverlapping(framebuffer.as_ptr(), self.fb_ptr, size);
+        }
+    }
+}
+```
+
+**不同平台的实现差异**:
+| 平台 | Framebuffer | 输入设备 | 代码修改点 |
+|------|------------|---------|-----------|
+| NuttX SIM | `/dev/fb0` (X11) | `/dev/input0` (X11 mouse) | 设备路径、IOCTL 常量 |
+| 裸机 STM32 | LCD 寄存器 | GPIO 触摸屏 | 完全重写 Window 实现 |
+| ESP32 | SPI LCD | I2C 触摸屏 | 完全重写 Window 实现 |
+| Linux 帧缓冲 | `/dev/fb0` | `/dev/input/event0` | 设备路径 |
+
+---
+
+#### 2. InputBridge 实现（平台相关）
+
+**原因**: 不同平台的按键码、鼠标按钮编码不同，需要应用层映射。
+
+**Bevy 自动化方式**:
+```rust
+// bevy_winit 自动转换 winit 按键码
+use winit::event::VirtualKeyCode;
+
+// winit 提供跨平台按键码，Bevy 自动映射
+// 无需应用层干预
+```
+
+**FHRE 手动实现**:
+```rust
+// apps/examples/fhre/rust/src/platform/framebuffer.rs
+pub struct InputAdapter;
+
+impl InputBridge for InputAdapter {
+    fn map_keycode(&self, code: u32) -> Option<KeyCode> {
+        // 必须手动: X11 按键码映射
+        match code {
+            0x0020 => Some(KeyCode::Space),      // X11 Space
+            0x0072 => Some(KeyCode::KeyR),       // X11 R
+            0xff1b => Some(KeyCode::Escape),     // X11 Escape
+            _ => None,
+        }
+    }
+    
+    fn map_mouse_button(&self, btn: u32) -> Option<MouseButton> {
+        // 必须手动: 鼠标按钮映射
+        match btn {
+            1 => Some(MouseButton::Left),
+            2 => Some(MouseButton::Middle),
+            3 => Some(MouseButton::Right),
+            _ => None,
+        }
+    }
+}
+```
+
+**不同平台的映射差异**:
+| 平台 | 按键码来源 | 映射方式 |
+|------|-----------|---------|
+| NuttX SIM | X11 keycode | switch-case 映射 |
+| 裸机 | GPIO 扫描码 | 硬件相关查表 |
+| ESP32 | I2C 触摸值 | 直接映射或查表 |
+
+---
+
+#### 3. 提取器 (Extractors) 实现（应用相关）
+
+**原因**: 提取器需要知道具体的组件类型，无法泛化。
+
+**Bevy 自动化方式**:
+```rust
+// bevy_render 提供泛型提取器 + derive 宏
+#[derive(Component, ExtractComponent)]
+struct Position(Vec3);
+
+// 自动生成提取代码
+impl ExtractComponent for Position {
+    fn extract(&self) -> Self { self.clone() }
+}
+```
+
+**FHRE 手动实现**:
+```rust
+// apps/examples/fhre/rust/src/extract.rs
+pub fn extract_3d_components(main_world: &MainWorld, render_world: &mut RenderWorld) {
+    // 必须手动: 查询具体组件类型
+    let cube_query = main_world.query::<(Entity, &Transform, &Cube)>();
+    let soccer_query = main_world.query::<(Entity, &Transform, &SoccerBall)>();
+    
+    // 必须手动: 转换为渲染数据
+    for (entity, transform, cube) in cube_query.iter() {
+        let render_entity = render_world.get_or_spawn_synced(entity);
+        let mesh = ExtractedMesh {
+            vertices: cube.get_vertices().to_vec(),
+            faces: cube.get_faces().iter().map(|f| f.to_vec()).collect(),
+            // ...
+        };
+        render_world.insert_component(render_entity, mesh);
+    }
+}
+```
+
+**为什么不能自动化**:
+1. FHRE 没有反射系统，无法在运行时获取组件类型信息
+2. 提取逻辑需要知道组件的具体字段
+3. 渲染数据格式由应用决定
+
+---
+
+#### 4. 组件定义（应用相关）
+
+**原因**: 游戏对象由应用定义，引擎无法预知。
+
+**Bevy 自动化方式**:
+```rust
+// derive 宏自动实现 Component trait
+#[derive(Component)]
+struct Position(Vec3);
+
+#[derive(Component)]
+struct Velocity(Vec3);
+
+// 自动实现:
+// - Component trait
+// - Reflect (可选)
+// - 注册到类型注册表
+```
+
+**FHRE 手动实现**:
+```rust
+// apps/examples/fhre/rust/src/components/cube.rs
+pub struct Cube {
+    pub size: f32,
+    pub face_colors: [Color; 6],
+    pub face_textures: [Option<Handle<Image>>; 6],
+    pub rotation: Vec3,
+}
+
+// 必须手动实现 Component trait
+impl Component for Cube {
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+    fn clone_boxed(&self) -> Box<dyn Component> { Box::new(self.clone()) }
+}
+
+// 必须手动实现 AnimationReceiver (如果需要动画)
+impl AnimationReceiver for Cube {
+    fn receive_animation(&mut self, property: AnimationProperty, value: f32) {
+        match property {
+            AnimationProperty::RotationX => self.rotation.x = value,
+            AnimationProperty::RotationY => self.rotation.y = value,
+            // ...
+        }
+    }
+}
+```
+
+---
+
+#### 5. 游戏逻辑系统（应用相关）
+
+**原因**: 行为由应用定义，引擎无法预知。
+
+**Bevy 自动化方式**:
+```rust
+// 系统参数自动注入
+fn move_system(
+    mut query: Query<(&mut Position, &Velocity)>,
+    time: Res<Time>,
+) {
+    for (mut pos, vel) in query.iter_mut() {
+        pos.0 += vel.0 * time.delta_seconds();
+    }
+}
+
+// 自动注册
+app.add_systems(Update, move_system);
+```
+
+**FHRE 手动实现**:
+```rust
+// apps/examples/fhre/rust/src/lib.rs
+fn input_system(
+    key_input: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<DemoState>,
+    mut button_query: Query<&mut Button>,
+) {
+    // 必须手动: 游戏逻辑
+    for (_, button) in button_query.iter_mut() {
+        if button.clicked {
+            match button.text.as_str() {
+                "Prev" => state.current_model = (state.current_model + 1) % 2,
+                "Next" => state.current_model = (state.current_model + 1) % 2,
+                _ => {}
+            }
+        }
+    }
+}
+
+// 必须手动: 声明系统参数
+app.add_systems(PreUpdate, declare_system!(input_system; 
+    key_input: Res<ButtonInput<KeyCode>>,
+    state: ResMut<DemoState>,
+    button_query: Query<&mut Button>,
+));
+```
+
+---
+
+#### 6. 资产加载（平台相关）
+
+**原因**: 存储介质由平台决定。
+
+**Bevy 自动化方式**:
+```rust
+// bevy_asset 提供异步资产服务器
+let handle: Handle<Image> = asset_server.load("textures/player.png");
+
+// 自动:
+// - 异步加载
+// - 热重载
+// - 依赖追踪
+```
+
+**FHRE 手动实现**:
+```rust
+// apps/examples/fhre/rust/src/lib.rs
+fn setup_textures(mut images: ResMut<Assets<Image>>, mut events: ResMut<Events>) {
+    // 必须手动: 从代码内嵌数据创建纹理
+    let texture_data = include_bytes!("texture.raw");
+    let image = Image::from_raw(texture_data, width, height);
+    let handle = images.add_with_event(image, &mut events);
+}
+```
+
+**不同平台的资产来源**:
+| 平台 | 资产来源 | 加载方式 |
+|------|---------|---------|
+| NuttX SIM | 编译时内嵌 | `include_bytes!` |
+| 裸机 | Flash ROM | 链接脚本 + 指针读取 |
+| ESP32 | SPIFFS/LittleFS | 文件系统 API |
+
+---
+
+### 可以自动化的设计（平台无关）
+
+以下功能 FHRE 已在核心库自动化，应用层无需实现：
+
+#### 1. 时间系统
+```rust
+// apps/fhre/rust/src/app/app.rs
+pub fn update_and_render(&mut self) {
+    // 自动更新时间
+    if let Some(time) = self.main_world.resources_mut().get_mut::<Time>() {
+        time.update(DEFAULT_FRAME_TIME);
+    }
+}
+```
+
+#### 2. 实体同步
+```rust
+// apps/fhre/rust/src/sync/sync_system.rs
+pub fn entity_sync_system(main_world: &MainWorld, render_world: &mut RenderWorld) {
+    // 自动同步 MainWorld → RenderWorld
+}
+```
+
+#### 3. 输入事件分发
+```rust
+// apps/fhre/rust/src/window/mod.rs
+pub trait InputPlugin: Plugin {
+    fn bridge(&self, app: &mut App, events: &WindowInputEvents);
+}
+
+// 应用层只需实现 InputBridge 映射，分发逻辑已自动化
+```
+
+#### 4. Picking 系统
+```rust
+// apps/fhre/rust/src/picking/system.rs
+pub fn picking_system(
+    mouse_pos: Res<MousePosition>,
+    mouse_input: Res<ButtonInput<MouseButton>>,
+    // ...
+) {
+    // 自动检测碰撞、更新 HoverMap、生成事件
+}
+```
+
+#### 5. 动画系统
+```rust
+// apps/fhre/rust/src/animation/mod.rs
+pub fn apply_animations<T: AnimationReceiver>(
+    player_query: Query<&AnimationPlayer>,
+    mut target_query: Query<&mut T>,
+) {
+    // 自动应用动画到组件
+}
+```
+
+#### 6. 主循环
+```rust
+// apps/fhre/rust/src/app/app.rs
+pub fn run<W: Window, I: InputPlugin>(&mut self, window: &mut W, input_plugin: &I, ...) {
+    loop {
+        let events = window.collect_input_events();
+        input_plugin.bridge(self, &events);
+        self.update_and_render();
+        window.present(self.framebuffer());
+    }
+}
+```
+
+---
+
+### 架构对比：App 结构
+
+**Bevy App 结构** (复杂):
+```rust
+// bevy/crates/bevy_app/src/app.rs
+pub struct App {
+    pub(crate) sub_apps: SubApps,  // 支持多个 SubApp
+    pub(crate) runner: RunnerFn,   // 可替换的 runner
+}
+
+// SubApps 包含 MainWorld + 自定义 SubApp (如 RenderApp)
+pub struct SubApps {
+    pub main: SubApp,
+    pub sub_apps: HashMap<InternedAppLabel, SubApp>,
+}
+
+// Bevy 的 run() 使用 runner 模式
+pub fn run(&mut self) -> AppExit {
+    let runner = core::mem::replace(&mut self.runner, Box::new(run_once));
+    (runner)(app)  // runner 负责事件循环
+}
+
+// WinitPlugin 设置 runner
+impl Plugin for WinitPlugin {
+    fn build(&self, app: &mut App) {
+        app.set_runner(|app| winit_runner(app, event_loop));
+    }
+}
+```
+
+**FHRE App 结构** (简化):
+```rust
+// apps/fhre/rust/src/app/app.rs
+pub struct App {
+    pub main_world: MainWorld,
+    pub render_world: RenderWorld,
+    plugins: Vec<Box<dyn Plugin>>,
+    extractors: Extractors,
+}
+
+// FHRE 的 run() 直接内嵌主循环
+pub fn run<W: Window, I: InputPlugin>(
+    &mut self,
+    window: &mut W,        // 外部传入
+    input_plugin: &I,      // 外部传入
+    frame_delay_ms: u32,
+) {
+    loop {
+        let events = window.collect_input_events();
+        if !window.is_running() { break; }
+        
+        input_plugin.bridge(self, &events);
+        self.update_and_render();
+        window.present(self.framebuffer());
+        usleep(frame_delay_ms * 1000);
+    }
+}
+```
+
+**关键差异**:
+| 特性 | Bevy | FHRE |
+|------|------|------|
+| SubApp 支持 | ✅ 多个 SubApp | ❌ 仅 MainWorld + RenderWorld |
+| Runner 模式 | ✅ 可替换 | ❌ 固定循环 |
+| 窗口管理 | 内置 winit | 外部传入 Window trait |
+| 事件循环 | winit EventLoop | 裸机 while loop |
+
+### 架构对比：窗口系统
+
+**Bevy Window** (完整窗口管理):
+```rust
+// bevy/crates/bevy_window/src/window.rs
+#[derive(Component)]
+pub struct Window {
+    pub present_mode: PresentMode,
+    pub mode: WindowMode,
+    pub position: WindowPosition,
+    pub resolution: WindowResolution,
+    pub title: String,
+    pub resizable: bool,
+    pub decorations: bool,
+    pub transparent: bool,
+    pub focused: bool,
+    // ... 30+ 字段
+}
+
+// bevy_winit 负责创建和管理窗口
+impl Plugin for WinitPlugin {
+    fn build(&self, app: &mut App) {
+        let event_loop = EventLoop::<WinitUserEvent>::with_user_event().build();
+        app.set_runner(|app| winit_runner(app, event_loop));
+    }
+}
+```
+
+**FHRE Window** (trait 抽象):
+```rust
+// apps/fhre/rust/src/window/mod.rs
+pub trait Window {
+    fn is_running(&self) -> bool;
+    fn collect_input_events(&mut self) -> WindowInputEvents;
+    fn present(&mut self, framebuffer: &[u32]);
+    fn dimensions(&self) -> (u32, u32);
+}
+
+// 应用层实现 (平台相关)
+// apps/examples/fhre/rust/src/platform/framebuffer.rs
+pub struct Window {
+    width: u32,
+    height: u32,
+    fb_fd: c_int,      // /dev/fb0
+    fb_ptr: *mut u32,  // framebuffer 内存
+    input_fd: c_int,   // /dev/input0
+    kbd_fd: c_int,     // /dev/kbd
+}
+
+impl WindowTrait for Window {
+    fn collect_input_events(&mut self) -> WindowInputEvents {
+        // 从 /dev/input0 读取触摸事件
+        // 从 /dev/kbd 读取键盘事件
+    }
+    
+    fn present(&mut self, framebuffer: &[u32]) {
+        // 复制到 framebuffer
+        core::ptr::copy_nonoverlapping(framebuffer.as_ptr(), self.fb_ptr, size);
+    }
+}
+```
+
+**设计决策**:
+- **Bevy**: 窗口是引擎核心功能，由 `bevy_winit` 自动管理
+- **FHRE**: 窗口是平台相关，由应用层实现 `Window` trait
+
+### 架构对比：输入系统
+
+**Bevy 输入系统** (事件驱动):
+```rust
+// bevy_winit 通过事件循环接收输入
+fn winit_runner(app: App, event_loop: EventLoop) -> AppExit {
+    event_loop.run(move |event, _, control_flow| {
+        match event {
+            Event::WindowEvent { event, .. } => {
+                match event {
+                    WindowEvent::MouseInput { button, state, .. } => {
+                        // 发送到 ECS Events
+                    }
+                    WindowEvent::KeyboardInput { input, .. } => {
+                        // 发送到 ECS Events
+                    }
+                }
+            }
+        }
+    });
+}
+
+// bevy_input 提供 ButtonInput<T> 资源
+app.insert_resource(ButtonInput::<KeyCode>::default());
+app.insert_resource(ButtonInput::<MouseButton>::default());
+```
+
+**FHRE 输入系统** (轮询 + 桥接):
+```rust
+// FHRE 核心: InputPlugin trait
+pub trait InputPlugin: Plugin {
+    fn bridge(&self, app: &mut App, events: &WindowInputEvents);
+}
+
+// 应用层: InputBridge 映射平台按键码
+pub trait InputBridge {
+    fn map_keycode(&self, platform_keycode: u32) -> Option<KeyCode>;
+    fn map_mouse_button(&self, platform_button: u32) -> Option<MouseButton>;
+}
+
+// 应用层: PlatformInputPlugin 实现
+impl<B: InputBridge> InputPlugin for PlatformInputPlugin<B> {
+    fn bridge(&self, app: &mut App, events: &WindowInputEvents) {
+        // 1. 映射键盘事件 → ButtonInput<KeyCode>
+        for event in &events.keyboard_events {
+            if let Some(kc) = self.bridge.map_keycode(event.keycode) {
+                if event.pressed { key_input.press(kc); }
+                else { key_input.release(kc); }
+            }
+        }
+        // 2. 映射鼠标事件 → ButtonInput<MouseButton>
+        // 3. 更新 MousePosition
+    }
+}
+
+// 使用
+let input_plugin = PlatformInputPlugin::new(InputAdapter);
+app.run(&mut window, &input_plugin, 16);
+```
+
+**设计决策**:
+| 层次 | Bevy | FHRE |
+|------|------|------|
+| 事件来源 | winit EventLoop | Window::collect_input_events() |
+| 事件分发 | 自动 (winit → ECS Events) | 手动 (InputPlugin::bridge) |
+| 按键映射 | winit 内置 | 应用层 InputBridge |
+| 坐标系统 | 自动转换 | 直接使用屏幕坐标 |
+
+### 架构对比：渲染系统
+
+**Bevy 渲染** (GPU + SubApp):
+```rust
+// bevy_render 作为 SubApp
+let render_app = SubApp::new();
+app.insert_sub_app(RenderApp, render_app);
+
+// 渲染阶段
+pub enum RenderSystems {
+    ExtractCommands,    // 提取
+    PrepareAssets,      // 准备资源
+    Queue,              // 队列
+    PhaseSort,          // 排序
+    Render,             // 渲染
+    Cleanup,            // 清理
+}
+
+// GPU 渲染
+render_pass.set_pipeline(pipeline);
+render_pass.draw_indexed(indices);
+```
+
+**FHRE 渲染** (CPU 软件):
+```rust
+// apps/fhre/rust/src/render_world/world.rs
+pub struct RenderWorld {
+    framebuffer: Vec<u32>,  // CPU 帧缓冲
+    commands: Vec<RenderCommand>,
+}
+
+pub enum RenderCommand {
+    Clear { color: Color },
+    DrawRect { rect: Rect, color: Color },
+    DrawPolygon { vertices: Vec<Vec2>, color: Color },
+    DrawPolygonTextured { vertices, uvs, texture_id, color },
+}
+
+// CPU 软件渲染
+impl SoftwareBackend {
+    pub fn fill_polygon(&mut self, vertices: &[Vec2], color: Color) {
+        // 扫描线填充算法
+    }
+}
+```
+
+**设计决策**:
+- **Bevy**: GPU 渲染，需要 wgpu，支持多后端
+- **FHRE**: CPU 软件渲染，无 GPU 依赖，适合嵌入式
+
+### 设计决策总结
+
+| 功能 | Bevy | FHRE | 原因 |
+|------|------|------|------|
+| 窗口创建 | 自动 (winit) | 手动 (Window trait) | 嵌入式无统一窗口系统 |
+| 事件循环 | 自动 (EventLoop) | 手动 (while loop) | 嵌入式无 OS 事件系统 |
+| 按键映射 | 自动 (winit) | 手动 (InputBridge) | 不同平台按键码不同 |
+| 提取器 | 泛型 (derive) | 手动 | 无反射系统 |
+| 组件定义 | derive | 手动 | 无反射系统 |
+| 时间系统 | 自动 | 自动 | 平台无关 |
+| 实体同步 | 自动 | 自动 | 平台无关 |
+| Picking | 自动 | 自动 | 平台无关 |
+| 动画 | 自动 | 自动 | 平台无关 |
 
 ### 呈现窗口架构
 
@@ -623,13 +1264,14 @@ FHRE 的核心设计原则：**渲染引擎不关心输出目标和输入来源*
 
 #### 应该移入 FHRE 库 (平台无关)
 
-| 功能 | 当前状态 | 应该自动化 | 实现位置 |
-|------|----------|-----------|----------|
-| **时间系统** | 手动 `time.update()` | `TimePlugin` 在 `First` 阶段自动更新 | `app/app.rs` |
-| **实体同步** | 手动调用 `entity_sync_system()` | Observer 模式自动响应变化 | `sync/sync_system.rs` |
-| **提取调度** | 手动调用 `extractors.run()` | `ExtractSchedule` 自动运行 | `app/app.rs` |
-| **事件更新** | 手动 `events.update()` | 自动在 `PostUpdate` 后清理 | `event/mod.rs` |
-| **输入事件分发** | 手动 `bridge_*()` | `InputPlugin` 自动分发到 ECS Resources | 新增 `input/plugin.rs` |
+| 功能 | 当前状态 | 实现位置 |
+|------|----------|----------|
+| **时间系统** | ✅ 已自动化 | `App::update_and_render()` |
+| **实体同步** | ✅ 已自动化 | `entity_sync_system()` |
+| **提取调度** | ✅ 已自动化 | `App::update_and_render()` |
+| **事件更新** | ✅ 已自动化 | `App::run()` |
+| **输入事件分发** | ✅ 已自动化 | `InputPlugin` trait + `PlatformInputPlugin` |
+| **主循环** | ✅ 已自动化 | `App::run()` |
 
 #### 可选改进 (中优先级)
 
@@ -656,9 +1298,9 @@ FHRE 的核心设计原则：**渲染引擎不关心输出目标和输入来源*
                     │ WindowInputEvents
                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    FHRE 库 (可自动化)                                    │
+│                    FHRE 库 (已自动化)                                    │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  InputPlugin (建议添加)                                          │   │
+│  │  InputPlugin (v2.8.3 已实现)                                     │   │
 │  │  - InputBridge::map_mouse_button() → MouseButton                │   │
 │  │  - InputBridge::map_keycode() → KeyCode                         │   │
 │  │  - 自动分发到 ButtonInput<MouseButton>, ButtonInput<KeyCode>    │   │
@@ -680,56 +1322,32 @@ FHRE 的核心设计原则：**渲染引擎不关心输出目标和输入来源*
 
 ### 核心循环改进
 
-**当前应用层代码** (`App::update_and_render`):
+**v2.8.3 已实现 `App::run()`**:
 ```rust
-pub fn update_and_render(&mut self) {
-    // 1. 手动更新时间 ← 应该自动化
-    if let Some(time) = self.main_world.resources_mut().get_mut::<Time>() {
-        time.update(DEFAULT_FRAME_TIME);
-    }
-    
-    // 2. 手动运行调度 ← 应该自动化
-    self.main_world.run_systems();
-    
-    // 3. 手动更新事件 ← 应该自动化
-    if let Some(events) = self.main_world.resources_mut().get_mut::<Events>() {
-        events.update();
-    }
-    
-    // 4. 手动同步实体 ← 应该自动化
-    entity_sync_system(&mut self.main_world, &mut self.render_world);
-    
-    // 5. 手动提取 ← 应该自动化
-    self.extractors.run(&self.main_world, &mut self.render_world);
-    
-    // 6. 手动渲染 ← 应该自动化
-    self.render_world.execute_render();
-}
-```
-
-**目标 FHRE 库自动化**:
-```rust
-// FHRE 库内部:
+// FHRE 库提供:
 impl App {
-    pub fn update_and_render(&mut self) {
-        // 1. TimePlugin 自动更新时间 (First 阶段)
-        // 2. MainScheduleOrder 自动运行调度
-        // 3. Observer 自动同步实体
-        // 4. ExtractSchedule 自动提取
-        // 5. RenderSystems 自动渲染
-        // 6. Events 自动清理 (Last 阶段)
+    pub fn run<W: Window, I: InputPlugin>(
+        &mut self,
+        window: &mut W,
+        input_plugin: &I,
+        frame_delay_ms: u32,
+    ) {
+        loop {
+            let events = window.collect_input_events();  // 平台层采集
+            if !window.is_running() { break; }
+            
+            input_plugin.bridge(self, &events);          // FHRE 分发
+            self.update_and_render();                     // FHRE 核心循环
+            window.present(self.framebuffer());           // 平台层输出
+            events.update();                              // 清理事件
+            usleep(frame_delay_ms * 1000);                // 帧延迟
+        }
     }
 }
 
 // 应用层只需:
-pub fn run(mut app: App, mut window: impl Window) {
-    while window.is_running() {
-        let events = window.collect_input_events();  // 平台层采集 (必须手动)
-        app.bridge_input_events(events);             // FHRE 分发 (建议自动化)
-        app.update_and_render();                     // FHRE 核心循环 (应该自动化)
-        window.present(app.framebuffer());           // 平台层输出 (必须手动)
-    }
-}
+let input_plugin = PlatformInputPlugin::new(InputAdapter);
+app.run(&mut window, &input_plugin, 16);
 ```
 
 ### Bevy 自动化机制参考
@@ -751,55 +1369,133 @@ pub fn run(mut app: App, mut window: impl Window) {
 
 ### 必须手动 (平台相关或应用相关)
 
-| 类别 | 文件/函数 | 职责 | 原因 |
-|------|-----------|------|------|
-| **平台适配** | `framebuffer.rs` | 实现 `Window` trait | 输出目标由平台决定 |
-| **平台适配** | `runner.rs` | 主循环 + 输入桥接 | 事件循环由平台决定 |
-| **提取器** | `extract_3d_components()` | Cube/SoccerBall → ExtractedMesh | 需知道具体组件类型 |
-| **提取器** | `queue_meshes()` | ExtractedMesh → RenderCommand | 需知道渲染逻辑 |
-| **组件** | `Cube`, `Button` | 游戏对象定义 | 应用定义的游戏对象 |
-| **游戏逻辑** | `setup()`, `input_system()` | 场景创建、交互逻辑 | 应用定义的行为 |
+#### 平台适配层 (platform/)
 
-### 建议自动化 (平台无关)
+| 文件 | 职责 | 代码量 | 必须手动的原因 |
+|------|------|--------|----------------|
+| `framebuffer.rs` | Window trait 实现 | ~360 行 | 设备路径、IOCTL 调用是平台相关的 |
+| `runner.rs` | InputBridge + PlatformInputPlugin | ~120 行 | 按键码映射是平台相关的 |
+| `input/mod.rs` | KeyCode, MouseButton 定义 | ~100 行 | 输入类型由平台决定 |
 
-| 类别 | 当前状态 | 建议 |
-|------|----------|------|
-| **输入桥接** | 手动 `bridge_*()` | FHRE 提供 `InputPlugin` |
-| **核心循环** | 手动 `update_and_render()` | FHRE 自动化时间、调度、同步、提取、渲染 |
+**framebuffer.rs 关键实现**:
+```rust
+// 必须手动: 平台相关的设备路径
+const FB_PATH: &[u8] = b"/dev/fb0\0";
+const INPUT_PATH: &[u8] = b"/dev/input0\0";
+const KBD_PATH: &[u8] = b"/dev/kbd\0";
 
-### 责任边界
+// 必须手动: 平台相关的 IOCTL 常量
+const FBIOGET_VIDEOINFO: c_int = 0x2801;
+const FBIOGET_PLANEINFO: c_int = 0x2802;
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    应用层责任 (必须手动)                                 │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  平台适配: Window trait, Runner                                  │   │
-│  │  组件定义: Cube, Button, ...                                     │   │
-│  │  游戏逻辑: setup, input_system, ...                              │   │
-│  │  提取器: extract_3d_components, queue_meshes, ...                │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
-                    │
-                    │ 明确的接口
-                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    FHRE 库责任 (应该自动化)                              │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  核心循环: update_and_render (时间、调度、同步、提取、渲染)        │   │
-│  │  输入分发: InputPlugin (WindowInputEvents → ECS Resources)       │   │
-│  │  Picking: picking_system, pointer_events                         │   │
-│  │  动画: apply_animations                                          │   │
-│  │  资产: Assets, AssetEvent, GpuTexture                            │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
+// 必须手动: 平台相关的按键码映射
+impl InputBridge for InputAdapter {
+    fn map_keycode(&self, code: u32) -> Option<KeyCode> {
+        match code {
+            0x0020 => Some(KeyCode::Space),   // X11 Space
+            0xff1b => Some(KeyCode::Escape),  // X11 Escape
+            _ => None,
+        }
+    }
+}
 ```
 
-**推荐做法**:
-- 平台适配: 根据目标平台实现 `Window` trait
-- 提取器: 复制模板，修改组件类型
-- 组件: 实现 `AnimationReceiver` 映射属性
-- 游戏逻辑: 使用 FHRE 提供的核心函数组装
-- 输入桥接: 等待 FHRE 提供 `InputPlugin`，或手动实现
+#### 应用逻辑层 (components/, extract.rs, lib.rs)
+
+| 文件 | 职责 | 代码量 | 必须手动的原因 |
+|------|------|--------|----------------|
+| `components/cube.rs` | Cube 组件 + AnimationReceiver | ~200 行 | 游戏对象由应用定义 |
+| `components/soccer_ball.rs` | SoccerBall 组件 | ~250 行 | 游戏对象由应用定义 |
+| `components/button.rs` | Button 组件 | ~100 行 | UI 组件由应用定义 |
+| `extract.rs` | 提取器实现 | ~200 行 | 需知道具体组件类型 |
+| `lib.rs` | 系统注册、游戏逻辑 | ~900 行 | 行为由应用定义 |
+
+**extract.rs 关键实现**:
+```rust
+// 必须手动: 查询具体组件类型
+pub fn extract_3d_components(main_world: &MainWorld, render_world: &mut RenderWorld) {
+    let cube_query = main_world.query::<(Entity, &Transform, &Cube)>();
+    let soccer_query = main_world.query::<(Entity, &Transform, &SoccerBall)>();
+    
+    // 必须手动: 转换为渲染数据
+    for (entity, transform, cube) in cube_query.iter() {
+        render_world.insert_component(entity, ExtractedMesh::from_cube(cube, transform));
+    }
+}
+
+// 必须手动: 队列渲染命令
+pub fn queue_meshes(render_world: &mut RenderWorld) {
+    let meshes = render_world.query::<&ExtractedMesh>();
+    for mesh in meshes.iter() {
+        render_world.add_command(RenderCommand::DrawPolygon { ... });
+    }
+}
+```
+
+**lib.rs 关键实现**:
+```rust
+// 必须手动: 系统注册
+app.add_systems(Startup, declare_system!(setup_textures; ...))
+   .add_systems(Startup, declare_system!(setup; ...))
+   .add_systems(PreUpdate, declare_system!(picking_system; ...))
+   .add_systems(Update, declare_system!(input_system; ...));
+
+// 必须手动: 游戏逻辑
+fn input_system(key_input: Res<ButtonInput<KeyCode>>, mut state: ResMut<DemoState>) {
+    if key_input.just_pressed(KeyCode::Space) {
+        state.is_rotating = !state.is_rotating;
+    }
+}
+```
+
+### FHRE 库自动化 (平台无关)
+
+| 功能 | 实现位置 | 代码量 |
+|------|----------|--------|
+| 时间系统 | `App::update_and_render()` | ~10 行 |
+| 实体同步 | `sync/entity_sync_system()` | ~50 行 |
+| 提取调度 | `App::update_and_render()` | ~20 行 |
+| 输入分发 | `InputPlugin::bridge()` | ~60 行 |
+| Picking | `picking/system.rs` | ~150 行 |
+| 动画 | `animation/mod.rs` | ~100 行 |
+| 主循环 | `App::run()` | ~30 行 |
+
+### 代码量分布
+
+```
+示例应用总代码量: ~2,770 行
+
+平台适配层 (必须手动):
+├── framebuffer.rs    ~360 行 (13%)
+├── runner.rs         ~120 行 (4%)
+└── input/            ~100 行 (4%)
+                      ~580 行 (21%)
+
+应用逻辑层 (必须手动):
+├── components/       ~550 行 (20%)
+├── extract.rs        ~200 行 (7%)
+└── lib.rs            ~900 行 (32%)
+                      ~1650 行 (59%)
+
+FHRE 库自动化:
+├── 时间系统          ~10 行
+├── 实体同步          ~50 行
+├── 输入分发          ~60 行
+├── Picking          ~150 行
+├── 动画             ~100 行
+└── 主循环            ~30 行
+                      ~400 行 (14%)  ← 应用层无需编写
+```
+
+### 开发流程
+
+1. **复制模板**: 从 `apps/examples/fhre_template` 复制
+2. **修改平台适配**: 
+   - 修改 `framebuffer.rs` 中的设备路径和 IOCTL
+   - 修改 `runner.rs` 中的按键映射
+3. **定义组件**: 在 `components/` 中定义游戏对象
+4. **实现提取器**: 在 `extract.rs` 中提取渲染数据
+5. **编写游戏逻辑**: 在 `lib.rs` 中注册系统和编写逻辑
 
 ---
 
@@ -845,7 +1541,12 @@ let blend_lut: Box<[[u8; 256]]> = /* ... */;
 
 ## 版本历史
 
-### v2.8.2 (当前)
+### v2.8.3 (当前)
+- **InputPlugin trait**: FHRE 核心提供 `InputPlugin` trait，平台层实现 `PlatformInputPlugin`
+- **App::run()**: 自动化主循环，包含输入桥接、更新、渲染、呈现、帧延迟
+- **简化应用层代码**: `WindowRunner` → `app.run(&mut window, &input_plugin, frame_delay_ms)`
+
+### v2.8.2
 - **架构文档重构**: 明确 FHRE 与 Bevy 的核心差异 (no_std、零依赖、外部窗口)
 - **责任边界划分**: 区分平台相关 (应用层) vs 平台无关 (FHRE 库)
 - **输入系统分层**: 明确哪些可自动化 (InputPlugin) vs 必须手动 (Window trait)

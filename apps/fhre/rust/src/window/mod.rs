@@ -92,3 +92,17 @@ pub struct KeyboardEvent {
     pub keycode: u32,
     pub pressed: bool,
 }
+
+use crate::app::App;
+use crate::plugin::Plugin;
+
+/// Trait for input plugins that bridge raw events to ECS resources
+///
+/// Platform implementations should implement this trait to convert
+/// platform-specific input events to FHRE input resources.
+pub trait InputPlugin: Plugin {
+    /// Bridge raw window events to ECS resources
+    ///
+    /// Called each frame before `update_and_render()`.
+    fn bridge(&self, app: &mut App, events: &WindowInputEvents);
+}

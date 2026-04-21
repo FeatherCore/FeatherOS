@@ -188,6 +188,51 @@ impl App {
     pub fn render_world_mut(&mut self) -> &mut RenderWorld {
         &mut self.render_world
     }
+
+    /// Run the application with automatic main loop
+    ///
+    /// This method provides a fully automated main loop that:
+    /// 1. Collects input events from the window
+    /// 2. Bridges events to ECS resources via InputPlugin
+    /// 3. Runs update_and_render()
+    /// 4. Presents the framebuffer
+    /// 5. Updates event buffers
+    /// 6. Handles frame timing
+    pub fn run<W: crate::window::Window, I: crate::window::InputPlugin>(
+        &mut self,
+        window: &mut W,
+        input_plugin: &I,
+        frame_delay_ms: u32,
+    ) {
+        extern "C" {
+            fn usleep(usec: u32) -> i32;
+            fn sched_yield() -> i32;
+        }
+
+        loop {
+            unsafe { sched_yield(); }
+
+            let events = window.collect_input_events();
+
+            if !window.is_running() {
+                break;
+            }
+
+            input_plugin.bridge(self, &events);
+
+            self.update_and_render();
+
+            window.present(self.framebuffer());
+
+            if let Some(events) = self.main_world.resources_mut().get_mut::<crate::event::Events>() {
+                events.update();
+            }
+
+            unsafe {
+                usleep(frame_delay_ms * 1000);
+            }
+        }
+    }
 }
 
 /// Trait for converting types into systems that can be added to the app

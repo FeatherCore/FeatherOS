@@ -1,0 +1,7 @@
+############################################################################
+# apps/examples/wing/Make.defs
+############################################################################
+
+ifneq ($(CONFIG_EXAMPLES_WING_RUST),)
+CONFIGURED_APPS += $(APPDIR)/examples/wing/rust
+endif

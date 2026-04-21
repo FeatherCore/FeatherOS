@@ -1,10 +1,9 @@
-//! Input Bridge and Window Runner
+//! Input Plugin and Window Runner
 //!
 //! Bridges raw window events to ECS resources.
 //! This is platform-specific, not part of FHRE core.
 
-use fhre::{App, resources::Resource, Events};
-use fhre::window::{Window, WindowInputEvents, MousePosition};
+use fhre::{App, resources::Resource, Events, InputPlugin, WindowInputEvents, MousePosition, Plugin};
 use super::input::{ButtonInput, KeyCode, MouseButton};
 
 extern crate alloc;
@@ -38,81 +37,35 @@ impl InputBridge for DefaultInputBridge {
     }
 }
 
-/// Window runner with input bridging
-///
-/// Provides a standard main loop that:
-/// 1. Collects input events from the window
-/// 2. Bridges events to ButtonInput resources
-/// 3. Runs app.update_and_render()
-/// 4. Presents the framebuffer to the window
-pub struct WindowRunner<'a, W: Window, B: InputBridge> {
-    app: &'a mut App,
-    window: &'a mut W,
-    input_bridge: &'a B,
-    frame_delay_ms: u32,
+/// Input plugin that bridges raw events to ECS resources
+pub struct PlatformInputPlugin<B: InputBridge> {
+    bridge: B,
 }
 
-impl<'a, W: Window, B: InputBridge> WindowRunner<'a, W, B> {
-    pub fn new(app: &'a mut App, window: &'a mut W, input_bridge: &'a B) -> Self {
-        Self {
-            app,
-            window,
-            input_bridge,
-            frame_delay_ms: 16,
-        }
+impl<B: InputBridge> PlatformInputPlugin<B> {
+    pub fn new(bridge: B) -> Self {
+        Self { bridge }
     }
-    
-    pub fn with_frame_delay_ms(mut self, ms: u32) -> Self {
-        self.frame_delay_ms = ms;
-        self
+}
+
+impl<B: InputBridge + 'static> Plugin for PlatformInputPlugin<B> {
+    fn build(&self, _app: &mut App) {}
+}
+
+impl<B: InputBridge + 'static> InputPlugin for PlatformInputPlugin<B> {
+    fn bridge(&self, app: &mut App, events: &WindowInputEvents) {
+        self.bridge_keyboard_input(app, &events.keyboard_events);
+        self.bridge_mouse_input(app, &events.mouse_button_events);
+        self.bridge_mouse_position(app, &events.mouse_button_events, &events.mouse_motion_events);
     }
-    
-    pub fn run(&mut self) {
-        extern "C" {
-            fn usleep(usec: u32) -> i32;
-            fn sched_yield() -> i32;
-        }
-        
-        let mut frame_count: u32 = 0;
-        
-        loop {
-            frame_count += 1;
-            
-            unsafe { sched_yield(); }
-            
-            let events = self.window.collect_input_events();
-            
-            if !self.window.is_running() {
-                break;
-            }
-            
-            self.bridge_keyboard_input(&events.keyboard_events);
-            self.bridge_mouse_input(&events.mouse_button_events);
-            self.bridge_mouse_position(&events.mouse_button_events, &events.mouse_motion_events);
-            
-            self.app.update_and_render();
-            
-            self.window.present(self.app.framebuffer());
-            
-            if let Some(events) = self.app.main_world.resources_mut().get_mut::<Events>() {
-                events.update();
-            }
-            
-            unsafe {
-                usleep(self.frame_delay_ms * 1000);
-            }
-            
-            if false {  // TEMP: test
-                break;
-            }
-        }
-    }
-    
-    fn bridge_keyboard_input(&mut self, events: &[fhre::window::KeyboardEvent]) {
-        if let Some(key_input) = self.app.main_world.resources_mut().get_mut::<ButtonInput<KeyCode>>() {
+}
+
+impl<B: InputBridge> PlatformInputPlugin<B> {
+    fn bridge_keyboard_input(&self, app: &mut App, events: &[fhre::window::KeyboardEvent]) {
+        if let Some(key_input) = app.main_world.resources_mut().get_mut::<ButtonInput<KeyCode>>() {
             key_input.clear();
             for event in events {
-                if let Some(kc) = self.input_bridge.map_keycode(event.keycode) {
+                if let Some(kc) = self.bridge.map_keycode(event.keycode) {
                     if event.pressed {
                         key_input.press(kc);
                     } else {
@@ -123,11 +76,11 @@ impl<'a, W: Window, B: InputBridge> WindowRunner<'a, W, B> {
         }
     }
     
-    fn bridge_mouse_input(&mut self, events: &[fhre::window::MouseButtonEvent]) {
-        if let Some(mouse_input) = self.app.main_world.resources_mut().get_mut::<ButtonInput<MouseButton>>() {
+    fn bridge_mouse_input(&self, app: &mut App, events: &[fhre::window::MouseButtonEvent]) {
+        if let Some(mouse_input) = app.main_world.resources_mut().get_mut::<ButtonInput<MouseButton>>() {
             mouse_input.clear();
             for event in events {
-                if let Some(btn) = self.input_bridge.map_mouse_button(event.button) {
+                if let Some(btn) = self.bridge.map_mouse_button(event.button) {
                     if event.pressed {
                         if !mouse_input.pressed(btn) {
                             mouse_input.press(btn);
@@ -141,11 +94,12 @@ impl<'a, W: Window, B: InputBridge> WindowRunner<'a, W, B> {
     }
     
     fn bridge_mouse_position(
-        &mut self, 
+        &self, 
+        app: &mut App, 
         button_events: &[fhre::window::MouseButtonEvent], 
         motion_events: &[fhre::window::MouseMotionEvent]
     ) {
-        if let Some(mouse_pos) = self.app.main_world.resources_mut().get_mut::<MousePosition>() {
+        if let Some(mouse_pos) = app.main_world.resources_mut().get_mut::<MousePosition>() {
             for event in motion_events {
                 mouse_pos.x = event.x;
                 mouse_pos.y = event.y;
@@ -156,4 +110,9 @@ impl<'a, W: Window, B: InputBridge> WindowRunner<'a, W, B> {
             }
         }
     }
+}
+
+/// Create a platform input plugin with default mappings
+pub fn default_input_plugin() -> PlatformInputPlugin<DefaultInputBridge> {
+    PlatformInputPlugin::new(DefaultInputBridge)
 }

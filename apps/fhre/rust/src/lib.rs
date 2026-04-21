@@ -139,7 +139,7 @@ pub use animation::{AnimationClip, AnimationClipHandle, AnimationPlayer, Animati
 pub use math::{Color, Vec2, Vec3, Mat4};
 
 // Re-export window types (platform-agnostic trait and event types)
-pub use window::{Window, WindowInputEvents, MouseButtonEvent, MouseMotionEvent, MouseWheelEvent, KeyboardEvent, MousePosition};
+pub use window::{Window, WindowInputEvents, MouseButtonEvent, MouseMotionEvent, MouseWheelEvent, KeyboardEvent, MousePosition, InputPlugin};
 
 // Re-export picking types
 pub use picking::{
