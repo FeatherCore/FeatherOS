@@ -348,6 +348,7 @@ void sim_kbdevent(uint32_t key, bool is_press);
     defined(CONFIG_ARCH_BUTTONS) || defined(CONFING_SIM_KEYBOARD)
 void sim_x11events(void);
 void sim_buttonevent(int x, int y, int buttons);
+void sim_wheelevent(int x, int y, int direction);
 #endif
 
 /* sim_framebuffer.c sim_lcd.c **********************************************/

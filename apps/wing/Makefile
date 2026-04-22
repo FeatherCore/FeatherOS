@@ -1,5 +1,7 @@
 ############################################################################
-# apps/examples/wing/Make.defs
+# apps/wing/Makefile
 ############################################################################
 
-include $(wildcard $(APPDIR)/examples/wing/*/Make.defs)
+MENUDESC = "Wing Desktop Environment"
+
+include $(APPDIR)/Directory.mk

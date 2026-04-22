@@ -6,18 +6,29 @@
 
 extern crate alloc;
 
+pub mod components;
 pub mod desktop;
+pub mod extract;
 pub mod icon;
+pub mod input;
 pub mod launcher;
+pub mod plugin;
+pub mod resources;
+pub mod systems;
 pub mod taskbar;
 pub mod theme;
 pub mod widgets;
 pub mod wallpaper;
 pub mod window;
 
+pub use components::{ButtonWidget, DesktopIconComponent, DesktopRoot, DesktopWallpaper, IconGlyph, Label, LauncherEntry, LauncherPanel, ScrollAreaWidget, TaskbarItem, TaskbarRoot, TextFieldWidget, WidgetLayoutNode, WidgetNodeComponent, WindowChrome, WindowContentRoot, WindowFocus, WindowFrame};
 pub use desktop::{Desktop, DesktopConfig};
+pub use extract::queue_wing_shell;
 pub use icon::{DesktopIcon, IconGrid};
+pub use input::{ButtonInput, KeyCode, MouseButton, MouseWheel};
 pub use launcher::{AppInfo, AppLauncher};
+pub use plugin::WingDesktopPlugin;
+pub use resources::{DesktopMetrics, DragTransaction, FocusState, LauncherState, LayoutInvalidation, SelectionState, TaskbarState, TextInputState, ThemeState, WindowManagerState, WingDesktopState, WingRuntime};
 pub use taskbar::{Taskbar, TaskbarConfig};
 pub use theme::{ThemePalette, WingTheme, shell_palette};
 pub use widgets::{TextEditCommand, WidgetAction, WidgetEvent, WidgetEventKind, WidgetId, WidgetInteractionState, WidgetKind, WidgetLayout, WidgetNode, WidgetResponse, WidgetTreeNode};
@@ -196,8 +207,12 @@ impl Wing {
         self.window_manager.stop_dragging();
     }
 
-    pub fn handle_text_edit(&mut self, command: TextEditCommand) {
-        self.window_manager.handle_text_edit(command);
+    pub fn handle_text_edit(&mut self, command: TextEditCommand) -> bool {
+        self.window_manager.handle_text_edit(command)
+    }
+
+    pub fn handle_scroll(&mut self, position: Vec2, delta: i32) {
+        self.window_manager.handle_scroll(position, delta);
     }
 
     /// Handle dragging.

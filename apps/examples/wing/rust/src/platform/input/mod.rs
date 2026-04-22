@@ -1,11 +1,3 @@
-//! Platform input types.
+//! Transitional re-exports of Wing input resource types.
 
-mod button_input;
-mod keyboard;
-mod mouse;
-
-pub use button_input::ButtonInput;
-pub use keyboard::KeyCode;
-pub use mouse::MouseButton;
-
-extern crate alloc;
+pub use wing::{ButtonInput, KeyCode, MouseButton, MouseWheel};

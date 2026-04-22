@@ -257,3 +257,32 @@ void sim_buttonevent(int x, int y, int buttons)
 
   touch_event(priv->lower.priv, &sample);
 }
+
+/****************************************************************************
+ * Name: sim_wheelevent
+ ****************************************************************************/
+
+void sim_wheelevent(int x, int y, int direction)
+{
+  struct sim_dev_s  *priv = (struct sim_dev_s *)&g_simtouchscreen;
+  struct touch_sample_s sample;
+
+  if (priv->eventloop == 0)
+    {
+      return;
+    }
+
+  memset(&sample, 0, sizeof(sample));
+  sample.npoints           = 1;
+  sample.point[0].id       = priv->id;
+  sample.point[0].x        = x;
+  sample.point[0].y        = y;
+  sample.point[0].h        = 1;
+  sample.point[0].w        = 1;
+  sample.point[0].flags    = TOUCH_ID_VALID | TOUCH_POS_VALID |
+                             TOUCH_GESTURE_VALID;
+  sample.point[0].gesture  = direction > 0 ? TOUCH_SLIDE_UP :
+                             TOUCH_SLIDE_DOWN;
+
+  touch_event(priv->lower.priv, &sample);
+}

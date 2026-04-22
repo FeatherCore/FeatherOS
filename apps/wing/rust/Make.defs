@@ -1,0 +1,12 @@
+############################################################################
+# apps/wing/rust/Make.defs
+############################################################################
+
+include $(APPDIR)/tools/Rust.mk
+
+ifneq ($(CONFIG_WING_RUST),)
+CONFIGURED_APPS += $(APPDIR)/wing/rust
+
+RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
+EXTRA_LIBS += $(APPDIR)/wing/rust/target/$(RUST_TARGET)/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libwing.a
+endif

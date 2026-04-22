@@ -138,9 +138,23 @@ void sim_x11events(void)
           case ButtonPress  : /* Enabled by ButtonPressMask */
           case ButtonRelease: /* Enabled by ButtonReleaseMask */
             {
+              if (event.type == ButtonPress)
+                {
+                  if (event.xbutton.button == Button4)
+                    {
+                      sim_wheelevent(event.xbutton.x, event.xbutton.y, 1);
+                      break;
+                    }
+                  else if (event.xbutton.button == Button5)
+                    {
+                      sim_wheelevent(event.xbutton.x, event.xbutton.y, -1);
+                      break;
+                    }
+                }
+
               sim_buttonevent(event.xbutton.x, event.xbutton.y,
                               sim_buttonmap(event.xbutton.state,
-                                          event.xbutton.button));
+                                           event.xbutton.button));
             }
             break;
 

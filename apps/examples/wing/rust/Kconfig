@@ -6,7 +6,7 @@
 config EXAMPLES_WING_RUST
 	tristate "Wing Rust desktop demo"
 	default n
-	depends on FHRE_RUST
+	depends on FHRE_RUST && WING_RUST
 	---help---
 		Enable the Wing desktop shell demo built on FHRE
 

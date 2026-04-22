@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 use core::ffi::c_int;
-use fhre::window::{KeyboardEvent, MouseButtonEvent, MouseMotionEvent, Window as WindowTrait, WindowInputEvents};
+use fhre::window::{KeyboardEvent, MouseButtonEvent, MouseMotionEvent, MouseWheelEvent, Window as WindowTrait, WindowInputEvents};
 
 use super::input::{KeyCode, MouseButton};
 use super::runner::InputBridge;
@@ -30,6 +30,9 @@ const X11_KEY_RIGHT: u32 = 0xff53;
 const X11_KEY_DOWN: u32 = 0xff54;
 const X11_KEY_HOME: u32 = 0xff50;
 const X11_KEY_END: u32 = 0xff57;
+const TOUCH_GESTURE_VALID: u8 = 1 << 7;
+const TOUCH_SLIDE_UP: u16 = 0x01;
+const TOUCH_SLIDE_DOWN: u16 = 0x02;
 
 #[repr(C)]
 struct VideoInfo {
@@ -145,6 +148,22 @@ impl Window {
                 let x = sample.point.x as i32;
                 let y = sample.point.y as i32;
                 let pressure = sample.point.pressure;
+
+                if (sample.point.flags & TOUCH_GESTURE_VALID) != 0 {
+                    let direction = match sample.point.gesture {
+                        TOUCH_SLIDE_UP => 1,
+                        TOUCH_SLIDE_DOWN => -1,
+                        _ => 0,
+                    };
+
+                    if direction != 0 {
+                        events.mouse_wheel_events.push(MouseWheelEvent {
+                            direction,
+                            x,
+                            y,
+                        });
+                    }
+                }
 
                 events.mouse_motion_events.push(MouseMotionEvent {
                     x,

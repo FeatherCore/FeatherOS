@@ -1,8 +1,8 @@
 //! Input plugin and platform event bridge.
 
-use fhre::{App, InputPlugin, Plugin, WindowInputEvents, MousePosition};
+use fhre::{App, InputPlugin, MousePosition, Plugin, WindowInputEvents};
 
-use super::input::{ButtonInput, KeyCode, MouseButton};
+use super::input::{ButtonInput, KeyCode, MouseButton, MouseWheel};
 
 pub trait InputBridge {
     fn map_keycode(&self, platform_keycode: u32) -> Option<KeyCode>;
@@ -28,6 +28,7 @@ impl<B: InputBridge + 'static> InputPlugin for PlatformInputPlugin<B> {
         self.bridge_keyboard_input(app, &events.keyboard_events);
         self.bridge_mouse_input(app, &events.mouse_button_events);
         self.bridge_mouse_position(app, &events.mouse_button_events, &events.mouse_motion_events);
+        self.bridge_mouse_wheel(app, &events.mouse_wheel_events);
     }
 }
 
@@ -78,6 +79,15 @@ impl<B: InputBridge> PlatformInputPlugin<B> {
             for event in button_events {
                 mouse_pos.x = event.x;
                 mouse_pos.y = event.y;
+            }
+        }
+    }
+
+    fn bridge_mouse_wheel(&self, app: &mut App, events: &[fhre::window::MouseWheelEvent]) {
+        if let Some(mouse_wheel) = app.main_world.resources_mut().get_mut::<MouseWheel>() {
+            mouse_wheel.clear();
+            for event in events {
+                mouse_wheel.delta += event.direction;
             }
         }
     }
