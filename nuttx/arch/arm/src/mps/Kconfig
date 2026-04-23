@@ -1,6 +1,6 @@
 #
 # For a description of the syntax of this configuration file,
-# see the file kconfig-language.txt in the NuttX tools repository.
+# see the file kconfig-language.txt in the tools repository.
 #
 
 if ARCH_CHIP_MPS
@@ -42,6 +42,56 @@ config ARCH_CHIP_MPS3_AN547
 	select ARCH_CORTEXM55
 	select ARCH_HAVE_FPU
 	select ARM_HAVE_MVE
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
+	select ARCH_HAVE_TEXT_HEAP
+	select ARCH_HAVE_DATA_HEAP
+
+config ARCH_CHIP_MPS3_AN550
+	bool "MPS3 AN550 Processor Cortexm55"
+	select ARCH_CORTEXM55
+	select ARCH_HAVE_MPU
+	select ARM_HAVE_MPU_UNIFIED
+	select ARCH_HAVE_FPU
+	select ARM_HAVE_MVE
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
+	select ARCH_HAVE_TEXT_HEAP
+	select ARCH_HAVE_DATA_HEAP
+
+config ARCH_CHIP_MPS3_AN555
+	bool "MPS3 AN555 Processor Cortexm55"
+	select ARCH_CORTEXM55
+	select ARCH_HAVE_MPU
+	select ARM_HAVE_MPU_UNIFIED
+	select ARCH_HAVE_FPU
+	select ARM_HAVE_MVE
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
+	select ARCH_HAVE_TEXT_HEAP
+	select ARCH_HAVE_DATA_HEAP
+
+config ARCH_CHIP_MPS3_AN547_M85
+	bool "MPS3 AN547 Processor Cortexm85"
+	select ARCH_CORTEXM85
+	select ARCH_HAVE_MPU
+	select ARM_HAVE_MPU_UNIFIED
+	select ARCH_HAVE_FPU
+	select ARM_HAVE_MVE
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
+	select ARCH_HAVE_TEXT_HEAP
+	select ARCH_HAVE_DATA_HEAP
+
+config ARCH_CHIP_MPS4_AN550
+	bool "MPS4 AN550 Processor Cortexm85"
+	select ARCH_CORTEXM85
+	select ARCH_HAVE_MPU
+	select ARM_HAVE_MPU_UNIFIED
+	select ARCH_HAVE_FPU
+	select ARM_HAVE_MVE
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
 	select ARCH_HAVE_TEXT_HEAP
 	select ARCH_HAVE_DATA_HEAP
 

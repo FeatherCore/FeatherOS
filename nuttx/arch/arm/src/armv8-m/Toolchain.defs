@@ -100,7 +100,13 @@ else ifeq ($(CONFIG_ARCH_CORTEXM85),y)
   endif
 endif
 
-LLVM_ARCHTYPE := thumbv8m.main$(EXTCPUFLAGS)
+ifeq ($(CONFIG_ARCH_CORTEXM55),y)
+  LLVM_ARCHTYPE := thumbv8.1m.main$(EXTCPUFLAGS)
+else ifeq ($(CONFIG_ARCH_CORTEXM85),y)
+  LLVM_ARCHTYPE := thumbv8.1m.main$(EXTCPUFLAGS)
+else
+  LLVM_ARCHTYPE := thumbv8m.main$(EXTCPUFLAGS)
+endif
 
 ifeq ($(CONFIG_ARCH_FPU),y)
   LLVM_ABITYPE := eabihf

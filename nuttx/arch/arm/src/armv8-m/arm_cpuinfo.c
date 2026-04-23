@@ -69,6 +69,19 @@ ssize_t up_show_cpuinfo(char *buf, size_t buf_size, off_t file_off)
 {
   int i;
   uint32_t cpuid;
+  const char *model_name;
+  const char *arch_name;
+  const char *arch_id;
+
+#if defined(CONFIG_ARCH_CORTEXM55) || defined(CONFIG_ARCH_CORTEXM85)
+  model_name = "ARMv8.1-M";
+  arch_name = "v8.1ml";
+#else
+  model_name = "ARMv8-M";
+  arch_name = "v8ml";
+#endif
+
+  arch_id = "8M";
 
   for (i = 0; i < CONFIG_SMP_NCPUS; i++)
     {
@@ -126,9 +139,9 @@ ssize_t up_show_cpuinfo(char *buf, size_t buf_size, off_t file_off)
 
       cpuid = getreg32(NVIC_CPUID_BASE);
       procfs_sprintf(buf, buf_size, &file_off,
-                     "\nmodel name\t: %s rev %" PRIx32 " (%s)\n"
-                     "CPU architecture: %s\n",
-                     "ARMv8-M", cpuid & 15, "v8ml", "8M");
+                      "\nmodel name\t: %s rev %" PRIx32 " (%s)\n"
+                      "CPU architecture: %s\n",
+                      model_name, cpuid & 15, arch_name, arch_id);
 
       procfs_sprintf(buf, buf_size, &file_off,
                      "CPU implementer\t: 0x%02" PRIx32 "\n"

@@ -32,3 +32,10 @@
 - Config: `sim:fhre` (NuttX simulator)
 - Release: `opt-level = 'z'` (size optimization)
 - Crate types: `staticlib`, `rlib` (embedded targets)
+
+## Documentation
+
+- [ARM Cortex-M55 and Cortex-M85 Support](docs/arm_cortex_m55_m85.md) - Implementation details for ARMv8.1-M CPUs
+- [Renesas RA8P1 Porting Guide](docs/ra8p1_porting.md) - RA8P1 (Cortex-M85) porting documentation
+- [Architecture](docs/ARCHITECTURE.md) - System architecture overview
+- [FHRE Rendering Backend](docs/fhre_rendering_backend.md) - FHRE engine documentation

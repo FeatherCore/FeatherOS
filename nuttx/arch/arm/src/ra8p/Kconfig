@@ -1,0 +1,91 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+comment "RA8P Configuration Options"
+
+choice
+	prompt "RA8P Chip Selection"
+	default ARCH_CHIP_R7KA8P1KFLCAC
+	depends on ARCH_CHIP_RA8P
+
+config ARCH_CHIP_R7KA8P1KFLCAC
+	bool "R7KA8P1KFLCAC (RA8P1)"
+	select ARCH_CORTEXM85
+	select ARCH_HAVE_FPU
+	select ARCH_HAVE_MPU
+	select ARM_HAVE_MPU_UNIFIED
+	select ARM_HAVE_MVE
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
+	select ARMV8M_SYSTICK
+	help
+	  Renesas RA8P1 Series (Cortex-M85)
+	  - Up to 1 GHz ARM Cortex-M85
+	  - ARMv8.1-M Mainline architecture
+	  - DSP, MVE-F, FPU, I/D Cache
+	  - Optional Ethos-U55 NPU
+
+endchoice # RA8P Chip Selection
+
+menu "RA8P Peripheral Support"
+
+config RA8P_HAVE_SCI_B_UART
+	bool
+	default y
+
+config RA8P_HAVE_SPI_B
+	bool
+	default n
+
+config RA8P_HAVE_ETHERNET
+	bool
+	default y
+
+config RA8P_SCI_B_UART0
+	bool "SCI_B UART 0"
+	default n
+	depends on RA8P_HAVE_SCI_B_UART
+	select SCI0_SERIALDRIVER
+
+config RA8P_SCI_B_UART1
+	bool "SCI_B UART 1"
+	default n
+	depends on RA8P_HAVE_SCI_B_UART
+	select SCI1_SERIALDRIVER
+
+config RA8P_SCI_B_UART2
+	bool "SCI_B UART 2"
+	default y
+	depends on RA8P_HAVE_SCI_B_UART
+	select SCI2_SERIALDRIVER
+
+config RA8P_SCI_B_UART3
+	bool "SCI_B UART 3"
+	default n
+	depends on RA8P_HAVE_SCI_B_UART
+	select SCI3_SERIALDRIVER
+
+config RA8P_SCI_B_UART4
+	bool "SCI_B UART 4"
+	default n
+	depends on RA8P_HAVE_SCI_B_UART
+	select SCI4_SERIALDRIVER
+
+config RA8P_SPI_B0
+	bool "SPI_B 0"
+	default n
+	depends on RA8P_HAVE_SPI_B
+
+config RA8P_SPI_B1
+	bool "SPI_B 1"
+	default n
+	depends on RA8P_HAVE_SPI_B
+
+endmenu # RA8P Peripheral Support
+
+config RA8P_NR_IRQS
+	int "Number of peripheral interrupts"
+	default 96
+	depends on ARCH_CHIP_RA8P

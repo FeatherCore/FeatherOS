@@ -367,6 +367,17 @@ config ARCH_CHIP_RA4
 	---help---
 		Renesas RA4 Architecture (ARM Cortex-M4F/M33).
 
+config ARCH_CHIP_RA8P
+	bool "Renesas RA8P"
+	select ARCH_HAVE_MPU
+	select ARM_HAVE_MPU_UNIFIED
+	select ARCH_HAVE_FPU
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
+	---help---
+		Renesas RA8P1 Series (ARM Cortex-M85).
+		ARMv8.1-M Mainline with DSP, MVE-F, FPU, I/D Cache.
+
 config ARCH_CHIP_RP2040
 	bool "Raspberry Pi RP2040"
 	select ARCH_CORTEXM0
@@ -1110,6 +1121,10 @@ config ARCH_CORTEXM55
 	select ARCH_HAVE_BUSFAULT_DEBUG
 	select ARCH_HAVE_USAGEFAULT_DEBUG
 	select ARCH_HAVE_SECUREFAULT_DEBUG if ARCH_TRUSTZONE_SECURE
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
+	select ARM_HAVE_DSP
+	select ARM_HAVE_MVE
 
 config ARCH_CORTEXM85
 	bool
@@ -1127,6 +1142,10 @@ config ARCH_CORTEXM85
 	select ARCH_HAVE_BUSFAULT_DEBUG
 	select ARCH_HAVE_USAGEFAULT_DEBUG
 	select ARCH_HAVE_SECUREFAULT_DEBUG if ARCH_TRUSTZONE_SECURE
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
+	select ARM_HAVE_DSP
+	select ARM_HAVE_MVE
 
 config ARCH_ARMV8R
 	bool
@@ -1178,7 +1197,8 @@ config ARCH_CHIP
 	default "nrf91"		if ARCH_CHIP_NRF91
 	default "nuc1xx"	if ARCH_CHIP_NUC1XX
 	default "ra4"			if ARCH_CHIP_RA4
-	default "rp2040"	if ARCH_CHIP_RP2040
+	default "ra8p"			if ARCH_CHIP_RA8P
+	default "rp2040"		if ARCH_CHIP_RP2040
 	default "rp23xx"	if ARCH_CHIP_RP23XX
 	default "s32k1xx"	if ARCH_CHIP_S32K1XX
 	default "s32k3xx"	if ARCH_CHIP_S32K3XX
@@ -1642,6 +1662,9 @@ source "arch/arm/src/nuc1xx/Kconfig"
 endif
 if ARCH_CHIP_RA4
 source "arch/arm/src/ra4/Kconfig"
+endif
+if ARCH_CHIP_RA8P
+source "arch/arm/src/ra8p/Kconfig"
 endif
 if ARCH_CHIP_RP2040
 source "arch/arm/src/rp2040/Kconfig"
