@@ -8,5 +8,17 @@ ifneq ($(CONFIG_EXAMPLES_WING_RUST),)
 CONFIGURED_APPS += $(APPDIR)/examples/wing/rust
 
 RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
+
+# Check if we're building for NuttX simulator (native compilation)
+ifeq ($(CONFIG_ARCH_SIM),y)
+RUST_NATIVE := y
+endif
+
+# Library path differs between SIM and embedded builds
+ifeq ($(RUST_NATIVE),y)
+# SIM: no target subdirectory
+EXTRA_LIBS += $(APPDIR)/examples/wing/rust/target/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libwing_rs_demo.a
+else
 EXTRA_LIBS += $(APPDIR)/examples/wing/rust/target/$(RUST_TARGET)/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libwing_rs_demo.a
+endif
 endif

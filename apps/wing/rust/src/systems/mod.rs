@@ -1,13 +1,9 @@
-//! Transitional ECS systems registered by the Wing desktop plugin.
+//! ECS systems for Wing shell and legacy migration code.
 
-mod input;
-mod sync;
-mod update;
+mod pointer;
+mod picking;
+mod shell;
 
-pub use input::{
-    wing_pointer_input_system,
-    wing_shell_shortcut_system,
-    wing_text_input_system,
-};
-pub use sync::{wing_shell_state_sync_system, wing_window_state_sync_system};
-pub use update::wing_update_system;
+pub use shell::{setup_wing_shell, wing_notification_text_layout_system, wing_shell_interaction_system, wing_shell_layout_system, wing_shell_overlay_layout_system, wing_shell_stack_layout_system};
+pub use pointer::wing_minimal_button_interaction_system;
+pub use picking::wing_picking_system;

@@ -1,24 +1,40 @@
-FeatherOS Wing Configuration for Sim Board
+Wing Desktop Environment
+========================
 
-This configuration enables the Wing desktop environment demo on the sim board.
+This configuration enables the Wing desktop environment, a mobile/watch-style
+shell built on FHRE's declarative ECS architecture.
 
-Enabled components:
-- FHRE Rust library: `apps/fhre`
-- Wing Rust library: `apps/wing`
-- Wing Rust example: `apps/examples/wing`
+Features:
+- Card-based UI (similar to Android/Symbian smartwatch systems)
+- App preview cards in stack layout
+- Quick settings panel
+- Notification stack
+- Gesture zones for navigation
 
-How to use this configuration:
-1. From the `nuttx` directory, run:
-   `./tools/configure.sh sim:wing`
+Console Options
+--------------
 
-2. Build the project:
-   `make`
+The Wing shell runs as an NSH builtin application. To start Wing::
 
-3. Run the simulation:
-   `./nuttx`
+  nsh> wing_rust
 
-4. In the NSH shell, run the Wing demo:
-   `wing_rust`
+The shell will initialize and display the UI on the X11 framebuffer.
 
-This will start the Wing desktop shell example built from
-`apps/examples/wing`.
+Framebuffer
+-----------
+
+- Resolution: 640x480 (configurable via CONFIG_SIM_FBWIDTH/FHEIGHT)
+- X11-based display via NuttX simulation
+
+Input
+-----
+
+- X11 mouse/touch events via /dev/input0
+- X11 keyboard events via /dev/kbd
+
+Dependencies
+------------
+
+- FHRE_RUST must be enabled
+- Framebuffer support (X11)
+- Touchscreen and keyboard input support

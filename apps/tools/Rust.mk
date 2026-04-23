@@ -20,6 +20,9 @@
 
 # Generate Rust target triple based on LLVM architecture configuration
 #
+# For NuttX SIM (CONFIG_ARCH_SIM), we use native compilation without --target
+# For embedded targets (ARM, RISC-V), we use cross-compilation
+#
 # Uses the following LLVM variables directly:
 #   - LLVM_ARCHTYPE: Architecture type (e.g. thumbv7m, riscv32)
 #   - LLVM_ABITYPE: ABI type (e.g. eabi, eabihf)
@@ -27,7 +30,7 @@
 #
 # Supported architectures and their target triples:
 #   - x86: i686-unknown-nuttx
-#   - x86_64: x86_64-unknown-nuttx
+#   - x86_64: x86_64-unknown-linux-gnu (native) or x86_64-unknown-nuttx
 #   - armv7a: armv7a-nuttx-eabi, armv7a-nuttx-eabihf
 #   - thumbv6m: thumbv6m-nuttx-eabi
 #   - thumbv7a: thumbv7a-nuttx-eabi, thumbv7a-nuttx-eabihf
@@ -42,39 +45,48 @@
 #
 # Output:
 #   Rust target triple (e.g. riscv32imac-unknown-nuttx-elf,
-#   thumbv7m-nuttx-eabi, thumbv7em-nuttx-eabihf)
+#   thumbv7m-nuttx-eabi, x86_64-unknown-linux-gnu for SIM)
 
 # Strip any +extentions from LLVM_ARCHTYPE (e.g., thumbv8m.main+dsp -> thumbv8m.main)
 RUST_ARCHTYPE := $(firstword $(subst +, ,$(LLVM_ARCHTYPE)))
 
+# Check if we're building for NuttX simulator (native compilation)
+ifeq ($(CONFIG_ARCH_SIM),y)
+# SIM uses native compilation
+RUST_NATIVE := y
+endif
+
 define RUST_TARGET_TRIPLE
-$(or \
-  $(and $(filter x86_64,$(RUST_ARCHTYPE)), \
-    x86_64-unknown-linux-gnu \
-  ), \
-  $(and $(filter x86,$(RUST_ARCHTYPE)), \
-    i686-unknown-linux-gnu \
-  ), \
-  $(and $(filter thumb%,$(RUST_ARCHTYPE)), \
-    $(if $(filter thumbv8m%,$(RUST_ARCHTYPE)), \
-      $(if $(filter cortex-m23,$(LLVM_CPUTYPE)),thumbv8m.base-none-$(LLVM_ABITYPE),thumbv8m.main-none-$(LLVM_ABITYPE)), \
-      $(RUST_ARCHTYPE)-none-$(LLVM_ABITYPE) \
+$(if $(RUST_NATIVE), \
+  $(shell rustc --version | grep -q x86_64 && echo x86_64-unknown-linux-gnu || echo x86_64-unknown-linux-gnu), \
+  $(or \
+    $(and $(filter x86_64,$(RUST_ARCHTYPE)), \
+      x86_64-unknown-linux-gnu \
+    ), \
+    $(and $(filter x86,$(RUST_ARCHTYPE)), \
+      i686-unknown-linux-gnu \
+    ), \
+    $(and $(filter thumb%,$(RUST_ARCHTYPE)), \
+      $(if $(filter thumbv8m%,$(RUST_ARCHTYPE)), \
+        $(if $(filter cortex-m23,$(LLVM_CPUTYPE)),thumbv8m.base-none-$(LLVM_ABITYPE),thumbv8m.main-none-$(LLVM_ABITYPE)), \
+        $(RUST_ARCHTYPE)-none-$(LLVM_ABITYPE) \
+      ) \
+    ), \
+    $(and $(filter riscv32,$(RUST_ARCHTYPE)), \
+      riscv32$(or \
+        $(and $(filter sifive-e20,$(LLVM_CPUTYPE)),imc), \
+        $(and $(filter sifive-e31,$(LLVM_CPUTYPE)),imac), \
+        $(and $(filter sifive-e76,$(LLVM_CPUTYPE)),imafc), \
+        imc \
+      )-unknown-none-elf \
+    ), \
+    $(and $(filter riscv64,$(RUST_ARCHTYPE)), \
+      riscv64$(or \
+        $(and $(filter sifive-s51,$(LLVM_CPUTYPE)),imac), \
+        $(and $(filter sifive-u54,$(LLVM_CPUTYPE)),imafdc), \
+        imac \
+      )-unknown-none-elf \
     ) \
-  ), \
-  $(and $(filter riscv32,$(RUST_ARCHTYPE)), \
-    riscv32$(or \
-      $(and $(filter sifive-e20,$(LLVM_CPUTYPE)),imc), \
-      $(and $(filter sifive-e31,$(LLVM_CPUTYPE)),imac), \
-      $(and $(filter sifive-e76,$(LLVM_CPUTYPE)),imafc), \
-      imc \
-    )-unknown-none-elf \
-  ), \
-  $(and $(filter riscv64,$(RUST_ARCHTYPE)), \
-    riscv64$(or \
-      $(and $(filter sifive-s51,$(LLVM_CPUTYPE)),imac), \
-      $(and $(filter sifive-u54,$(LLVM_CPUTYPE)),imafdc), \
-      imac \
-    )-unknown-none-elf \
   ) \
 )
 endef
@@ -90,6 +102,25 @@ endef
 # Output:
 #   None, builds the Rust project
 
+ifeq ($(CONFIG_ARCH_SIM),y)
+# SIM uses native compilation (no --target flag)
+ifeq ($(CONFIG_DEBUG_FULLOPT),y)
+define RUST_CARGO_BUILD
+	@echo "Building Rust code with cargo (native)..."
+	NUTTX_INCLUDE_DIR=$(TOPDIR)/include:$(TOPDIR)/include/arch \
+    cargo build --release \
+		--manifest-path $(2)/$(1)/Cargo.toml
+endef
+else
+define RUST_CARGO_BUILD
+	@echo "Building Rust code with cargo (native)..."
+	NUTTX_INCLUDE_DIR=$(TOPDIR)/include:$(TOPDIR)/include/arch \
+    cargo build \
+		--manifest-path $(2)/$(1)/Cargo.toml
+endef
+endif
+else
+# Cross-compilation for embedded targets
 ifeq ($(CONFIG_DEBUG_FULLOPT),y)
 define RUST_CARGO_BUILD
 	@echo "Building Rust code with cargo..."
@@ -106,6 +137,7 @@ define RUST_CARGO_BUILD
 		--manifest-path $(2)/$(1)/Cargo.toml \
 		--target $(call RUST_TARGET_TRIPLE)
 endef
+endif
 endif
 
 # Clean Rust project using cargo
@@ -134,6 +166,13 @@ endef
 # Output:
 #   Path to the Rust binary (e.g. path/to/project/target/riscv32imac-unknown-nuttx-elf/release/libhello.a)
 
+ifeq ($(CONFIG_ARCH_SIM),y)
+# SIM: no target subdirectory
+define RUST_GET_BINDIR
+$(2)/$(1)/target/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/lib$(1).a
+endef
+else
 define RUST_GET_BINDIR
 $(2)/$(1)/target/$(strip $(call RUST_TARGET_TRIPLE))/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/lib$(1).a
 endef
+endif

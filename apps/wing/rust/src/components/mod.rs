@@ -1,13 +1,7 @@
-//! Transitional ECS components for the Wing desktop plugin.
+//! ECS components for Wing shell and legacy migration code.
 
-mod desktop;
-mod launcher;
-mod taskbar;
+mod shell;
 mod widgets;
-mod window;
 
-pub use desktop::{DesktopIconComponent, DesktopRoot, DesktopWallpaper};
-pub use launcher::{LauncherEntry, LauncherPanel};
-pub use taskbar::{TaskbarItem, TaskbarRoot};
-pub use widgets::{ButtonWidget, IconGlyph, Label, ScrollAreaWidget, TextFieldWidget, WidgetLayoutNode, WidgetNodeComponent};
-pub use window::{WindowChrome, WindowContentRoot, WindowFocus, WindowFrame};
+pub use shell::{AppSurface, BottomBar, CardStackRoot, GestureZone, HomeSurface, NotificationCard, NotificationLayer, NotificationStackRoot, NotificationText, NotificationTextRole, OverlayLayer, QuickSettingsPanel, ShellRoot, StatusBar, SurfacePreviewCard, SurfaceStackRoot, SurfaceText};
+pub use widgets::{ButtonWidget, WidgetLayoutNode};

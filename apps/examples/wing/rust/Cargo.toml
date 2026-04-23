@@ -6,7 +6,7 @@ edition = "2021"
 [lib]
 name = "wing_rs_demo"
 path = "src/lib.rs"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 [profile.dev]
 panic = "abort"

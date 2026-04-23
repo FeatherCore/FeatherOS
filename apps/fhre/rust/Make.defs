@@ -25,8 +25,18 @@ include $(APPDIR)/tools/Rust.mk
 ifneq ($(CONFIG_FHRE_RUST),)
 CONFIGURED_APPS += $(APPDIR)/fhre/rust
 
-# Rust library path: target/<target>/<profile>/lib<crate>.a
-# The path is dynamically determined by the target and profile
+# Check if we're building for NuttX simulator (native compilation)
+ifeq ($(CONFIG_ARCH_SIM),y)
+RUST_NATIVE := y
+endif
+
+# Rust library path differs between SIM and embedded builds
 RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
+ifeq ($(RUST_NATIVE),y)
+# SIM: native compilation, no target subdirectory
+EXTRA_LIBS += $(APPDIR)/fhre/rust/target/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libfhre.a
+else
+# Embedded: cross-compilation with target subdirectory
 EXTRA_LIBS += $(APPDIR)/fhre/rust/target/$(RUST_TARGET)/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libfhre.a
+endif
 endif

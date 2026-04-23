@@ -28,15 +28,26 @@ MODULE = $(CONFIG_FHRE_RUST)
 RUST_CRATE_NAME := fhre
 RUST_CARGO_PATH := $(APPDIR)/fhre/rust
 
-# Get target triple from NuttX configuration
-# This supports multiple architectures: thumbv6m, thumbv7m, thumbv8m, riscv32, riscv64, x86_64, etc.
+# Check if we're building for NuttX simulator (native compilation)
+ifeq ($(CONFIG_ARCH_SIM),y)
+RUST_NATIVE := y
+endif
+
+# For SIM (native compilation), we don't need --target flag
+ifeq ($(RUST_NATIVE),y)
+context::
+	@echo "Building FHRE library (native)..."
+	cargo build \
+		--manifest-path $(RUST_CARGO_PATH)/Cargo.toml
+else
+# Get target triple from NuttX configuration for cross-compilation
 RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
 
 # Generate .cargo/config.toml dynamically based on target
 CARGO_CONFIG := $(RUST_CARGO_PATH)/.cargo/config.toml
 
 context:: $(CARGO_CONFIG)
-	@echo "Building Rust code with cargo..."
+	@echo "Building FHRE library..."
 	@echo "Target: $(RUST_TARGET)"
 	NUTTX_INCLUDE_DIR=$(TOPDIR)/include:$(TOPDIR)/include/arch \
 	RUST_TARGET=$(RUST_TARGET) \
@@ -57,6 +68,7 @@ $(CARGO_CONFIG):
 	@echo '  "-C", "linker=rust-lld",' >> $@
 	@echo '  "-C", "link-arg=--undefined=rust_eh_personality",' >> $@
 	@echo ']' >> $@
+endif
 
 clean::
 	cargo clean --manifest-path $(RUST_CARGO_PATH)/Cargo.toml
