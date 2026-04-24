@@ -20,25 +20,9 @@ pub struct ButtonWidget {
 }
 
 impl ButtonWidget {
-    pub const fn pressed() -> Self {
-        Self {
-            hovered: false,
-            pressed: true,
-            clicked: false,
-        }
-    }
-
     pub const fn idle() -> Self {
         Self {
             hovered: false,
-            pressed: false,
-            clicked: false,
-        }
-    }
-
-    pub const fn hovered() -> Self {
-        Self {
-            hovered: true,
             pressed: false,
             clicked: false,
         }

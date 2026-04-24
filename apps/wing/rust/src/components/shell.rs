@@ -83,13 +83,30 @@ impl fhre::Component for NotificationStackRoot {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NotificationCard {
+    pub notification_id: u32,
     pub visible: bool,
     pub stack_index: u8,
+    pub priority: crate::resources::NotificationPriority,
+    pub category: crate::resources::NotificationCategory,
 }
 
 impl NotificationCard {
-    pub const fn hidden(stack_index: u8) -> Self {
-        Self { visible: false, stack_index }
+    pub const fn hidden(notification_id: u32, stack_index: u8) -> Self {
+        Self {
+            notification_id,
+            visible: false,
+            stack_index,
+            priority: crate::resources::NotificationPriority::Normal,
+            category: crate::resources::NotificationCategory::Other,
+        }
+    }
+
+    pub const fn with_priority(self, priority: crate::resources::NotificationPriority) -> Self {
+        Self { priority, ..self }
+    }
+
+    pub const fn with_category(self, category: crate::resources::NotificationCategory) -> Self {
+        Self { category, ..self }
     }
 }
 
@@ -165,6 +182,8 @@ pub struct SurfacePreviewCard {
     pub surface_id: SurfaceId,
     pub visible: bool,
     pub stack_index: u8,
+    pub state: crate::resources::SurfaceState,
+    pub icon_hint: &'static str,
 }
 
 impl SurfacePreviewCard {
@@ -173,12 +192,54 @@ impl SurfacePreviewCard {
             surface_id,
             visible: false,
             stack_index,
+            state: crate::resources::SurfaceState::Background,
+            icon_hint: "",
         }
+    }
+
+    pub const fn with_state(self, state: crate::resources::SurfaceState) -> Self {
+        Self { state, ..self }
+    }
+
+    pub const fn with_icon(self, icon_hint: &'static str) -> Self {
+        Self { icon_hint, ..self }
     }
 }
 
 impl fhre::Component for SurfacePreviewCard {
     fn type_name() -> &'static str { "SurfacePreviewCard" }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SurfaceCardTitle {
+    pub surface_id: SurfaceId,
+    pub stack_index: u8,
+}
+
+impl SurfaceCardTitle {
+    pub const fn for_card(surface_id: SurfaceId, stack_index: u8) -> Self {
+        Self { surface_id, stack_index }
+    }
+}
+
+impl fhre::Component for SurfaceCardTitle {
+    fn type_name() -> &'static str { "SurfaceCardTitle" }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SurfaceCardSubtitle {
+    pub surface_id: SurfaceId,
+    pub stack_index: u8,
+}
+
+impl SurfaceCardSubtitle {
+    pub const fn for_card(surface_id: SurfaceId, stack_index: u8) -> Self {
+        Self { surface_id, stack_index }
+    }
+}
+
+impl fhre::Component for SurfaceCardSubtitle {
+    fn type_name() -> &'static str { "SurfaceCardSubtitle" }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

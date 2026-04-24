@@ -20,11 +20,23 @@
 
 Wing 必须直接使用 FHRE 的 `Camera + PrimaryScreen + View` 模型。
 
+**核心原则：Wing 下所有控件，即使是视觉上的 2D 组件，本体都必须是 3D 对象。**
+
 - 所有壳层对象都是 3D 实体
-- `2D` 只是对象位于幕布平面附近时的视觉结果
+- 所有控件都必须是 3D 对象，包括那些视觉上像 `2D` 的按钮、卡片、面板、文字和手势区
+- `2D` 只是对象默认位于幕布平面附近时的视觉结果，而不是另一套对象类型
 - 空间表达只允许使用 `Transform`
 - 前后层次只允许使用 `Transform.position.z`
 - 不能再定义一套独立屏幕空间或 z-index runtime
+
+这条规则必须按 `docs/ARCHITECTURE.md` 的纯 3D 语义理解：
+
+- 视觉上看起来像 `2D` 的控件，本体仍然是 3D 对象
+- 默认状态下，它们只是与 `PrimaryScreen` 对应的幕布平面处于同一平面或近平面
+- **任何控件都必须允许在 3D 空间中进行位移、缩放、旋转和层叠**
+- **例如一个默认贴在幕布上的按钮，可以在 3D 空间内相对于摄像机做远近移动，也可以做旋转、缩放等空间变换**
+- **不能因为某个控件视觉上像 2D，就把它实现成脱离相机投影的纯屏幕空间对象**
+- Wing 不允许把所谓 `2D` 控件实现成脱离相机与幕布关系的专用屏幕空间 primitive
 
 当前壳层骨架中的 `ShellRoot`、`SurfaceStackRoot`、`CardStackRoot`、`NotificationStackRoot`、`HomeSurface`、`StatusBar`、`QuickSettingsPanel`、`OverlayLayer`、`NotificationLayer`、`NotificationCard`、`AppSurface`、`SurfacePreviewCard`、`BottomBar`、`GestureZone` 都必须作为 3D ECS 实体存在于 `MainWorld`。
 
@@ -70,10 +82,14 @@ PreUpdate
   -> wing_picking_system
   -> wing_minimal_button_interaction_system
   -> wing_shell_interaction_system
+  -> wing_gesture_system
 Update
+  -> wing_overlay_animation_system
   -> wing_shell_layout_system
   -> wing_shell_stack_layout_system
   -> wing_shell_overlay_layout_system
+  -> wing_notification_card_layout_system
+  -> wing_shell_overlay_card_layout_system
   -> wing_notification_text_layout_system
 entity_sync
 extract
@@ -131,12 +147,16 @@ apps/wing/rust/src/                   # Wing 库（壳层组件/资源/系统）
 │   ├── shell.rs                     # ShellRoot, HomeSurface, StatusBar, etc.
 │   └── widgets.rs                    # WidgetLayoutNode, ButtonWidget
 ├── resources/                        # ECS 资源
-│   ├── mod.rs                        # DesktopMetrics
+│   ├── mod.rs                        # ShellMetrics
+│   ├── animation.rs                  # ShellOverlayAnimation
+│   ├── content.rs                    # ShellContent, ShellSurfaceEntry, ShellNotificationEntry
+│   ├── gesture.rs                    # GestureState, GesturePhase, SwipeDirection
 │   ├── shell.rs                     # ShellState
-│   ├── theme.rs                     # ThemeState
-│   └── window.rs                    # DragTransaction, WindowManagerState
+│   └── theme.rs                     # ThemeState
 ├── systems/                          # ECS 系统
 │   ├── mod.rs
+│   ├── animation.rs                  # wing_overlay_animation_system
+│   ├── gesture.rs                    # wing_gesture_system
 │   ├── shell.rs                     # setup_wing_shell, 交互/布局系统
 │   ├── picking.rs                   # wing_picking_system
 │   └── pointer.rs                   # wing_minimal_button_interaction_system
@@ -155,10 +175,7 @@ apps/examples/wing/rust/src/          # Wing Demo（可执行应用）
     ├── framebuffer.rs               # Window trait 实现（NuttX SIM）
     ├── runner.rs                     # InputBridge, PlatformInputPlugin
     └── input/                        # 输入类型
-        ├── mod.rs
-        ├── button_input.rs
-        ├── keyboard.rs
-        └── mouse.rs
+        └── mod.rs
 
 nuttx/boards/sim/sim/sim/configs/wing/ # NuttX 配置
 ├── defconfig                         # 默认配置
@@ -219,64 +236,106 @@ Platform Window
 
 这个链路里不存在独立的 Wing GUI runtime。
 
+必须进一步强调：这个链路里的壳层控件不是“最后一步临时拼出来的 2D GUI 对象”，而是始终处于 FHRE 相机 + 幕布系统中的 3D 对象。所谓按钮、面板、通知卡片等视觉上接近 `2D` 的控件，只是默认贴近幕布平面，不代表它们可以脱离 3D 世界坐标和相机投影语义独立存在。
+
 ## 当前实现状态
 
-### 已完成
+### 已落地
 
-**核心架构：**
-- ✅ 相机 + 幕布系统（z=0 平面）
-- ✅ 呈现窗口 + 输入系统（NuttX SIM framebuffer）
-- ✅ 核心系统（Query, App 生命周期, picking, Pointer<E>）
-- ✅ 声明式 ECS（自动化边界与手动边界）
+**主链路已经成立：**
+- ✅ shell 实体在 `MainWorld` 中生成
+- ✅ 平台输入通过 `Window + InputBridge` 进入 ECS 资源
+- ✅ `wing_picking_system` 生成 `Pointer<E>` 事件
+- ✅ shell 状态通过系统更新 `Transform` / `PickableBounds`
+- ✅ shell 渲染通过 extractor 进入 `RenderWorld`
+- ✅ `queue_wing_primitives` 生成当前阶段的壳层绘制命令
 
-**壳层组件：**
-- ✅ `ShellRoot` - 壳层根节点
-- ✅ `HomeSurface` - 主屏幕
-- ✅ `SurfaceStackRoot` - Surface 堆栈
-- ✅ `CardStackRoot` - 卡片堆栈
-- ✅ `NotificationStackRoot` - 通知堆栈
-- ✅ `StatusBar` - 状态栏
-- ✅ `QuickSettingsPanel` - 快速设置面板
-- ✅ `OverlayLayer` - 覆盖层
-- ✅ `NotificationLayer` - 通知层
-- ✅ `NotificationCard` - 通知卡片
-- ✅ `NotificationText` - 通知文本
-- ✅ `AppSurface` - 应用 Surface
-- ✅ `SurfacePreviewCard` - Surface 预览卡片
-- ✅ `BottomBar` - 底部栏
-- ✅ `GestureZone` - 手势区域
-- ✅ `SurfaceText` - Surface 文本
+**当前可用的壳层骨架：**
+- ✅ `ShellRoot`
+- ✅ `HomeSurface`
+- ✅ `SurfaceStackRoot`
+- ✅ `CardStackRoot`
+- ✅ `NotificationStackRoot`
+- ✅ `StatusBar`
+- ✅ `QuickSettingsPanel`
+- ✅ `OverlayLayer`
+- ✅ `NotificationLayer`
+- ✅ `NotificationCard`
+- ✅ `NotificationText`
+- ✅ `AppSurface`
+- ✅ `SurfacePreviewCard`
+- ✅ `BottomBar`
+- ✅ `GestureZone`
+- ✅ `SurfaceText`
 
-**系统：**
-- ✅ `setup_wing_shell` - 初始化壳层 UI
-- ✅ `wing_picking_system` - 指针拾取
-- ✅ `wing_minimal_button_interaction_system` - 按钮交互
-- ✅ `wing_shell_interaction_system` - 壳层交互
-- ✅ `wing_shell_layout_system` - 壳层布局
-- ✅ `wing_shell_stack_layout_system` - 堆栈布局
-- ✅ `wing_shell_overlay_layout_system` - 覆盖层布局
-- ✅ `wing_notification_text_layout_system` - 通知文本布局
+**当前可用的系统与提取器：**
+- ✅ `setup_wing_shell`
+- ✅ `wing_picking_system`
+- ✅ `wing_minimal_button_interaction_system`
+- ✅ `wing_shell_interaction_system`
+- ✅ `wing_gesture_system`
+- ✅ `wing_overlay_animation_system`
+- ✅ `wing_shell_layout_system`
+- ✅ `wing_shell_stack_layout_system`
+- ✅ `wing_shell_overlay_layout_system`
+- ✅ `wing_notification_card_layout_system`
+- ✅ `wing_shell_overlay_card_layout_system`
+- ✅ `wing_notification_text_layout_system`
+- ✅ `extract_view`
+- ✅ `extract_wing_shell`
+- ✅ `queue_wing_primitives`
 
-**提取器：**
-- ✅ `extract_view` - 视图提取
-- ✅ `extract_wing_shell` - 壳层数据提取
-- ✅ `queue_wing_primitives` - 渲染命令队列
+**当前可用的资源：**
+- ✅ `ShellState`
+- ✅ `ShellContent` - 支持动态添加/移除 surface 和 notification，包含完整数据模型
+- ✅ `ShellMetrics`
+- ✅ `ShellOverlayAnimation`
+- ✅ `ThemeState`
+- ✅ `GestureState`
 
-**主题系统：**
-- ✅ `ThemePalette` - 主题调色板
-- ✅ `WingTheme` - 完整主题
-- ✅ `shell_palette()` - 默认调色板
-- ✅ 预设主题：`aurora()`, `dusk()`
+**当前布局模型：**
+- ✅ `CardStackLayout` - 根据 `ShellContent.surfaces.len()` 动态计算卡片尺寸和间距
+- ✅ `NotificationStackLayout` - 根据 `ShellContent.notifications.len()` 动态计算通知卡片布局
 
-**平台层：**
-- ✅ `Window` trait 实现（NuttX SIM X11 framebuffer）
-- ✅ `InputBridge` trait 实现（X11 按键码映射）
-- ✅ `PlatformInputPlugin` - 输入桥接插件
+**主题与平台层：**
+- ✅ `ThemePalette` / `WingTheme`
+- ✅ `shell_palette()`
+- ✅ 预设主题：`aurora()`、`dusk()`
+- ✅ NuttX SIM framebuffer `Window` 实现
+- ✅ `InputBridge` 与 `PlatformInputPlugin`
+
+### 尚未完成的架构约束
+
+以下部分仍未完全达到 `docs/ARCHITECTURE.md` 要求的纯 3D 语义，必须明确记录，不能把当前最小实现误写成已经完成架构收口：
+
+- 当前控件虽然已经作为 3D ECS 实体存在于 `MainWorld`，但最终渲染结果仍偏向最小 2D primitive 输出
+- 视觉上像 `2D` 的按钮、卡片、面板、文字和手势区，当前实现还没有完整落实为“默认贴在幕布平面上的 3D 对象”这一约束
+- 当前主线已经接入 `Camera + PrimaryScreen + View`，但壳层控件的最终呈现语义仍需要继续向统一的相机投影语义收口
+- `Transform.position.z` 现在已经承担层次表达，但后续仍要确保它不仅是排序辅助值，而是真正可参与控件空间行为的 3D 深度
+- 后续所有壳层控件实现，都必须以“可在 3D 空间内相对摄像机移动、层叠、缩放、旋转”为默认前提，而不是以“先做纯屏幕空间 2D 控件”为前提
+
+### 当前限制
+
+- 现在是最小 shell 骨架，不是完整系统壳层
+- `ShellState` 已开始收口为更明确的壳层模式状态，但整体仍是最小状态模型
+- `AppSurface`、通知卡片、预览卡片仍是默认 demo 内容，但已开始收口为资源驱动的数据模型
+- 布局已实现动态计算：`CardStackLayout` 和 `NotificationStackLayout` 根据 `ShellContent` 数量自适应
+- 滑动手势已实现基础版本，支持上下滑动切换 QuickSettings/AppSwitcher
+- **滑动手势已支持速度阈值判断**：快速滑动即使位移较小也能触发，提高交互流畅度
+- **长按手势已实现**：在 StatusBar 区域长按可切换主题（Aurora ↔ Dusk）
+- Overlay 已接入基础过渡动画，QuickSettings / Notification / AppSwitcher 不再瞬时切换
+- **Overlay 动画已扩展透明度细节**：卡片和遮罩层透明度随动画进度平滑过渡
+- **ShellContent 已支持动态更新 API**：`add_surface()`、`remove_surface()`、`add_notification()`、`remove_notification()` 等方法
+- **ThemeAnimation 主题过渡动画**：`ThemeAnimation` 资源支持平滑的主题切换过渡
+- **ThemeState 扩展**：`pending_variant`、`is_transitioning` 支持主题切换动画状态追踪
+- `WingShellPlugin` 已负责主线资源、系统和 extractor 的默认装配
+- 当前实现仍处于"主链路已接通，但纯 3D 控件语义未完全收口"的阶段
 
 ### 当前交互
 
 当前默认交互保持克制：
 
+**点击交互：**
 - 点击 `StatusBar` 切换 `QuickSettingsPanel`
 - `QuickSettingsPanel` 打开时显示 `OverlayLayer`
 - `QuickSettingsPanel` 打开时同时显示 `NotificationCard + NotificationText` 骨架
@@ -284,6 +343,57 @@ Platform Window
 - 点击 `GestureZone` 回到 `HomeSurface`
 - 点击 `BottomBar` 打开或关闭 `SurfacePreviewCard` 卡片栈
 - 点击任意 `SurfacePreviewCard` 激活对应 `surface`
+
+**滑动手势：**
+- 从 `StatusBar` 区域向下滑动 → 打开 `QuickSettings`
+- 从 `BottomBar` 区域向上滑动 → 打开 `AppSwitcher`
+- 在 `QuickSettings` 打开时向上滑动 → 关闭
+- 在 `AppSwitcher` 打开时向下滑动 → 关闭
+- 滑动阈值：50 像素位移 或 200 像素/秒速度
+- 快速滑动（速度 > 200 像素/秒）即使位移较小（> 20 像素）也能触发
+
+**长按手势：**
+- 在 `StatusBar` 区域长按（> 0.5 秒且移动 < 15 像素）→ 切换主题（Aurora ↔ Dusk）
+
+## 数据模型
+
+### ShellSurfaceEntry
+
+应用 Surface 数据模型：
+- `id`: SurfaceId - 唯一标识
+- `label`: &'static str - 显示名称
+- `preview_title`: &'static str - 预览卡片标题
+- `state`: SurfaceState - 运行状态（Running/Paused/Background/Closed）
+- `icon_hint`: &'static str - 图标提示
+- `last_active_time`: u64 - 最后活跃时间戳
+
+### ShellNotificationEntry
+
+通知数据模型：
+- `id`: u32 - 唯一标识
+- `title`: &'static str - 标题
+- `summary`: &'static str - 摘要
+- `priority`: NotificationPriority - 优先级（Low/Normal/High/Urgent）
+- `category`: NotificationCategory - 分类（System/Message/Email/Social/Alarm/Reminder/Other）
+- `timestamp`: u64 - 时间戳
+
+### ShellContent 动态更新 API
+
+```rust
+// 添加/移除 Surface
+content.add_surface(surface_entry);
+content.remove_surface(surface_id);
+
+// 添加/移除通知
+content.add_notification(notification_entry);
+content.remove_notification(notification_id);
+content.clear_notifications();
+
+// 查询
+content.get_surface(surface_id);
+content.surface_count();
+content.notification_count();
+```
 
 ## 当前非目标
 
@@ -298,24 +408,25 @@ Platform Window
 
 ## 迁移原则
 
-仓库里仍然存在部分旧的 `desktop/window/taskbar/launcher` 代码。这些内容当前只应被视为迁移残留，不能再代表 Wing 的产品方向。
+旧的 `desktop/window/taskbar/launcher` 过渡代码已经从 `apps/wing/rust/src/` 主线中移除。后续不再恢复这些 PC 桌面语义模块。
 
 处理原则：
 
 - 不把旧 PC 窗口语义继续扩展成默认主线
-- 不把旧模块再接回示例入口
-- 后续逐步清理或降级为内部过渡代码
+- 不重新引入旧模块或旧命名
 - 新能力只沿 shell/surface 语义增加
 
 ## 下一步
 
 下一阶段应继续沿 shell 主线推进：
 
-1. 清理 `widgets.rs` 中仍未使用的占位组件
-2. 继续把 `SurfacePreviewCard` 从最小卡片栈扩展成更完整的应用预览栈
-3. 继续把 `NotificationCard + NotificationText` 从最小通知列表扩展成更完整的通知卡片栈
-4. 添加更多手势交互（滑动、长按等）
-5. 完善主题切换机制
+1. ~~继续把 `SurfacePreviewCard` 从最小卡片栈扩展成更完整的应用预览栈~~ ✅ 已完成
+2. ~~继续把 `NotificationCard + NotificationText` 从默认 demo 内容扩展成更完整的通知数据模型和卡片栈~~ ✅ 已完成
+3. ~~补齐手势速度阈值判断，让滑动识别不只依赖位移阈值~~ ✅ 已完成
+4. ~~添加长按手势交互~~ ✅ 已完成
+5. ~~完善主题切换机制~~ ✅ 已完成
+6. ~~让 `ShellContent` 支持动态更新（运行时添加/移除 surface 和 notification）~~ ✅ 已完成
+7. ~~把 overlay 动画从位置/尺寸过渡扩展到透明度和层级细节~~ ✅ 已完成
 
 ## 结论
 
@@ -325,5 +436,7 @@ Wing 必须彻底放弃 PC 桌面窗口控件方向，严格回到 `docs/ARCHITE
 2. 呈现窗口 + 输入系统
 3. 核心系统
 4. 声明式 ECS 的自动化边界与手动边界
+
+尤其要坚持一条不可回退的约束：Wing 下所有控件，无论视觉上多像 `2D`，本体都必须是 3D 对象。它们只是默认与幕布处于同一平面，因此看起来像传统平面 UI；但任何控件都必须允许在 3D 空间中相对摄像机做前后移动、层叠、变换和其他空间操作。
 
 当前默认主线已经是 shell 骨架。后续所有新增能力都必须围绕移动/手表壳层继续推进，而不是回到 PC 桌面窗口模型。

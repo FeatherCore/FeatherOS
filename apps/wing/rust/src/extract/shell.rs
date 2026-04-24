@@ -2,8 +2,8 @@ use alloc::string::String;
 
 use fhre::{render_world::ExtractedUI, Color, MainWorld, RenderWorld, Transform};
 
-use crate::components::{AppSurface, BottomBar, CardStackRoot, GestureZone, HomeSurface, NotificationCard, NotificationLayer, NotificationStackRoot, NotificationText, NotificationTextRole, OverlayLayer, QuickSettingsPanel, ShellRoot, StatusBar, SurfacePreviewCard, SurfaceStackRoot, SurfaceText, WidgetLayoutNode};
-use crate::resources::{ShellState, ThemeState};
+use crate::components::{AppSurface, BottomBar, CardStackRoot, GestureZone, HomeSurface, NotificationCard, NotificationLayer, NotificationStackRoot, NotificationText, NotificationTextRole, OverlayLayer, QuickSettingsPanel, ShellRoot, StatusBar, SurfaceCardSubtitle, SurfaceCardTitle, SurfacePreviewCard, SurfaceStackRoot, SurfaceText, WidgetLayoutNode};
+use crate::resources::{ShellContent, ShellOverlayAnimation, ShellState, ThemeState};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExtractedShellText {
@@ -30,8 +30,26 @@ pub fn extract_wing_shell(main_world: &MainWorld, render_world: &mut RenderWorld
     let notifications_visible = main_world
         .resources()
         .get::<ShellState>()
-        .map(|state| state.notifications_visible)
+        .map(|state| state.notifications_visible())
         .unwrap_or(false);
+    let overlay_alpha = main_world
+        .resources()
+        .get::<ShellOverlayAnimation>()
+        .map(|anim| anim.overlay_alpha_eased())
+        .unwrap_or(0.0);
+    let card_alpha = main_world
+        .resources()
+        .get::<ShellOverlayAnimation>()
+        .map(|anim| anim.card_alpha_eased())
+        .unwrap_or(1.0);
+    let app_switcher_open = main_world
+        .resources()
+        .get::<ShellState>()
+        .map(|state| state.app_switcher_open())
+        .unwrap_or(false);
+    let content = main_world
+        .resources()
+        .get::<ShellContent>();
 
     for (entity, transform) in main_world.query::<Transform>() {
         let Some(layout) = main_world.get_component::<WidgetLayoutNode>(entity) else {
@@ -53,25 +71,32 @@ pub fn extract_wing_shell(main_world: &MainWorld, render_world: &mut RenderWorld
         } else if main_world.get_component::<BottomBar>(entity).is_some() {
             Some(palette.surface_alt)
         } else if let Some(overlay) = main_world.get_component::<OverlayLayer>(entity) {
-            Some(if overlay.visible { Color::new(10, 16, 32, 160) } else { Color::new(0, 0, 0, 0) })
+            Some(if overlay.visible { 
+                Color::new(10, 16, 32, (160.0 * overlay_alpha) as u8) 
+            } else { Color::new(0, 0, 0, 0) })
         } else if let Some(notification) = main_world.get_component::<NotificationLayer>(entity) {
             Some(if notification.visible { palette.surface_alt } else { Color::new(0, 0, 0, 0) })
         } else if let Some(notification_card) = main_world.get_component::<NotificationCard>(entity) {
             Some(if notification_card.visible {
-                if notification_card.stack_index == 0 { palette.surface } else { palette.surface_alt }
+                let base_color = if notification_card.stack_index == 0 { palette.surface } else { palette.surface_alt };
+                Color::new(base_color.r, base_color.g, base_color.b, (255.0 * card_alpha) as u8)
             } else {
                 Color::new(0, 0, 0, 0)
             })
         } else if let Some(card) = main_world.get_component::<SurfacePreviewCard>(entity) {
             Some(if card.visible {
-                if card.stack_index == 0 { palette.surface } else { palette.surface_alt }
+                let base_color = if card.stack_index == 0 { palette.surface } else { palette.surface_alt };
+                Color::new(base_color.r, base_color.g, base_color.b, (255.0 * card_alpha) as u8)
             } else {
                 Color::new(0, 0, 0, 0)
             })
         } else if main_world.get_component::<GestureZone>(entity).is_some() {
             Some(Color::new(255, 255, 255, 96))
         } else if let Some(panel) = main_world.get_component::<QuickSettingsPanel>(entity) {
-            Some(if panel.open { palette.overlay } else { Color::new(0, 0, 0, 0) })
+            Some(if panel.open { 
+                let base = palette.overlay;
+                Color::new(base.r, base.g, base.b, (base.a as f32 * card_alpha) as u8)
+            } else { Color::new(0, 0, 0, 0) })
         } else if let Some(app_surface) = main_world.get_component::<AppSurface>(entity) {
             Some(if app_surface.active { palette.surface_alt } else { Color::new(0, 0, 0, 0) })
         } else {
@@ -136,5 +161,45 @@ pub fn extract_wing_shell(main_world: &MainWorld, render_world: &mut RenderWorld
                 },
             },
         );
+    }
+
+    if app_switcher_open {
+        for (entity, transform) in main_world.query::<Transform>() {
+            let Some(card_title) = main_world.get_component::<SurfaceCardTitle>(entity) else {
+                continue;
+            };
+            let title = content.and_then(|c| c.get_surface(card_title.surface_id))
+                .map(|s| s.preview_title)
+                .unwrap_or("App");
+            let render_entity = render_world.get_or_spawn_synced(entity);
+            render_world.insert_component(
+                render_entity,
+                ExtractedShellText {
+                    position: transform.xy(),
+                    text: title.into(),
+                    color: palette.text,
+                    size: 12.0,
+                },
+            );
+        }
+
+        for (entity, transform) in main_world.query::<Transform>() {
+            let Some(card_subtitle) = main_world.get_component::<SurfaceCardSubtitle>(entity) else {
+                continue;
+            };
+            let subtitle = content.and_then(|c| c.get_surface(card_subtitle.surface_id))
+                .and_then(|s| if s.icon_hint.is_empty() { None } else { Some(s.icon_hint) })
+                .unwrap_or("Running");
+            let render_entity = render_world.get_or_spawn_synced(entity);
+            render_world.insert_component(
+                render_entity,
+                ExtractedShellText {
+                    position: transform.xy(),
+                    text: subtitle.into(),
+                    color: palette.text_muted,
+                    size: 10.0,
+                },
+            );
+        }
     }
 }

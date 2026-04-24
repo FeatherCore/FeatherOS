@@ -1,34 +1,34 @@
-//! Resources for Wing shell and legacy migration code.
+//! Resources for the Wing shell.
 
+mod animation;
+mod content;
+mod gesture;
 mod shell;
 mod theme;
 
 use fhre::Vec2;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DesktopMetrics {
+pub struct ShellMetrics {
     pub screen_size: Vec2,
-    pub taskbar_height: f32,
-    pub icon_margin: f32,
 }
 
-impl DesktopMetrics {
-    pub const fn new(screen_size: Vec2, taskbar_height: f32, icon_margin: f32) -> Self {
-        Self {
-            screen_size,
-            taskbar_height,
-            icon_margin,
-        }
+impl ShellMetrics {
+    pub const fn new(screen_size: Vec2) -> Self {
+        Self { screen_size }
     }
 }
 
-impl Default for DesktopMetrics {
+impl Default for ShellMetrics {
     fn default() -> Self {
-        Self::new(Vec2::ZERO, 48.0, 16.0)
+        Self::new(Vec2::ZERO)
     }
 }
 
-impl fhre::resources::Resource for DesktopMetrics {}
+impl fhre::resources::Resource for ShellMetrics {}
 
-pub use shell::ShellState;
-pub use theme::ThemeState;
+pub use animation::{ShellOverlayAnimation, ThemeAnimation};
+pub use content::{NotificationCategory, NotificationPriority, ShellContent, ShellNotificationEntry, ShellSurfaceEntry, SurfaceState};
+pub use gesture::{GesturePhase, GestureState, SwipeDirection};
+pub use shell::{ShellOverlayMode, ShellState};
+pub use theme::{ThemeState, ThemeVariant};

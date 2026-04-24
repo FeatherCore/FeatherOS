@@ -1,4 +1,4 @@
-//! Transitional input resource types shared by Wing runtime and demo platform code.
+//! Input resource types shared by the Wing shell and demo platform code.
 
 extern crate alloc;
 

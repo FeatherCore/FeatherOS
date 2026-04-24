@@ -3,7 +3,7 @@ name = "wing"
 version = "0.1.0"
 edition = "2021"
 authors = ["FeatherOS Team"]
-description = "Wing Desktop Environment - A desktop shell for FeatherOS based on FHRE"
+description = "Wing Shell - A mobile/watch shell for FeatherOS based on FHRE"
 license = "MIT OR Apache-2.0"
 
 [lib]

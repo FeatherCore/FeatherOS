@@ -36,7 +36,10 @@ pub use components::{
 pub use extract::{extract_view, extract_wing_shell, queue_wing_primitives, ExtractedShellText};
 pub use input::{ButtonInput, KeyCode, MouseButton, MouseWheel};
 pub use plugin::WingShellPlugin;
-pub use resources::{DesktopMetrics, ShellState, ThemeState};
+pub use resources::{
+    ShellContent, ShellMetrics, ShellNotificationEntry, ShellOverlayMode, ShellState,
+    ShellSurfaceEntry, ThemeState,
+};
 pub use systems::{
     setup_wing_shell, wing_minimal_button_interaction_system, wing_picking_system,
     wing_shell_interaction_system, wing_shell_layout_system, wing_shell_overlay_layout_system,
