@@ -1,10 +1,14 @@
 use crate::types::SurfaceId;
 
+/// Shell overlay modes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ShellOverlayMode {
     #[default]
     None,
-    QuickSettings,
+    /// Android-style notification panel (swipe down from status bar)
+    /// Contains quick settings at top + notification list below
+    NotificationPanel,
+    /// App switcher showing surface preview cards
     AppSwitcher,
 }
 
@@ -15,12 +19,9 @@ pub struct ShellState {
 }
 
 impl ShellState {
-    pub const fn notifications_visible(&self) -> bool {
-        matches!(self.overlay_mode, ShellOverlayMode::QuickSettings)
-    }
-
-    pub const fn quick_settings_open(&self) -> bool {
-        matches!(self.overlay_mode, ShellOverlayMode::QuickSettings)
+    /// Check if notification panel is visible
+    pub const fn notification_panel_open(&self) -> bool {
+        matches!(self.overlay_mode, ShellOverlayMode::NotificationPanel)
     }
 
     pub const fn overlay_visible(&self) -> bool {

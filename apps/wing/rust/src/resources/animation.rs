@@ -1,11 +1,15 @@
+use super::shell::ShellOverlayMode;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ShellOverlayAnimation {
-    pub quick_settings_progress: f32,
+    pub notification_panel_progress: f32,
     pub app_switcher_progress: f32,
-    pub target_quick_settings: f32,
+    pub target_notification_panel: f32,
     pub target_app_switcher: f32,
     pub overlay_alpha: f32,
     pub card_alpha: f32,
+    /// Previous overlay mode for transition detection
+    pub previous_mode: crate::resources::ShellOverlayMode,
 }
 
 impl ShellOverlayAnimation {
@@ -13,8 +17,8 @@ impl ShellOverlayAnimation {
     pub const OVERLAY_MAX_ALPHA: f32 = 0.6;
     pub const CARD_MAX_ALPHA: f32 = 1.0;
 
-    pub fn set_quick_settings_open(&mut self, open: bool) {
-        self.target_quick_settings = if open { 1.0 } else { 0.0 };
+    pub fn set_notification_panel_open(&mut self, open: bool) {
+        self.target_notification_panel = if open { 1.0 } else { 0.0 };
     }
 
     pub fn set_app_switcher_open(&mut self, open: bool) {
@@ -24,14 +28,14 @@ impl ShellOverlayAnimation {
     pub fn update(&mut self, delta_seconds: f32) {
         let speed = Self::ANIMATION_SPEED * delta_seconds;
 
-        if (self.quick_settings_progress - self.target_quick_settings).abs() > 0.001 {
-            if self.quick_settings_progress < self.target_quick_settings {
-                self.quick_settings_progress = (self.quick_settings_progress + speed).min(self.target_quick_settings);
+        if (self.notification_panel_progress - self.target_notification_panel).abs() > 0.001 {
+            if self.notification_panel_progress < self.target_notification_panel {
+                self.notification_panel_progress = (self.notification_panel_progress + speed).min(self.target_notification_panel);
             } else {
-                self.quick_settings_progress = (self.quick_settings_progress - speed).max(self.target_quick_settings);
+                self.notification_panel_progress = (self.notification_panel_progress - speed).max(self.target_notification_panel);
             }
         } else {
-            self.quick_settings_progress = self.target_quick_settings;
+            self.notification_panel_progress = self.target_notification_panel;
         }
 
         if (self.app_switcher_progress - self.target_app_switcher).abs() > 0.001 {
@@ -45,13 +49,13 @@ impl ShellOverlayAnimation {
         }
 
         self.overlay_alpha = Self::OVERLAY_MAX_ALPHA 
-            * (self.quick_settings_progress.max(self.app_switcher_progress));
+            * (self.notification_panel_progress.max(self.app_switcher_progress));
         self.card_alpha = Self::CARD_MAX_ALPHA 
-            * Self::ease_out_cubic(self.quick_settings_progress.max(self.app_switcher_progress));
+            * Self::ease_out_cubic(self.notification_panel_progress.max(self.app_switcher_progress));
     }
 
     pub fn is_animating(&self) -> bool {
-        (self.quick_settings_progress - self.target_quick_settings).abs() > 0.001
+        (self.notification_panel_progress - self.target_notification_panel).abs() > 0.001
             || (self.app_switcher_progress - self.target_app_switcher).abs() > 0.001
     }
 
@@ -60,8 +64,8 @@ impl ShellOverlayAnimation {
         1.0 - (one_minus_t * one_minus_t * one_minus_t)
     }
 
-    pub fn quick_settings_eased(&self) -> f32 {
-        Self::ease_out_cubic(self.quick_settings_progress)
+    pub fn notification_panel_eased(&self) -> f32 {
+        Self::ease_out_cubic(self.notification_panel_progress)
     }
 
     pub fn app_switcher_eased(&self) -> f32 {

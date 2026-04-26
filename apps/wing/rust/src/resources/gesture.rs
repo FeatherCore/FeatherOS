@@ -26,11 +26,8 @@ pub struct GestureState {
 }
 
 impl GestureState {
-    pub const SWIPE_THRESHOLD: f32 = 50.0;
-    pub const VELOCITY_THRESHOLD: f32 = 200.0;
-    pub const MIN_SWIPE_FOR_VELOCITY: f32 = 20.0;
+    /// Default long press threshold in seconds
     pub const LONG_PRESS_THRESHOLD: f32 = 0.5;
-    pub const LONG_PRESS_MOVE_THRESHOLD: f32 = 15.0;
     const VELOCITY_HISTORY_SIZE: usize = 5;
 
     pub fn start(&mut self, position: Vec2) {
@@ -91,11 +88,6 @@ impl GestureState {
     pub fn update_hold_time(&mut self, delta_seconds: f32) {
         if self.phase == GesturePhase::Started || self.phase == GesturePhase::Updated {
             self.hold_time += delta_seconds;
-            if self.hold_time >= Self::LONG_PRESS_THRESHOLD
-                && self.total_delta.length() < Self::LONG_PRESS_MOVE_THRESHOLD
-            {
-                self.is_long_press = true;
-            }
         }
     }
 
@@ -105,12 +97,11 @@ impl GestureState {
         }
     }
 
-    pub fn is_long_press_triggered(&self) -> bool {
-        self.is_long_press && !self.is_swipe()
-    }
-
-    pub fn is_swipe(&self) -> bool {
-        self.total_delta.length() > Self::LONG_PRESS_MOVE_THRESHOLD * 2.0
+    /// Check if long press is triggered with given move threshold
+    pub fn is_long_press_triggered(&self, move_threshold: f32) -> bool {
+        self.is_long_press 
+            && self.hold_time >= Self::LONG_PRESS_THRESHOLD
+            && self.total_delta.length() < move_threshold
     }
 
     pub fn reset(&mut self) {
@@ -119,72 +110,6 @@ impl GestureState {
 
     pub fn is_active(&self) -> bool {
         matches!(self.phase, GesturePhase::Started | GesturePhase::Updated)
-    }
-
-    pub fn is_horizontal_swipe(&self) -> bool {
-        self.total_delta.x.abs() > Self::SWIPE_THRESHOLD
-            && self.total_delta.x.abs() > self.total_delta.y.abs() * 2.0
-    }
-
-    pub fn is_vertical_swipe(&self) -> bool {
-        self.total_delta.y.abs() > Self::SWIPE_THRESHOLD
-            && self.total_delta.y.abs() > self.total_delta.x.abs() * 2.0
-    }
-
-    pub fn is_fast_swipe(&self, direction: SwipeDirection) -> bool {
-        let velocity_threshold = Self::VELOCITY_THRESHOLD;
-        let displacement_threshold = Self::MIN_SWIPE_FOR_VELOCITY;
-        match direction {
-            SwipeDirection::Up => {
-                self.average_velocity.y < -velocity_threshold
-                    && self.total_delta.y.abs() > displacement_threshold
-            }
-            SwipeDirection::Down => {
-                self.average_velocity.y > velocity_threshold
-                    && self.total_delta.y.abs() > displacement_threshold
-            }
-            SwipeDirection::Left => {
-                self.average_velocity.x < -velocity_threshold
-                    && self.total_delta.x.abs() > displacement_threshold
-            }
-            SwipeDirection::Right => {
-                self.average_velocity.x > velocity_threshold
-                    && self.total_delta.x.abs() > displacement_threshold
-            }
-        }
-    }
-
-    pub fn swipe_direction(&self) -> Option<SwipeDirection> {
-        if self.is_horizontal_swipe() {
-            if self.total_delta.x > 0.0 {
-                Some(SwipeDirection::Right)
-            } else {
-                Some(SwipeDirection::Left)
-            }
-        } else if self.is_vertical_swipe() {
-            if self.total_delta.y > 0.0 {
-                Some(SwipeDirection::Down)
-            } else {
-                Some(SwipeDirection::Up)
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn swipe_direction_with_velocity(&self) -> Option<SwipeDirection> {
-        if self.is_horizontal_swipe() || self.is_vertical_swipe() {
-            let direction = self.swipe_direction()?;
-            if self.is_fast_swipe(direction) || self.meets_displacement_threshold() {
-                return Some(direction);
-            }
-        }
-        None
-    }
-
-    fn meets_displacement_threshold(&self) -> bool {
-        self.total_delta.y.abs() > Self::SWIPE_THRESHOLD * 0.6
-            || self.total_delta.x.abs() > Self::SWIPE_THRESHOLD * 0.6
     }
 }
 

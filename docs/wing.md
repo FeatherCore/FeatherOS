@@ -240,6 +240,8 @@ Platform Window
 
 ## 当前实现状态
 
+### 当前实现状态
+
 ### 已落地
 
 **主链路已经成立：**
@@ -255,17 +257,13 @@ Platform Window
 - ✅ `HomeSurface`
 - ✅ `SurfaceStackRoot`
 - ✅ `CardStackRoot`
-- ✅ `NotificationStackRoot`
-- ✅ `StatusBar`
-- ✅ `QuickSettingsPanel`
 - ✅ `OverlayLayer`
-- ✅ `NotificationLayer`
+- ✅ `NotificationPanel`
+- ✅ `QuickControlTile`（WiFi、蓝牙、飞行模式等）
+- ✅ `BrightnessControl`
 - ✅ `NotificationCard`
-- ✅ `NotificationText`
 - ✅ `AppSurface`
 - ✅ `SurfacePreviewCard`
-- ✅ `BottomBar`
-- ✅ `GestureZone`
 - ✅ `SurfaceText`
 
 **当前可用的系统与提取器：**
@@ -278,9 +276,10 @@ Platform Window
 - ✅ `wing_shell_layout_system`
 - ✅ `wing_shell_stack_layout_system`
 - ✅ `wing_shell_overlay_layout_system`
-- ✅ `wing_notification_card_layout_system`
+- ✅ `wing_shell_notification_panel_layout_system`
+- ✅ `wing_shell_quick_controls_layout_system`
+- ✅ `wing_shell_notification_cards_layout_system`
 - ✅ `wing_shell_overlay_card_layout_system`
-- ✅ `wing_notification_text_layout_system`
 - ✅ `extract_view`
 - ✅ `extract_wing_shell`
 - ✅ `queue_wing_primitives`
@@ -304,56 +303,54 @@ Platform Window
 - ✅ NuttX SIM framebuffer `Window` 实现
 - ✅ `InputBridge` 与 `PlatformInputPlugin`
 
-### 尚未完成的架构约束
+### 架构约束
 
-以下部分仍未完全达到 `docs/ARCHITECTURE.md` 要求的纯 3D 语义，必须明确记录，不能把当前最小实现误写成已经完成架构收口：
+以下部分仍未完全达到 `docs/ARCHITECT.md` 要求的纯 3D 语义，必须明确记录：
 
 - 当前控件虽然已经作为 3D ECS 实体存在于 `MainWorld`，但最终渲染结果仍偏向最小 2D primitive 输出
-- 视觉上像 `2D` 的按钮、卡片、面板、文字和手势区，当前实现还没有完整落实为“默认贴在幕布平面上的 3D 对象”这一约束
+- 视觉上像 `2D` 的按钮、卡片、面板，当前实现还没有完整落实为"默认贴在幕布平面上的 3D 对象"这一约束
 - 当前主线已经接入 `Camera + PrimaryScreen + View`，但壳层控件的最终呈现语义仍需要继续向统一的相机投影语义收口
 - `Transform.position.z` 现在已经承担层次表达，但后续仍要确保它不仅是排序辅助值，而是真正可参与控件空间行为的 3D 深度
-- 后续所有壳层控件实现，都必须以“可在 3D 空间内相对摄像机移动、层叠、缩放、旋转”为默认前提，而不是以“先做纯屏幕空间 2D 控件”为前提
 
 ### 当前限制
 
 - 现在是最小 shell 骨架，不是完整系统壳层
 - `ShellState` 已开始收口为更明确的壳层模式状态，但整体仍是最小状态模型
-- `AppSurface`、通知卡片、预览卡片仍是默认 demo 内容，但已开始收口为资源驱动的数据模型
 - 布局已实现动态计算：`CardStackLayout` 和 `NotificationStackLayout` 根据 `ShellContent` 数量自适应
-- 滑动手势已实现基础版本，支持上下滑动切换 QuickSettings/AppSwitcher
-- **滑动手势已支持速度阈值判断**：快速滑动即使位移较小也能触发，提高交互流畅度
-- **长按手势已实现**：在 StatusBar 区域长按可切换主题（Aurora ↔ Dusk）
-- Overlay 已接入基础过渡动画，QuickSettings / Notification / AppSwitcher 不再瞬时切换
+- **手势识别系统**：手势检测覆盖整个屏幕，支持下滑打开通知面板
+- **长按手势已实现**：在屏幕顶部区域长按可切换主题（Aurora ↔ Dusk）
+- Overlay 已接入基础过渡动画，NotificationPanel / AppSwitcher 不再瞬时切换
 - **Overlay 动画已扩展透明度细节**：卡片和遮罩层透明度随动画进度平滑过渡
 - **ShellContent 已支持动态更新 API**：`add_surface()`、`remove_surface()`、`add_notification()`、`remove_notification()` 等方法
 - **ThemeAnimation 主题过渡动画**：`ThemeAnimation` 资源支持平滑的主题切换过渡
 - **ThemeState 扩展**：`pending_variant`、`is_transitioning` 支持主题切换动画状态追踪
+- **安卓风格通知面板**：下滑显示快捷控制（WiFi、蓝牙、亮度等）+ 应用通知列表
+- **全屏手势**：顶部状态栏和底部导航栏已移除，不占用主屏幕显示区域
 - `WingShellPlugin` 已负责主线资源、系统和 extractor 的默认装配
-- 当前实现仍处于"主链路已接通，但纯 3D 控件语义未完全收口"的阶段
 
 ### 当前交互
 
 当前默认交互保持克制：
 
-**点击交互：**
-- 点击 `StatusBar` 切换 `QuickSettingsPanel`
-- `QuickSettingsPanel` 打开时显示 `OverlayLayer`
-- `QuickSettingsPanel` 打开时同时显示 `NotificationCard + NotificationText` 骨架
-- 点击 `OverlayLayer` 关闭 panel
-- 点击 `GestureZone` 回到 `HomeSurface`
-- 点击 `BottomBar` 打开或关闭 `SurfacePreviewCard` 卡片栈
-- 点击任意 `SurfacePreviewCard` 激活对应 `surface`
-
-**滑动手势：**
-- 从 `StatusBar` 区域向下滑动 → 打开 `QuickSettings`
-- 从 `BottomBar` 区域向上滑动 → 打开 `AppSwitcher`
-- 在 `QuickSettings` 打开时向上滑动 → 关闭
+**滑动手势（全屏）：**
+- 在屏幕任意位置向下滑动 → 打开 `NotificationPanel`（安卓风格通知面板）
+- 在屏幕任意位置上滑动 → 打开 `AppSwitcher`（应用预览卡片）
+- 在 `NotificationPanel` 打开时向上滑动 → 关闭
 - 在 `AppSwitcher` 打开时向下滑动 → 关闭
 - 滑动阈值：50 像素位移 或 200 像素/秒速度
-- 快速滑动（速度 > 200 像素/秒）即使位移较小（> 20 像素）也能触发
+- 快速滑动（速度 > 200 像素/秒）即使位移较小也能触发
 
 **长按手势：**
-- 在 `StatusBar` 区域长按（> 0.5 秒且移动 < 15 像素）→ 切换主题（Aurora ↔ Dusk）
+- 在屏幕顶部区域长按（> 0.5 秒且移动 < 15 像素）→ 切换主题（Aurora ↔ Dusk）
+
+**点击交互：**
+- StatusBar 和 BottomBar 不再显示（不占用屏幕空间）
+- 点击 `OverlayLayer`（遮罩层）关闭 panel
+- 点击通知面板关闭
+
+**注意：**
+- 顶部状态栏和底部导航栏已移除，不占用主屏幕显示区域
+- 手势检测覆盖整个屏幕，无需特定区域触发
 
 ## 数据模型
 
@@ -373,9 +370,24 @@ Platform Window
 - `id`: u32 - 唯一标识
 - `title`: &'static str - 标题
 - `summary`: &'static str - 摘要
-- `priority`: NotificationPriority - 优先级（Low/Normal/High/Urgent）
+- `app_name`: &'static str - 应用名称
+- `priority`: NotificationPriority - 优先级（Low/Normal/High）
 - `category`: NotificationCategory - 分类（System/Message/Email/Social/Alarm/Reminder/Other）
 - `timestamp`: u64 - 时间戳
+
+### QuickControlState
+
+快捷控制状态：
+- `wifi_enabled`: bool - WiFi 开关
+- `wifi_connected`: bool - WiFi 连接状态
+- `bluetooth_enabled`: bool - 蓝牙开关
+- `bluetooth_connected`: bool - 蓝牙连接状态
+- `airplane_mode`: bool - 飞行模式
+- `flashlight_on`: bool - 手电筒
+- `dnd_mode`: bool - 勿扰模式
+- `auto_rotate`: bool - 自动旋转
+- `battery_saver`: bool - 省电模式
+- `brightness`: f32 - 亮度（0.0-1.0）
 
 ### ShellContent 动态更新 API
 
@@ -393,6 +405,13 @@ content.clear_notifications();
 content.get_surface(surface_id);
 content.surface_count();
 content.notification_count();
+
+// 快捷控制
+content.toggle_wifi();
+content.toggle_bluetooth();
+content.toggle_airplane_mode();
+content.toggle_flashlight();
+content.set_brightness(0.8);
 ```
 
 ## 当前非目标

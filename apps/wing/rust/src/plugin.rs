@@ -5,10 +5,11 @@ use fhre::{App, Plugin};
 use crate::extract::{extract_view, extract_wing_shell, queue_wing_primitives};
 use crate::resources::{GestureState, ShellContent, ShellMetrics, ShellOverlayAnimation, ShellState, ThemeAnimation, ThemeState};
 use crate::systems::{
-    setup_wing_shell, wing_gesture_system, wing_minimal_button_interaction_system, wing_notification_card_layout_system,
-    wing_notification_text_layout_system, wing_overlay_animation_system, wing_picking_system,
+    setup_wing_shell, wing_gesture_system, wing_minimal_button_interaction_system,
+    wing_overlay_animation_system, wing_picking_system,
     wing_shell_interaction_system, wing_shell_layout_system, wing_shell_overlay_layout_system,
-    wing_shell_overlay_card_layout_system, wing_shell_stack_layout_system,
+    wing_shell_notification_panel_layout_system, wing_shell_quick_controls_layout_system,
+    wing_shell_notification_cards_layout_system, wing_shell_overlay_card_layout_system, wing_shell_stack_layout_system,
 };
 
 /// Registers the default Wing shell resources, systems, and extractors.
@@ -56,7 +57,7 @@ impl Plugin for WingShellPlugin {
         )
         .add_systems(
             fhre::PreUpdate,
-            fhre::declare_system!(wing_shell_interaction_system; fhre::Res<fhre::Events>, fhre::ResMut<ShellState>, fhre::Query<&crate::StatusBar>, fhre::Query<&crate::BottomBar>, fhre::Query<&crate::GestureZone>, fhre::Query<&crate::OverlayLayer>, fhre::Query<&crate::SurfacePreviewCard>, fhre::Query<&crate::AppSurface>),
+            fhre::declare_system!(wing_shell_interaction_system; fhre::Res<fhre::Events>, fhre::ResMut<ShellState>, fhre::Query<&crate::OverlayLayer>, fhre::Query<&crate::SurfacePreviewCard>, fhre::Query<&crate::AppSurface>, fhre::Query<&crate::NotificationPanel>),
         )
         .add_systems(
             fhre::PreUpdate,
@@ -68,27 +69,31 @@ impl Plugin for WingShellPlugin {
         )
         .add_systems(
             fhre::Update,
-            fhre::declare_system!(wing_shell_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellState>, fhre::Query<&mut fhre::Transform>, fhre::Query<&mut fhre::PickableBounds>, fhre::Query<&mut crate::HomeSurface>, fhre::Query<&crate::StatusBar>, fhre::Query<&crate::BottomBar>, fhre::Query<&mut crate::AppSurface>),
+            fhre::declare_system!(wing_shell_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellState>, fhre::Query<&mut fhre::Transform>, fhre::Query<&mut fhre::PickableBounds>, fhre::Query<&mut crate::HomeSurface>, fhre::Query<&mut crate::AppSurface>),
         )
         .add_systems(
             fhre::Update,
-            fhre::declare_system!(wing_shell_stack_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellContent>, fhre::Query<&mut fhre::Transform>, fhre::Query<&crate::SurfaceStackRoot>, fhre::Query<&crate::CardStackRoot>, fhre::Query<&crate::NotificationStackRoot>),
+            fhre::declare_system!(wing_shell_stack_layout_system; fhre::Res<ShellMetrics>, fhre::Query<&mut fhre::Transform>, fhre::Query<&crate::SurfaceStackRoot>, fhre::Query<&crate::CardStackRoot>),
         )
         .add_systems(
             fhre::Update,
-            fhre::declare_system!(wing_shell_overlay_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellState>, fhre::Res<ShellOverlayAnimation>, fhre::Query<&mut fhre::Transform>, fhre::Query<&mut fhre::PickableBounds>, fhre::Query<&mut crate::OverlayLayer>, fhre::Query<&mut crate::NotificationLayer>, fhre::Query<&crate::GestureZone>, fhre::Query<&mut crate::QuickSettingsPanel>),
+            fhre::declare_system!(wing_shell_overlay_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellState>, fhre::Res<ShellOverlayAnimation>, fhre::Query<&mut fhre::Transform>, fhre::Query<&mut fhre::PickableBounds>, fhre::Query<&mut crate::OverlayLayer>),
         )
         .add_systems(
             fhre::Update,
-            fhre::declare_system!(wing_notification_card_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellContent>, fhre::Res<ShellState>, fhre::Res<ShellOverlayAnimation>, fhre::Query<&mut fhre::Transform>, fhre::Query<&mut fhre::PickableBounds>, fhre::Query<&mut crate::NotificationCard>),
+            fhre::declare_system!(wing_shell_notification_panel_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellState>, fhre::Res<ShellOverlayAnimation>, fhre::Query<&mut fhre::Transform>, fhre::Query<&mut fhre::PickableBounds>, fhre::Query<&mut crate::NotificationPanel>),
+        )
+        .add_systems(
+            fhre::Update,
+            fhre::declare_system!(wing_shell_quick_controls_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellState>, fhre::Res<ShellOverlayAnimation>, fhre::Res<ShellContent>, fhre::Query<&mut fhre::Transform>, fhre::Query<&mut crate::BrightnessControl>, fhre::Query<&mut crate::QuickControlTile>),
+        )
+        .add_systems(
+            fhre::Update,
+            fhre::declare_system!(wing_shell_notification_cards_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellState>, fhre::Res<ShellOverlayAnimation>, fhre::Query<&mut fhre::Transform>, fhre::Query<&mut fhre::PickableBounds>, fhre::Query<&mut crate::NotificationCard>),
         )
         .add_systems(
             fhre::Update,
             fhre::declare_system!(wing_shell_overlay_card_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellContent>, fhre::Res<ShellState>, fhre::Res<ShellOverlayAnimation>, fhre::Query<&mut fhre::Transform>, fhre::Query<&mut fhre::PickableBounds>, fhre::Query<&mut crate::SurfacePreviewCard>),
-        )
-        .add_systems(
-            fhre::Update,
-            fhre::declare_system!(wing_notification_text_layout_system; fhre::Res<ShellMetrics>, fhre::Res<ShellContent>, fhre::Res<ShellOverlayAnimation>, fhre::Query<&mut fhre::Transform>, fhre::Query<&crate::NotificationText>),
         )
         .add_extractor(extract_view)
         .add_extractor(extract_wing_shell)

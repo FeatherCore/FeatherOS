@@ -2,7 +2,13 @@ use alloc::string::String;
 
 use fhre::{render_world::ExtractedUI, Color, MainWorld, RenderWorld, Transform};
 
-use crate::components::{AppSurface, BottomBar, CardStackRoot, GestureZone, HomeSurface, NotificationCard, NotificationLayer, NotificationStackRoot, NotificationText, NotificationTextRole, OverlayLayer, QuickSettingsPanel, ShellRoot, StatusBar, SurfaceCardSubtitle, SurfaceCardTitle, SurfacePreviewCard, SurfaceStackRoot, SurfaceText, WidgetLayoutNode};
+use crate::components::{
+    AppSurface, BrightnessControl, CardStackRoot, HomeSurface,
+    NotificationCard, NotificationCardContent, NotificationCardTitle, NotificationPanel,
+    OverlayLayer, QuickControlTile, ShellRoot,
+    SurfaceCardSubtitle, SurfaceCardTitle, SurfacePreviewCard,
+    SurfaceStackRoot, SurfaceText, WidgetLayoutNode,
+};
 use crate::resources::{ShellContent, ShellOverlayAnimation, ShellState, ThemeState};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -17,6 +23,10 @@ impl fhre::Component for ExtractedShellText {
     fn type_name() -> &'static str { "ExtractedShellText" }
 }
 
+/// Extract shell UI components to render world.
+/// 
+/// This extractor reads shell state from MainWorld and creates render components.
+/// Components are conditionally added/removed based on visibility state.
 pub fn extract_wing_shell(main_world: &MainWorld, render_world: &mut RenderWorld) {
     let palette = main_world
         .resources()
@@ -27,11 +37,6 @@ pub fn extract_wing_shell(main_world: &MainWorld, render_world: &mut RenderWorld
         .resources()
         .get::<ShellState>()
         .and_then(|state| state.active_surface);
-    let notifications_visible = main_world
-        .resources()
-        .get::<ShellState>()
-        .map(|state| state.notifications_visible())
-        .unwrap_or(false);
     let overlay_alpha = main_world
         .resources()
         .get::<ShellOverlayAnimation>()
@@ -47,76 +52,91 @@ pub fn extract_wing_shell(main_world: &MainWorld, render_world: &mut RenderWorld
         .get::<ShellState>()
         .map(|state| state.app_switcher_open())
         .unwrap_or(false);
-    let content = main_world
+    let notification_panel_open = main_world
         .resources()
-        .get::<ShellContent>();
+        .get::<ShellState>()
+        .map(|state| state.notification_panel_open())
+        .unwrap_or(false);
 
+    // === Extract UI rectangles ===
+    
     for (entity, transform) in main_world.query::<Transform>() {
         let Some(layout) = main_world.get_component::<WidgetLayoutNode>(entity) else {
             continue;
         };
 
-        let color = if main_world.get_component::<ShellRoot>(entity).is_some() {
-            Some(palette.background)
+        // Determine if this UI element should be rendered
+        let (should_render, render_color) = if main_world.get_component::<ShellRoot>(entity).is_some() {
+            (true, Some(palette.background))
         } else if main_world.get_component::<SurfaceStackRoot>(entity).is_some() {
-            Some(Color::new(0, 0, 0, 0))
+            (false, None)  // Invisible container
         } else if main_world.get_component::<CardStackRoot>(entity).is_some() {
-            Some(Color::new(0, 0, 0, 0))
-        } else if main_world.get_component::<NotificationStackRoot>(entity).is_some() {
-            Some(Color::new(0, 0, 0, 0))
+            (false, None)  // Invisible container
         } else if let Some(home_surface) = main_world.get_component::<HomeSurface>(entity) {
-            Some(if home_surface.active { palette.surface } else { Color::new(0, 0, 0, 0) })
-        } else if main_world.get_component::<StatusBar>(entity).is_some() {
-            Some(palette.accent)
-        } else if main_world.get_component::<BottomBar>(entity).is_some() {
-            Some(palette.surface_alt)
+            if home_surface.active { (true, Some(palette.surface)) } else { (false, None) }
         } else if let Some(overlay) = main_world.get_component::<OverlayLayer>(entity) {
-            Some(if overlay.visible { 
-                Color::new(10, 16, 32, (160.0 * overlay_alpha) as u8) 
-            } else { Color::new(0, 0, 0, 0) })
-        } else if let Some(notification) = main_world.get_component::<NotificationLayer>(entity) {
-            Some(if notification.visible { palette.surface_alt } else { Color::new(0, 0, 0, 0) })
-        } else if let Some(notification_card) = main_world.get_component::<NotificationCard>(entity) {
-            Some(if notification_card.visible {
-                let base_color = if notification_card.stack_index == 0 { palette.surface } else { palette.surface_alt };
-                Color::new(base_color.r, base_color.g, base_color.b, (255.0 * card_alpha) as u8)
-            } else {
-                Color::new(0, 0, 0, 0)
-            })
+            if overlay.visible { 
+                (true, Some(Color::new(10, 16, 32, (160.0 * overlay_alpha) as u8)))
+            } else { (false, None) }
         } else if let Some(card) = main_world.get_component::<SurfacePreviewCard>(entity) {
-            Some(if card.visible {
+            if card.visible {
                 let base_color = if card.stack_index == 0 { palette.surface } else { palette.surface_alt };
-                Color::new(base_color.r, base_color.g, base_color.b, (255.0 * card_alpha) as u8)
-            } else {
-                Color::new(0, 0, 0, 0)
-            })
-        } else if main_world.get_component::<GestureZone>(entity).is_some() {
-            Some(Color::new(255, 255, 255, 96))
-        } else if let Some(panel) = main_world.get_component::<QuickSettingsPanel>(entity) {
-            Some(if panel.open { 
+                (true, Some(Color::new(base_color.r, base_color.g, base_color.b, (255.0 * card_alpha) as u8)))
+            } else { (false, None) }
+        // Notification panel container
+        } else if let Some(panel) = main_world.get_component::<NotificationPanel>(entity) {
+            if panel.open { 
                 let base = palette.overlay;
-                Color::new(base.r, base.g, base.b, (base.a as f32 * card_alpha) as u8)
-            } else { Color::new(0, 0, 0, 0) })
+                (true, Some(Color::new(base.r, base.g, base.b, (base.a as f32 * card_alpha) as u8)))
+            } else { (false, None) }
+        // Quick control tile
+        } else if let Some(tile) = main_world.get_component::<QuickControlTile>(entity) {
+            if notification_panel_open || card_alpha > 0.0 {
+                let tile_color = if tile.active { palette.accent } else { palette.surface_alt };
+                (true, Some(Color::new(tile_color.r, tile_color.g, tile_color.b, (255.0 * card_alpha) as u8)))
+            } else { (false, None) }
+        // Brightness control
+        } else if let Some(brightness) = main_world.get_component::<BrightnessControl>(entity) {
+            if brightness.visible {
+                (true, Some(Color::new(palette.surface_alt.r, palette.surface_alt.g, palette.surface_alt.b, (200.0 * card_alpha) as u8)))
+            } else { (false, None) }
+        // Notification card
+        } else if let Some(card) = main_world.get_component::<NotificationCard>(entity) {
+            if card.visible {
+                let base_color = match card.priority {
+                    crate::components::NotificationPriority::High => palette.accent,
+                    _ => palette.surface,
+                };
+                (true, Some(Color::new(base_color.r, base_color.g, base_color.b, (255.0 * card_alpha) as u8)))
+            } else { (false, None) }
         } else if let Some(app_surface) = main_world.get_component::<AppSurface>(entity) {
-            Some(if app_surface.active { palette.surface_alt } else { Color::new(0, 0, 0, 0) })
+            if app_surface.active { (true, Some(palette.surface_alt)) } else { (false, None) }
         } else {
-            None
+            (false, None)
         };
 
-        if let Some(color) = color {
-            let render_entity = render_world.get_or_spawn_synced(entity);
-            render_world.insert_component(
-                render_entity,
-                ExtractedUI {
-                    position: transform.xy(),
-                    width: layout.width,
-                    height: layout.height,
-                    color,
-                },
-            );
+        let render_entity = render_world.get_or_spawn_synced(entity);
+        
+        if should_render {
+            if let Some(color) = render_color {
+                render_world.insert_component(
+                    render_entity,
+                    ExtractedUI {
+                        position: transform.xy(),
+                        width: layout.width,
+                        height: layout.height,
+                        color,
+                    },
+                );
+            }
+        } else {
+            // Remove component when not visible to avoid stale rendering
+            render_world.remove_component::<ExtractedUI>(render_entity);
         }
     }
 
+    // === Extract shell text (SurfaceText) ===
+    
     for (entity, transform) in main_world.query::<Transform>() {
         let Some(text) = main_world.get_component::<SurfaceText>(entity) else {
             continue;
@@ -138,40 +158,21 @@ pub fn extract_wing_shell(main_world: &MainWorld, render_world: &mut RenderWorld
         );
     }
 
+    // === Extract card title/subtitle text (only when AppSwitcher is open) ===
+    
     for (entity, transform) in main_world.query::<Transform>() {
-        let Some(text) = main_world.get_component::<NotificationText>(entity) else {
+        let Some(card_title) = main_world.get_component::<SurfaceCardTitle>(entity) else {
             continue;
         };
-        if !notifications_visible {
-            continue;
-        }
         let render_entity = render_world.get_or_spawn_synced(entity);
-        render_world.insert_component(
-            render_entity,
-            ExtractedShellText {
-                position: transform.xy(),
-                text: text.text.into(),
-                color: match text.role {
-                    NotificationTextRole::Title => palette.text,
-                    NotificationTextRole::Summary => palette.text_muted,
-                },
-                size: match text.role {
-                    NotificationTextRole::Title => 12.0,
-                    NotificationTextRole::Summary => 10.0,
-                },
-            },
-        );
-    }
-
-    if app_switcher_open {
-        for (entity, transform) in main_world.query::<Transform>() {
-            let Some(card_title) = main_world.get_component::<SurfaceCardTitle>(entity) else {
-                continue;
-            };
-            let title = content.and_then(|c| c.get_surface(card_title.surface_id))
+        
+        if app_switcher_open {
+            let title = main_world
+                .resources()
+                .get::<ShellContent>()
+                .and_then(|c| c.get_surface(card_title.surface_id))
                 .map(|s| s.preview_title)
                 .unwrap_or("App");
-            let render_entity = render_world.get_or_spawn_synced(entity);
             render_world.insert_component(
                 render_entity,
                 ExtractedShellText {
@@ -181,16 +182,24 @@ pub fn extract_wing_shell(main_world: &MainWorld, render_world: &mut RenderWorld
                     size: 12.0,
                 },
             );
+        } else {
+            render_world.remove_component::<ExtractedShellText>(render_entity);
         }
+    }
 
-        for (entity, transform) in main_world.query::<Transform>() {
-            let Some(card_subtitle) = main_world.get_component::<SurfaceCardSubtitle>(entity) else {
-                continue;
-            };
-            let subtitle = content.and_then(|c| c.get_surface(card_subtitle.surface_id))
+    for (entity, transform) in main_world.query::<Transform>() {
+        let Some(card_subtitle) = main_world.get_component::<SurfaceCardSubtitle>(entity) else {
+            continue;
+        };
+        let render_entity = render_world.get_or_spawn_synced(entity);
+        
+        if app_switcher_open {
+            let subtitle = main_world
+                .resources()
+                .get::<ShellContent>()
+                .and_then(|c| c.get_surface(card_subtitle.surface_id))
                 .and_then(|s| if s.icon_hint.is_empty() { None } else { Some(s.icon_hint) })
                 .unwrap_or("Running");
-            let render_entity = render_world.get_or_spawn_synced(entity);
             render_world.insert_component(
                 render_entity,
                 ExtractedShellText {
@@ -200,6 +209,64 @@ pub fn extract_wing_shell(main_world: &MainWorld, render_world: &mut RenderWorld
                     size: 10.0,
                 },
             );
+        } else {
+            render_world.remove_component::<ExtractedShellText>(render_entity);
+        }
+    }
+
+    // === Extract notification card title/content text (only when NotificationPanel is open) ===
+    
+    for (entity, transform) in main_world.query::<Transform>() {
+        let Some(card_title) = main_world.get_component::<NotificationCardTitle>(entity) else {
+            continue;
+        };
+        let render_entity = render_world.get_or_spawn_synced(entity);
+        
+        if notification_panel_open {
+            let title = main_world
+                .resources()
+                .get::<ShellContent>()
+                .and_then(|c| c.get_notification(card_title.notification_id))
+                .map(|n| n.title)
+                .unwrap_or("Notification");
+            render_world.insert_component(
+                render_entity,
+                ExtractedShellText {
+                    position: transform.xy(),
+                    text: title.into(),
+                    color: palette.text,
+                    size: 12.0,
+                },
+            );
+        } else {
+            render_world.remove_component::<ExtractedShellText>(render_entity);
+        }
+    }
+
+    for (entity, transform) in main_world.query::<Transform>() {
+        let Some(card_content) = main_world.get_component::<NotificationCardContent>(entity) else {
+            continue;
+        };
+        let render_entity = render_world.get_or_spawn_synced(entity);
+        
+        if notification_panel_open {
+            let content = main_world
+                .resources()
+                .get::<ShellContent>()
+                .and_then(|c| c.get_notification(card_content.notification_id))
+                .map(|n| n.summary)
+                .unwrap_or("");
+            render_world.insert_component(
+                render_entity,
+                ExtractedShellText {
+                    position: transform.xy(),
+                    text: content.into(),
+                    color: palette.text_muted,
+                    size: 10.0,
+                },
+            );
+        } else {
+            render_world.remove_component::<ExtractedShellText>(render_entity);
         }
     }
 }
