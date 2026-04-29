@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# ESP32 WiFi Driver Configuration
+
+if WIRELESS && CFG80211
+
+menu "ESP32 WiFi Driver"
+
+config ESP32_WIFI
+	bool "ESP32 WiFi support"
+	default n
+	help
+	  Enable support for ESP32 WiFi chips via SDIO or SPI interface.
+	  This provides cfg80211 compatibility layer for ESP32 chips.
+
+if ESP32_WIFI
+
+config ESP32_WIFI_SDIO
+	bool "SDIO interface support"
+	default y if ESP32_WIFI
+	help
+	  Enable SDIO interface for ESP32 WiFi chip communication.
+	  
+config ESP32_WIFI_SPI
+	bool "SPI interface support"
+	default n
+	help
+	  Enable SPI interface for ESP32 WiFi chip communication.
+
+config ESP32_WIFI_STA
+	bool "Station mode support"
+	default y
+	help
+	  Enable station (client) mode support for connecting to APs.
+
+config ESP32_WIFI_AP
+	bool "Access Point mode support"
+	default n
+	help
+	  Enable access point mode support for creating hotspots.
+
+config ESP32_WIFI_P2P
+	bool "Wi-Fi Direct (P2P) support"
+	default n
+	help
+	  Enable Wi-Fi Direct (P2P) mode support.
+
+config ESP32_WIFI_SDIO_DEVMINOR
+	int "SDIO device minor number"
+	default 0
+	range 0 255
+	depends on ESP32_WIFI_SDIO
+	help
+	  Minor number for the ESP32 SDIO device.
+
+config ESP32_WIFI_SDIO_FUNCTION
+	int "SDIO function number"
+	default 1
+	range 0 7
+	depends on ESP32_WIFI_SDIO
+	help
+	  SDIO function number for ESP32 WiFi (typically 1).
+
+config ESP32_WIFI_SPI_DEVMINOR
+	int "SPI device minor number"
+	default 0
+	range 0 255
+	depends on ESP32_WIFI_SPI
+	help
+	  Minor number for the ESP32 SPI device.
+
+config ESP32_WIFI_SPI_INTR_PIN
+	int "SPI interrupt GPIO pin"
+	default -1
+	range -1 255
+	depends on ESP32_WIFI_SPI
+	help
+	  GPIO pin number for ESP32 SPI interrupt (-1 for none).
+
+config ESP32_WIFI_SPI_CS_PIN
+	int "SPI chip select GPIO pin"
+	default 2
+	range -1 255
+	depends on ESP32_WIFI_SPI
+	help
+	  GPIO pin number for ESP32 SPI chip select (-1 for none).
+
+config ESP32_WIFI_SPI_FREQ
+	int "SPI frequency (Hz)"
+	default 10000000
+	range 1000000 40000000
+	depends on ESP32_WIFI_SPI
+	help
+	  SPI clock frequency for ESP32 communication.
+
+config ESP32_WIFI_NINTERFACES
+	int "Maximum number of WiFi interfaces"
+	default 2
+	range 1 4
+	help
+	  Maximum number of WiFi interfaces (stations, APs) that can be created.
+
+config ESP32_WIFI_RX_BUFFER_SIZE
+	int "Receive buffer size"
+	default 2048
+	range 1024 8192
+	help
+	  Size of the receive buffer for ESP32 communication.
+
+config ESP32_WIFI_SCAN_TIMEOUT
+	int "Scan timeout (seconds)"
+	default 10
+	range 5 60
+	help
+	  Timeout for WiFi scan operations.
+
+config ESP32_WIFI_CONNECT_TIMEOUT
+	int "Connection timeout (seconds)"
+	default 15
+	range 5 60
+	help
+	  Timeout for WiFi connection attempts.
+
+config ESP32_WIFI_DEBUG
+	bool "ESP32 WiFi debugging"
+	default n
+	help
+	  Enable debugging output for ESP32 WiFi driver.
+
+if ESP32_WIFI_DEBUG
+
+config ESP32_WIFI_DEBUG_INFO
+	bool "Debug info output"
+	default n
+	help
+	  Enable info-level debug output.
+
+config ESP32_WIFI_DEBUG_ERROR
+	bool "Debug error output"
+	default y
+	help
+	  Enable error-level debug output.
+
+endif # ESP32_WIFI_DEBUG
+
+endif # ESP32_WIFI
+
+endmenu
+
+endif # WIRELESS && CFG80211

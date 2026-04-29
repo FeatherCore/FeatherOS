@@ -1,5 +1,5 @@
 ############################################################################
-# net/netlink/Make.defs
+# net/wireless/Make.defs
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,27 +20,17 @@
 #
 ############################################################################
 
-# Logic specific to NETLINK
+# Logic specific to wireless subsystem
 
-ifeq ($(CONFIG_NET_NETLINK),y)
-
-SOCK_CSRCS += netlink_sockif.c
-NET_CSRCS += netlink_conn.c netlink_notifier.c
-
-ifeq ($(CONFIG_NETLINK_ROUTE),y)
-NET_CSRCS += netlink_route.c netlink_attr.c
+ifeq ($(CONFIG_NL80211),y)
+NET_CSRCS += nl80211.c
 endif
 
-ifeq ($(CONFIG_NETLINK_NETFILTER),y)
-NET_CSRCS += netlink_netfilter.c
+ifeq ($(CONFIG_CFG80211),y)
+NET_CSRCS += cfg80211.c
 endif
 
-ifeq ($(CONFIG_NETLINK_GENERIC),y)
-NET_CSRCS += netlink_generic.c
-endif
+# Include wireless build support
 
-# Include netlink build support
-
-DEPPATH += --dep-path netlink
-VPATH += :netlink
-endif
+DEPPATH += --dep-path wireless
+VPATH += :wireless

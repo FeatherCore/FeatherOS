@@ -137,6 +137,11 @@ static int netlink_setup(FAR struct socket *psock)
         break;
 #endif
 
+#ifdef CONFIG_NETLINK_GENERIC
+      case NETLINK_GENERIC:
+        break;
+#endif
+
       default:
         return -EPROTONOSUPPORT;
     }
@@ -635,6 +640,15 @@ static ssize_t netlink_sendmsg(FAR struct socket *psock,
                                        msg->msg_iov->iov_len, flags,
                                        (FAR const struct sockaddr_nl *)to,
                                        tolen);
+        break;
+#endif
+
+#ifdef CONFIG_NETLINK_GENERIC
+      case NETLINK_GENERIC:
+        ret = netlink_generic_sendto(conn, nlmsg,
+                                     msg->msg_iov->iov_len, flags,
+                                     (FAR const struct sockaddr_nl *)to,
+                                     tolen);
         break;
 #endif
 

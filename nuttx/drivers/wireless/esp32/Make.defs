@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# drivers/wireless/esp32/Make.defs
+
+ifeq ($(CONFIG_ESP32_WIFI),y)
+
+CSRCS = esp32_main.c
+
+ifeq ($(CONFIG_ESP32_WIFI_SDIO),y)
+CSRCS += esp32_sdio.c
+endif
+
+ifeq ($(CONFIG_ESP32_WIFI_SPI),y)
+CSRCS += esp32_spi.c
+endif
+
+CSRCS += esp_cfg80211.c
+
+# Add to wireless build
+DEPPATH += --dep-path wireless/esp32
+VPATH += :wireless/esp32
+
+# Include esp32 wireless directory
+CFLAGS += -I$(TOPDIR)/include/nuttx/wireless
+
+endif # CONFIG_ESP32_WIFI

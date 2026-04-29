@@ -465,6 +465,93 @@
 
 #define NFNETLINK_V0                     0
 
+/* Generic Netlink definitions ***********************************************/
+
+/* Generic Netlink message header
+ * This header follows struct nlmsghdr in Generic Netlink messages.
+ */
+
+struct genlmsghdr
+{
+  uint8_t  cmd;      /* Generic netlink command */
+  uint8_t  version;  /* Interface version */
+  uint16_t reserved; /* Reserved for future use */
+};
+
+/* Generic Netlink message handling macros */
+
+#define GENL_HDRLEN                      NLMSG_ALIGN(sizeof(struct genlmsghdr))
+#define GENLMSG_DATA(nlh)                ((FAR void *)((FAR char *)nlmsg_data(nlh) + GENL_HDRLEN))
+#define GENLMSG_PAYLOAD(nlh)             (nlmsg_len(nlh) - GENL_HDRLEN)
+
+/* Generic Netlink controller (nlctrl) family */
+
+#define GENL_ID_CTRL                     NLMSG_MIN_TYPE  /* 16 */
+
+/* Generic Netlink controller commands */
+
+enum
+{
+  CTRL_CMD_UNSPEC,
+  CTRL_CMD_NEWFAMILY,
+  CTRL_CMD_DELFAMILY,
+  CTRL_CMD_GETFAMILY,
+  CTRL_CMD_NEWOPS,
+  CTRL_CMD_DELOPS,
+  CTRL_CMD_GETOPS,
+  CTRL_CMD_NEWMCAST_GRP,
+  CTRL_CMD_DELMCAST_GRP,
+  CTRL_CMD_GETMCAST_GRP,
+  CTRL_CMD_GETPOLICY,
+  __CTRL_CMD_MAX,
+};
+
+#define CTRL_CMD_MAX                     (__CTRL_CMD_MAX - 1)
+
+/* Generic Netlink controller attributes */
+
+enum
+{
+  CTRL_ATTR_UNSPEC,
+  CTRL_ATTR_FAMILY_ID,
+  CTRL_ATTR_FAMILY_NAME,
+  CTRL_ATTR_VERSION,
+  CTRL_ATTR_HDRSIZE,
+  CTRL_ATTR_MAXATTR,
+  CTRL_ATTR_OPS,
+  CTRL_ATTR_MCAST_GROUPS,
+  CTRL_ATTR_POLICY,
+  CTRL_ATTR_OP_POLICY,
+  CTRL_ATTR_OP,
+  __CTRL_ATTR_MAX,
+};
+
+#define CTRL_ATTR_MAX                    (__CTRL_ATTR_MAX - 1)
+
+/* Generic Netlink controller operation attributes */
+
+enum
+{
+  CTRL_ATTR_OP_UNSPEC,
+  CTRL_ATTR_OP_ID,
+  CTRL_ATTR_OP_FLAGS,
+  __CTRL_ATTR_OP_MAX,
+};
+
+#define CTRL_ATTR_OP_MAX                 (__CTRL_ATTR_OP_MAX - 1)
+
+/* Generic Netlink multicast group attributes */
+
+enum
+{
+  CTRL_ATTR_MCAST_GRP_UNSPEC,
+  CTRL_ATTR_MCAST_GRP_NAME,
+  CTRL_ATTR_MCAST_GRP_ID,
+  __CTRL_ATTR_MCAST_GRP_MAX,
+};
+
+#define CTRL_ATTR_MCAST_GRP_MAX          (__CTRL_ATTR_MCAST_GRP_MAX - 1)
+
 /* netfilter netlink message types are split in two pieces:
  * 8 bit subsystem, 8bit operation.
  */

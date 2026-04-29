@@ -286,6 +286,53 @@ struct nla_policy
   FAR void *validation_data;
 };
 
+/* Generic Netlink types *******************************************************/
+
+/* Forward declarations */
+
+struct genl_family_s;
+struct genl_ops_s;
+
+/* Generic Netlink operation handler */
+
+struct netlink_ext_ack;
+struct nlmsghdr;
+struct genlmsghdr;
+struct nlattr;
+
+typedef int (*genl_op_handler_t)(NETLINK_HANDLE handle,
+                                 FAR const struct nlmsghdr *nlh,
+                                 FAR const struct genlmsghdr *gnlh,
+                                 FAR struct nlattr **attrs,
+                                 FAR struct netlink_ext_ack *extack);
+
+/* Generic Netlink operation */
+
+struct genl_ops_s
+{
+  uint8_t cmd;                /* Command identifier */
+  uint8_t flags;              /* Operation flags */
+  genl_op_handler_t handler;   /* Handler function */
+};
+
+/* Generic Netlink family (opaque, defined in netlink_generic.c) */
+
+struct genl_family_s
+{
+  char name[16];               /* Family name */
+  uint16_t id;                 /* Family ID */
+  uint8_t version;             /* Interface version */
+  uint8_t hdrsize;             /* Header size (excluding genlmsghdr) */
+  uint16_t maxattr;            /* Maximum attribute type */
+  FAR const struct nla_policy *policy;  /* Attribute validation policy */
+  FAR struct genl_ops_s *ops;  /* Operations array */
+  uint8_t n_ops;               /* Number of operations */
+  uint8_t n_mcast_groups;      /* Number of multicast groups */
+  bool registered;              /* Family is registered */
+};
+
+#define GENL_FAMILY_NAME_MAXLEN 16
+
 /****************************************************************************
  * Public Data
  ****************************************************************************/
@@ -641,6 +688,87 @@ void netlink_conntrack_notify(uint8_t type, uint8_t domain,
                               FAR const void *nat_entry);
 
 #endif /* CONFIG_NETLINK_NETFILTER */
+
+/****************************************************************************
+ * Name: netlink_generic_sendto
+ *
+ * Description:
+ *   Perform the sendto() operation for the NETLINK_GENERIC protocol.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NETLINK_GENERIC
+ssize_t netlink_generic_sendto(NETLINK_HANDLE handle,
+                               FAR const struct nlmsghdr *nlmsg,
+                               size_t len, int flags,
+                               FAR const struct sockaddr_nl *to,
+                               socklen_t tolen);
+
+/****************************************************************************
+ * Name: netlink_generic_initialize
+ *
+ * Description:
+ *   Initialize Generic Netlink subsystem.
+ *
+ ****************************************************************************/
+
+void netlink_generic_initialize(void);
+
+/****************************************************************************
+ * Name: genl_register_family
+ *
+ * Description:
+ *   Register a Generic Netlink family.
+ *
+ ****************************************************************************/
+
+int genl_register_family(FAR struct genl_family_s *family,
+                         FAR const char *name,
+                         uint8_t version, uint8_t hdrsize,
+                         uint16_t maxattr,
+                         FAR const struct nla_policy *policy);
+
+/****************************************************************************
+ * Name: genl_unregister_family
+ *
+ * Description:
+ *   Unregister a Generic Netlink family.
+ *
+ ****************************************************************************/
+
+int genl_unregister_family(int family_id);
+
+/****************************************************************************
+ * Name: genl_register_ops
+ *
+ * Description:
+ *   Register operations for a Generic Netlink family.
+ *
+ ****************************************************************************/
+
+int genl_register_ops(int family_id, FAR struct genl_ops_s *ops, uint8_t n_ops);
+
+/****************************************************************************
+ * Name: genl_register_mcast_group
+ *
+ * Description:
+ *   Register a multicast group for a Generic Netlink family.
+ *
+ ****************************************************************************/
+
+int genl_register_mcast_group(int family_id, FAR const char *name);
+
+/****************************************************************************
+ * Name: genl_multicast
+ *
+ * Description:
+ *   Send a multicast message to all listeners of a multicast group.
+ *
+ ****************************************************************************/
+
+int genl_multicast(int family_id, int group_id, FAR struct nlmsghdr *msg);
+
+#endif /* CONFIG_NETLINK_GENERIC */
 
 #undef EXTERN
 #ifdef __cplusplus

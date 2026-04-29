@@ -132,6 +132,30 @@ config NETLINK_NETFILTER
 		Support the NETLINK_NETFILTER protocol option, mainly
 		for conntrack with NAT.
 
+config NETLINK_GENERIC
+	bool "Generic Netlink protocol"
+	default n
+	---help---
+		Support the NETLINK_GENERIC protocol option.
+		This is required for nl80211 wireless configuration interface.
+
+if NETLINK_GENERIC
+
+config NETLINK_GENERIC_MAX_FAMILIES
+	int "Maximum number of Generic Netlink families"
+	default 16
+	---help---
+		Maximum number of registered Generic Netlink families.
+		Each wireless driver (like nl80211) registers as a family.
+
+config NETLINK_GENERIC_MAX_MCAST_GROUPS
+	int "Maximum multicast groups per family"
+	default 8
+	---help---
+		Maximum number of multicast groups per Generic Netlink family.
+
+endif # NETLINK_GENERIC
+
 endmenu # Netlink Protocols
 endif # NET_NETLINK
 endmenu # Netlink Socket Support

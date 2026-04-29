@@ -1,0 +1,105 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+menu "Wireless Subsystem"
+
+if WIRELESS
+
+config NL80211
+	bool "nl80211 wireless configuration interface"
+	default n
+	depends on NET_NETLINK && NETLINK_GENERIC
+	---help---
+		Enable nl80211 wireless configuration interface.
+		This provides a Linux-compatible netlink interface for
+		802.11 wireless configuration.
+
+		This is required for wpa_supplicant and hostapd support.
+
+config NL80211_MAX_WIPHY
+	int "Maximum number of wiphy devices"
+	default 4
+	depends on NL80211
+	---help---
+		Maximum number of wiphy (wireless physical) devices
+		that can be registered with nl80211.
+
+config NL80211_MAX_INTERFACES
+	int "Maximum number of wireless interfaces"
+	default 8
+	depends on NL80211
+	---help---
+		Maximum number of wireless interfaces that can be
+		registered with nl80211.
+
+config CFG80211
+	bool "cfg80211 wireless configuration API"
+	default n
+	depends on NL80211
+	---help---
+		Enable cfg80211 wireless configuration API.
+		This provides a standardized driver interface for
+		802.11 wireless hardware.
+
+		WiFi drivers should implement cfg80211_ops to work
+		with this interface.
+
+config CFG80211_MAX_WIPHY
+	int "Maximum number of wiphy devices for cfg80211"
+	default 4
+	depends on CFG80211
+	---help---
+		Maximum number of wiphy devices that can be registered
+		with cfg80211.
+
+config CFG80211_MAX_BSS
+	int "Maximum BSS entries in cache"
+	default 64
+	depends on CFG80211
+	---help---
+		Maximum number of BSS (Basic Service Set) entries
+		that can be cached by cfg80211.
+
+config CFG80211_MAX_SCAN_REQUESTS
+	int "Maximum pending scan requests"
+	default 4
+	depends on CFG80211
+	---help---
+		Maximum number of pending scan requests.
+
+config CFG80211_REGULATORY
+	bool "cfg80211 regulatory domain support"
+	default y
+	depends on CFG80211
+	---help---
+		Enable regulatory domain management in cfg80211.
+		This allows proper handling of channel restrictions
+		based on regulatory requirements.
+
+config CFG80211_DEFAULT_REGDOMAIN
+	string "Default regulatory domain"
+	default "00"
+	depends on CFG80211_REGULATORY
+	---help---
+		Default regulatory domain (ISO 3166-1 alpha-2).
+		Use "00" for world regulatory domain.
+
+config CFG80211_DEBUG
+	bool "cfg80211 debugging"
+	default n
+	depends on CFG80211 && DEBUG_WIRELESS_INFO
+	---help---
+		Enable debugging output for cfg80211.
+
+config CFG80211_VERBOSE_DEBUG
+	bool "cfg80211 verbose debugging"
+	default n
+	depends on CFG80211_DEBUG
+	---help---
+		Enable verbose debugging output for cfg80211.
+
+endif # WIRELESS
+
+endmenu # Wireless Subsystem
