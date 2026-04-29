@@ -1,0 +1,12 @@
+#
+# boards/arm/stm32n6570-dk/Make.defs
+#
+
+ifeq ($(CONFIG_ARCH_CHIP_STM32N657XX),y)
+
+ARCHSCRIPT = $(BOARD_DIR)/scripts/stm32n6570-dk.ld
+
+BOARD_SRCDIR = $(BOARD_DIR)/src
+BOARD_SRCS = $(BOARD_SRCDIR)/stm32_boardinitialize.c
+
+endif

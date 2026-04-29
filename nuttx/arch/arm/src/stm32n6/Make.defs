@@ -1,0 +1,221 @@
+############################################################################
+# arch/arm/src/stm32n6/Make.defs
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+############################################################################
+
+# STM32N6 specific source files
+
+ifeq ($(CONFIG_ARCH_CHIP_STM32N6),y)
+
+# MCU-specific header file
+
+CMN_ASRCS =
+CMN_CSRCS =
+
+# ARMv8-M Mainline common source files
+
+CMN_CSRCS += armv8-m_initialstate.c armv8-m_vectors.c armv8-m_hardfault.c
+CMN_CSRCS += armv8-m_svcall.c armv8-m_systick.c armv8-m_tcbinfo.c
+
+# ARMv8-M memory protection unit
+
+ifeq ($(CONFIG_ARM_MPU),y)
+CMN_CSRCS += armv8-m_mpu.c
+endif
+
+# Cache support
+
+ifeq ($(CONFIG_ARMV8M_DCACHE),y)
+CMN_CSRCS += armv8-m_cache.c
+endif
+
+# FPU support
+
+ifeq ($(CONFIG_ARCH_FPU),y)
+CMN_CSRCS += armv8-m_fpu.c
+endif
+
+# STM32N6 chip-specific source files
+
+CHIP_CSRCS = stm32n6_start.c stm32n6_clockconfig.c stm32n6_lowsetup.c
+CHIP_CSRCS += stm32n6_soc.c stm32n6_irq.c stm32n6_allocateheap.c
+CHIP_CSRCS += stm32n6_timerisr.c stm32n6_idle.c
+
+# NPU support
+
+ifeq ($(CONFIG_STM32N6_NPU),y)
+CHIP_CSRCS += stm32n6_npu.c
+endif
+
+# RIF support
+
+ifeq ($(CONFIG_STM32N6_RIF),y)
+CHIP_CSRCS += stm32n6_rif.c
+endif
+
+# AXISRAM configuration
+
+ifeq ($(CONFIG_STM32N6_AXISRAM3)$(CONFIG_STM32N6_AXISRAM4)$(CONFIG_STM32N6_AXISRAM5)$(CONFIG_STM32N6_AXISRAM6),y)
+CHIP_CSRCS += stm32n6_axisram.c
+endif
+
+# GPIO support
+
+ifeq ($(CONFIG_STM32N6_GPIO),y)
+CHIP_CSRCS += stm32n6_gpio.c
+endif
+
+# UART support
+
+ifeq ($(CONFIG_STM32N6_UART),y)
+CHIP_CSRCS += stm32n6_uart.c stm32n6_serial.c
+endif
+
+# SPI support
+
+ifeq ($(CONFIG_STM32N6_SPI),y)
+CHIP_CSRCS += stm32n6_spi.c
+endif
+
+# I2C support
+
+ifeq ($(CONFIG_STM32N6_I2C),y)
+CHIP_CSRCS += stm32n6_i2c.c
+endif
+
+# Ethernet support
+
+ifeq ($(CONFIG_STM32N6_ETH),y)
+CHIP_CSRCS += stm32n6_eth.c
+endif
+
+# LTDC support
+
+ifeq ($(CONFIG_STM32N6_LTDC),y)
+CHIP_CSRCS += stm32n6_ltdc.c
+endif
+
+# DMA2D support
+
+ifeq ($(CONFIG_STM32N6_DMA2D),y)
+CHIP_CSRCS += stm32n6_dma2d.c
+endif
+
+# DCMIPP support
+
+ifeq ($(CONFIG_STM32N6_DCMIPP),y)
+CHIP_CSRCS += stm32n6_dcmipp.c
+endif
+
+# USB support
+
+ifeq ($(CONFIG_STM32N6_USB),y)
+CHIP_CSRCS += stm32n6_usb.c
+endif
+
+# XSPI support
+
+ifeq ($(CONFIG_STM32N6_XSPI),y)
+CHIP_CSRCS += stm32n6_xspi.c
+endif
+
+# JPEG support
+
+ifeq ($(CONFIG_STM32N6_JPEG),y)
+CHIP_CSRCS += stm32n6_jpeg.c
+endif
+
+# VENC support
+
+ifeq ($(CONFIG_STM32N6_VENC),y)
+CHIP_CSRCS += stm32n6_venc.c
+endif
+
+# SDMMC support
+
+ifeq ($(CONFIG_STM32N6_SDMMC),y)
+CHIP_CSRCS += stm32n6_sdmmc.c
+endif
+
+# DMA support
+
+ifeq ($(CONFIG_STM32N6_DMA),y)
+CHIP_CSRCS += stm32n6_dma.c
+endif
+
+# ADC support
+
+ifeq ($(CONFIG_STM32N6_ADC),y)
+CHIP_CSRCS += stm32n6_adc.c
+endif
+
+# Timer support
+
+ifeq ($(CONFIG_STM32N6_TIMERS),y)
+CHIP_CSRCS += stm32n6_tim.c
+endif
+
+# EXTI support
+
+ifeq ($(CONFIG_STM32N6_EXTI),y)
+CHIP_CSRCS += stm32n6_exti.c
+endif
+
+# HSEM support
+
+ifeq ($(CONFIG_STM32N6_HSEM),y)
+CHIP_CSRCS += stm32n6_hsem.c
+endif
+
+# LPTIM support
+
+ifeq ($(CONFIG_STM32N6_LPTIM),y)
+CHIP_CSRCS += stm32n6_lptim.c
+endif
+
+# Flash support
+
+ifeq ($(CONFIG_STM32N6_FLASH),y)
+CHIP_CSRCS += stm32n6_flash.c
+endif
+
+# Power Management support
+
+ifeq ($(CONFIG_STM32N6_PWR),y)
+CHIP_CSRCS += stm32n6_pwr.c
+endif
+
+# Watchdog support
+
+ifeq ($(CONFIG_STM32N6_WWDG),y)
+CHIP_CSRCS += stm32n6_wdg.c
+endif
+
+# CAN FD support
+
+ifeq ($(CONFIG_STM32N6_FDCAN),y)
+CHIP_CSRCS += stm32n6_can.c
+endif
+
+# Include paths
+
+CHIP_INCDIR = hardware
+
+endif # CONFIG_ARCH_CHIP_STM32N6
