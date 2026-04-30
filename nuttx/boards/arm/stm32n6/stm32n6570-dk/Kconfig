@@ -1,0 +1,107 @@
+#
+# For a description of the syntax of this configuration file, see
+# the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_BOARD_STM32N6570_DK
+
+config STM32N6570_DK_BOARD
+	bool
+	default y
+
+menu "STM32N6570-DK Peripheral Bring-up"
+
+config STM32N6570_DK_I2C1
+	bool "I2C1 CSI connector bring-up"
+	default n
+	depends on STM32N6_I2C1
+	---help---
+		Configure the STM32N6570-DK I2C1 pins used by the CSI
+		connector and compile the NuttX I2C lower-half entry point.
+
+config STM32N6570_DK_I2C2
+	bool "I2C2 touch-controller bus bring-up"
+	default n
+	depends on STM32N6_I2C2
+	---help---
+		Configure the STM32N6570-DK I2C2 pins used by the GT911 touch
+		controller and compile the NuttX I2C lower-half entry point.
+
+config STM32N6570_DK_I2C4
+	bool "I2C4 Arduino connector bring-up"
+	default n
+	depends on STM32N6_I2C4
+
+config STM32N6570_DK_GT911
+	bool "Goodix GT911 touch reset/IRQ pins"
+	default n
+	depends on STM32N6570_DK_I2C2
+	---help---
+		Configure the GT911 reset and interrupt GPIOs.  The GT911
+		touchscreen driver binding is not claimed complete by this
+		board option.
+
+config STM32N6570_DK_SPI5
+	bool "SPI5 Arduino connector bring-up"
+	default n
+	depends on STM32N6_SPI5
+
+config STM32N6570_DK_FDCAN1
+	bool "FDCAN1 bring-up"
+	default n
+	depends on STM32N6_FDCAN1
+
+config STM32N6570_DK_SDMMC2
+	bool "SDMMC2 microSD bring-up"
+	default n
+	depends on STM32N6_SDMMC2
+
+config STM32N6570_DK_ADC1
+	bool "ADC1 Arduino analog inputs"
+	default n
+	depends on STM32N6_ADC1
+
+config STM32N6570_DK_TIM1_PWM
+	bool "TIM1 channel 1 PWM bring-up"
+	default n
+	depends on STM32N6_TIM1_PWM
+
+config STM32N6570_DK_TIM15_PWM
+	bool "TIM15 channel 1 PWM bring-up"
+	default n
+	depends on STM32N6_TIM15_PWM
+
+config STM32N6570_DK_ETH
+	bool "Ethernet RGMII/MDIO bring-up"
+	default n
+	depends on STM32N6_ETH
+
+config STM32N6570_DK_LTDC
+	bool "LTDC RGB panel bring-up"
+	default n
+	depends on STM32N6_LTDC
+
+config STM32N6570_DK_DISPLAY
+	bool "Display power and backlight GPIOs"
+	default n
+	depends on STM32N6570_DK_LTDC
+
+config STM32N6570_DK_XSPI1_PSRAM
+	bool "XSPI1 APS256xxN PSRAM bring-up"
+	default n
+	depends on STM32N6_XSPI1
+	---help---
+		Configure the XSPI1 PSRAM pins and controller clock path.
+		The PSRAM is not added to the heap or used for .data/.bss.
+
+config STM32N6570_DK_XSPI2_FLASH
+	bool "XSPI2 MX66UW1G45G NOR Flash registration"
+	default y
+	depends on STM32N6_XSPI2_FLASH
+	---help---
+		Register the XSPI2 MX66UW1G45G MTD as /dev/xspi2flash0 when
+		the JEDEC probe succeeds.
+
+endmenu
+
+endif

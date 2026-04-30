@@ -20,43 +20,13 @@
 #
 ############################################################################
 
-# STM32N6 specific source files
-
 ifeq ($(CONFIG_ARCH_CHIP_STM32N6),y)
 
-# MCU-specific header file
-
-CMN_ASRCS =
-CMN_CSRCS =
-
-# ARMv8-M Mainline common source files
-
-CMN_CSRCS += armv8-m_initialstate.c armv8-m_vectors.c armv8-m_hardfault.c
-CMN_CSRCS += armv8-m_svcall.c armv8-m_systick.c armv8-m_tcbinfo.c
-
-# ARMv8-M memory protection unit
-
-ifeq ($(CONFIG_ARM_MPU),y)
-CMN_CSRCS += armv8-m_mpu.c
-endif
-
-# Cache support
-
-ifeq ($(CONFIG_ARMV8M_DCACHE),y)
-CMN_CSRCS += armv8-m_cache.c
-endif
-
-# FPU support
-
-ifeq ($(CONFIG_ARCH_FPU),y)
-CMN_CSRCS += armv8-m_fpu.c
-endif
-
-# STM32N6 chip-specific source files
+include armv8-m/Make.defs
 
 CHIP_CSRCS = stm32n6_start.c stm32n6_clockconfig.c stm32n6_lowsetup.c
 CHIP_CSRCS += stm32n6_soc.c stm32n6_irq.c stm32n6_allocateheap.c
-CHIP_CSRCS += stm32n6_timerisr.c stm32n6_idle.c
+CHIP_CSRCS += stm32n6_idle.c stm32n6_timerisr.c
 
 # NPU support
 
@@ -84,8 +54,8 @@ endif
 
 # UART support
 
-ifeq ($(CONFIG_STM32N6_UART),y)
-CHIP_CSRCS += stm32n6_uart.c stm32n6_serial.c
+ifeq ($(CONFIG_STM32N6_USART),y)
+CHIP_CSRCS += stm32n6_serial.c
 endif
 
 # SPI support
@@ -148,12 +118,6 @@ ifeq ($(CONFIG_STM32N6_VENC),y)
 CHIP_CSRCS += stm32n6_venc.c
 endif
 
-# SDMMC support
-
-ifeq ($(CONFIG_STM32N6_SDMMC),y)
-CHIP_CSRCS += stm32n6_sdmmc.c
-endif
-
 # DMA support
 
 ifeq ($(CONFIG_STM32N6_DMA),y)
@@ -170,6 +134,12 @@ endif
 
 ifeq ($(CONFIG_STM32N6_TIMERS),y)
 CHIP_CSRCS += stm32n6_tim.c
+endif
+
+# PWM support
+
+ifeq ($(CONFIG_STM32N6_PWM),y)
+CHIP_CSRCS += stm32n6_pwm.c
 endif
 
 # EXTI support
@@ -212,6 +182,12 @@ endif
 
 ifeq ($(CONFIG_STM32N6_FDCAN),y)
 CHIP_CSRCS += stm32n6_can.c
+endif
+
+# SDMMC support
+
+ifeq ($(CONFIG_STM32N6_SDMMC),y)
+CHIP_CSRCS += stm32n6_sdmmc.c
 endif
 
 # Include paths

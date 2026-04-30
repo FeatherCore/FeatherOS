@@ -27,7 +27,13 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
+#include <time.h>
 
+#include <nuttx/arch.h>
+#include <arch/irq.h>
+
+#include "nvic.h"
+#include "clock/clock.h"
 #include "arm_internal.h"
 #include "chip.h"
 
@@ -35,33 +41,50 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define SYSTICK_CTRL_ENABLE    (1 << 0)
-#define SYSTICK_CTRL_TICKINT   (1 << 1)
-#define SYSTICK_CTRL_CLKSOURCE (1 << 2)
-#define SYSTICK_CTRL_COUNTFLAG (1 << 16)
+#define SYSTICK_RELOAD  ((STM32N6_HCLK_FREQUENCY / CLK_TCK) - 1)
 
-#define SYSTICK_LOAD_RELOAD    (1 << 0)
+#if SYSTICK_RELOAD > 0x00ffffff
+#  error SYSTICK_RELOAD exceeds the range of the RELOAD register
+#endif
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: stm32n6_timerisr
+ ****************************************************************************/
+
+static int stm32n6_timerisr(int irq, void *context, void *arg)
+{
+  nxsched_process_timer();
+  return 0;
+}
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-void arm_timer_initialize(void)
-{
-  uint32_t reload;
-
-  putreg32(0, NVIC_SYSTICK_CTRL);
-
-  reload = (STM32N6_HCLK_FREQUENCY / CONFIG_USEC_PER_TICK) - 1;
-  putreg32(reload, NVIC_SYSTICK_RELOAD);
-
-  putreg32(0, NVIC_SYSTICK_CURRENT);
-
-  putreg32(SYSTICK_CTRL_CLKSOURCE | SYSTICK_CTRL_TICKINT | SYSTICK_CTRL_ENABLE,
-           NVIC_SYSTICK_CTRL);
-}
+/****************************************************************************
+ * Name: up_timer_initialize
+ ****************************************************************************/
 
 void up_timer_initialize(void)
 {
-  arm_timer_initialize();
+  uint32_t regval;
+
+  regval = getreg32(NVIC_SYSH12_15_PRIORITY);
+  regval &= ~NVIC_SYSH_PRIORITY_PR15_MASK;
+  regval |= (NVIC_SYSH_PRIORITY_DEFAULT << NVIC_SYSH_PRIORITY_PR15_SHIFT);
+  putreg32(regval, NVIC_SYSH12_15_PRIORITY);
+
+  putreg32(SYSTICK_RELOAD, NVIC_SYSTICK_RELOAD);
+  putreg32(0, NVIC_SYSTICK_CURRENT);
+
+  irq_attach(STM32_IRQ_SYSTICK, stm32n6_timerisr, NULL);
+
+  putreg32((NVIC_SYSTICK_CTRL_CLKSOURCE | NVIC_SYSTICK_CTRL_TICKINT |
+            NVIC_SYSTICK_CTRL_ENABLE), NVIC_SYSTICK_CTRL);
+
+  up_enable_irq(STM32_IRQ_SYSTICK);
 }

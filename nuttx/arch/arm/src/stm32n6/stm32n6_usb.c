@@ -40,13 +40,6 @@
 #include "stm32n6_usb.h"
 
 /****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#define STM32_OTG_HS1_BASE         (STM32N6_PERIPH_BASE + 0x08040000)
-#define STM32_OTG_HS2_BASE         (STM32N6_PERIPH_BASE + 0x08080000)
-
-/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -55,11 +48,13 @@ int stm32n6_usb_initialize(uintptr_t otgbase)
   uint32_t regval;
 
   /* Enable USB OTG HS clock */
+
   regval = getreg32(STM32_RCC_AHB5ENR);
   regval |= RCC_AHB5ENR_USB1OTGEN;
   putreg32(regval, STM32_RCC_AHB5ENR);
 
   /* Configure USB PHY */
+
   regval = getreg32(STM32_RCC_AHB5ENR);
   regval |= RCC_AHB5ENR_USBPHYC1EN;
   putreg32(regval, STM32_RCC_AHB5ENR);

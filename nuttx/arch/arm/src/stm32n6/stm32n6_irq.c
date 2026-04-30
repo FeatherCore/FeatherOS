@@ -27,12 +27,16 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
+#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <arch/irq.h>
+#include <arch/armv8-m/nvicpri.h>
 
 #include "nvic.h"
+#include "ram_vectors.h"
 #include "arm_internal.h"
 #include "chip.h"
 
@@ -40,61 +44,303 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define STM32N6_IRQ_NEXTINTS  196
+/* Get a 32-bit version of the default priority */
+
+#define DEFPRIORITY32 \
+  (NVIC_SYSH_PRIORITY_DEFAULT << 24 | \
+   NVIC_SYSH_PRIORITY_DEFAULT << 16 | \
+   NVIC_SYSH_PRIORITY_DEFAULT << 8  | \
+   NVIC_SYSH_PRIORITY_DEFAULT)
+
+/* Given the address of a NVIC ENABLE register, this is the offset to
+ * the corresponding CLEAR ENABLE register.
+ */
+
+#define NVIC_ENA_OFFSET     0
+#define NVIC_CLRENA_OFFSET  (NVIC_IRQ0_31_CLEAR - NVIC_IRQ0_31_ENABLE)
 
 /****************************************************************************
- * Public Data
+ * Private Functions
  ****************************************************************************/
 
-const uint8_t g_irqmap[STM32N6_IRQ_NEXTINTS] =
+/****************************************************************************
+ * Name: stm32n6_dumpnvic
+ ****************************************************************************/
+
+#if defined(CONFIG_DEBUG_IRQ_INFO)
+static void stm32n6_dumpnvic(const char *msg, int irq)
 {
-  0,   1,   2,   3,   4,   5,   6,   8,
-  9,   10,  11,  12,  13,  14,  15,  16,
-  17,  18,  19,  20,  21,  22,  23,  24,
-  25,  26,  27,  28,  29,  30,  31,  32,
-  33,  34,  35,  36,  37,  38,  39,  40,
-  41,  42,  43,  44,  45,  46,  47,  48,
-  49,  50,  51,  52,  53,  54,  55,  56,
-  57,  58,  59,  60,  61,  62,  63,  64,
-  65,  66,  67,  68,  69,  70,  71,  72,
-  73,  74,  75,  76,  77,  78,  79,  80,
-  81,  82,  83,  84,  85,  86,  87,  88,
-  89,  90,  91,  92,  93,  94,  95,  96,
-  97,  98,  99,  100, 101, 102, 103, 104,
-  105, 106, 107, 108, 109, 110, 111, 112,
-  113, 114, 115, 116, 117, 118, 119, 120,
-  121, 122, 123, 124, 125, 126, 127, 128,
-  129, 130, 131, 132, 133, 134, 135, 136,
-  137, 138, 139, 140, 141, 142, 143, 144,
-  145, 146, 147, 148, 149, 150, 151, 152,
-  153, 154, 155, 156, 157, 158, 159, 160,
-  161, 162, 163, 164, 165, 166, 167, 168,
-  169, 170, 171, 172, 173, 174, 175, 176,
-  177, 178, 179, 180, 181, 182, 183, 184,
-  185, 186, 187, 188, 189, 190, 191, 192,
-  193, 194, 195
-};
+  irqstate_t flags;
+
+  flags = enter_critical_section();
+
+  irqinfo("NVIC (%s, irq=%d):\n", msg, irq);
+  irqinfo("  INTCTRL:    %08x VECTAB:  %08x\n",
+          getreg32(NVIC_INTCTRL), getreg32(NVIC_VECTAB));
+  irqinfo("  IRQ ENABLE: %08x %08x %08x\n",
+          getreg32(NVIC_IRQ0_31_ENABLE), getreg32(NVIC_IRQ32_63_ENABLE),
+          getreg32(NVIC_IRQ64_95_ENABLE));
+  irqinfo("  SYSH_PRIO:  %08x %08x %08x\n",
+          getreg32(NVIC_SYSH4_7_PRIORITY), getreg32(NVIC_SYSH8_11_PRIORITY),
+          getreg32(NVIC_SYSH12_15_PRIORITY));
+
+  leave_critical_section(flags);
+}
+#else
+#  define stm32n6_dumpnvic(msg, irq)
+#endif
+
+/****************************************************************************
+ * Name: stm32n6_nmi, stm32n6_pendsv, stm32n6_reserved
+ ****************************************************************************/
+
+#ifdef CONFIG_DEBUG_FEATURES
+static int stm32n6_nmi(int irq, void *context, void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! NMI received\n");
+  PANIC();
+  return 0;
+}
+
+static int stm32n6_pendsv(int irq, void *context, void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! PendSV received\n");
+  PANIC();
+  return 0;
+}
+
+static int stm32n6_reserved(int irq, void *context, void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Reserved interrupt\n");
+  PANIC();
+  return 0;
+}
+#endif
+
+/****************************************************************************
+ * Name: stm32n6_prioritize_syscall
+ ****************************************************************************/
+
+static inline void stm32n6_prioritize_syscall(int priority)
+{
+  uint32_t regval;
+
+  regval  = getreg32(NVIC_SYSH8_11_PRIORITY);
+  regval &= ~NVIC_SYSH_PRIORITY_PR11_MASK;
+  regval |= (priority << NVIC_SYSH_PRIORITY_PR11_SHIFT);
+  putreg32(regval, NVIC_SYSH8_11_PRIORITY);
+}
+
+/****************************************************************************
+ * Name: stm32n6_irqinfo
+ ****************************************************************************/
+
+static int stm32n6_irqinfo(int irq, uintptr_t *regaddr, uint32_t *bit,
+                           uintptr_t offset)
+{
+  int n;
+
+  DEBUGASSERT(irq >= STM32_IRQ_NMI && irq < NR_IRQS);
+
+  if (irq >= STM32_IRQ_FIRST)
+    {
+      n        = irq - STM32_IRQ_FIRST;
+      *regaddr = NVIC_IRQ_ENABLE(n) + offset;
+      *bit     = (uint32_t)1 << (n & 0x1f);
+    }
+  else
+    {
+      *regaddr = NVIC_SYSHCON;
+
+      if (irq == STM32_IRQ_MEMFAULT)
+        {
+          *bit = NVIC_SYSHCON_MEMFAULTENA;
+        }
+      else if (irq == STM32_IRQ_BUSFAULT)
+        {
+          *bit = NVIC_SYSHCON_BUSFAULTENA;
+        }
+      else if (irq == STM32_IRQ_USAGEFAULT)
+        {
+          *bit = NVIC_SYSHCON_USGFAULTENA;
+        }
+      else if (irq == STM32_IRQ_SYSTICK)
+        {
+          *regaddr = NVIC_SYSTICK_CTRL;
+          *bit = NVIC_SYSTICK_CTRL_ENABLE;
+        }
+      else
+        {
+          return ERROR;
+        }
+    }
+
+  return OK;
+}
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
+/****************************************************************************
+ * Name: up_irqinitialize
+ ****************************************************************************/
+
 void up_irqinitialize(void)
 {
+  uint32_t regaddr;
+  int num_priority_registers;
   int i;
 
-  for (i = 0; i < STM32N6_IRQ_NEXTINTS; i++)
+  for (i = 0; i < NR_IRQS - STM32_IRQ_FIRST; i += 32)
     {
-      putreg32(0, NVIC_IRQ_ENABLE(i + 16));
-      putreg32(0xff, NVIC_IRQ_CLEAR(i + 16));
+      putreg32(0xffffffff, NVIC_IRQ_CLEAR(i));
     }
 
   putreg32(0, NVIC_SYSTICK_CTRL);
   putreg32(0, NVIC_SYSTICK_CURRENT);
+  putreg32((uint32_t)_vectors, NVIC_VECTAB);
 
-  up_enable_irq(STM32N6_IRQ_SYSTICK);
+#ifdef CONFIG_ARCH_RAMVECTORS
+  up_ramvec_initialize();
+#endif
+
+  putreg32(DEFPRIORITY32, NVIC_SYSH4_7_PRIORITY);
+  putreg32(DEFPRIORITY32, NVIC_SYSH8_11_PRIORITY);
+  putreg32(DEFPRIORITY32, NVIC_SYSH12_15_PRIORITY);
+
+  num_priority_registers = (getreg32(NVIC_ICTR) + 1) * 8;
+  regaddr = NVIC_IRQ0_3_PRIORITY;
+
+  while (num_priority_registers--)
+    {
+      putreg32(DEFPRIORITY32, regaddr);
+      regaddr += 4;
+    }
+
+  irq_attach(STM32_IRQ_SVCALL, arm_svcall, NULL);
+  irq_attach(STM32_IRQ_HARDFAULT, arm_hardfault, NULL);
+
+  stm32n6_prioritize_syscall(NVIC_SYSH_SVCALL_PRIORITY);
+
+#ifdef CONFIG_ARM_MPU
+  irq_attach(STM32_IRQ_MEMFAULT, arm_memfault, NULL);
+  up_enable_irq(STM32_IRQ_MEMFAULT);
+#endif
+
+#ifdef CONFIG_DEBUG_FEATURES
+  irq_attach(STM32_IRQ_NMI, stm32n6_nmi, NULL);
+#  ifndef CONFIG_ARM_MPU
+  irq_attach(STM32_IRQ_MEMFAULT, arm_memfault, NULL);
+#  endif
+  irq_attach(STM32_IRQ_BUSFAULT, arm_busfault, NULL);
+  irq_attach(STM32_IRQ_USAGEFAULT, arm_usagefault, NULL);
+  irq_attach(STM32_IRQ_PENDSV, stm32n6_pendsv, NULL);
+  arm_enable_dbgmonitor();
+  irq_attach(STM32_IRQ_DBGMONITOR, arm_dbgmonitor, NULL);
+  irq_attach(STM32_IRQ_RESERVED, stm32n6_reserved, NULL);
+#endif
+
+  stm32n6_dumpnvic("initial", NR_IRQS);
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS
-  __asm__ volatile("cpsie i");
+  up_irq_enable();
 #endif
 }
+
+/****************************************************************************
+ * Name: up_disable_irq
+ ****************************************************************************/
+
+void up_disable_irq(int irq)
+{
+  uintptr_t regaddr;
+  uint32_t regval;
+  uint32_t bit;
+
+  if (stm32n6_irqinfo(irq, &regaddr, &bit, NVIC_CLRENA_OFFSET) == 0)
+    {
+      if (irq >= STM32_IRQ_FIRST)
+        {
+          putreg32(bit, regaddr);
+        }
+      else
+        {
+          regval  = getreg32(regaddr);
+          regval &= ~bit;
+          putreg32(regval, regaddr);
+        }
+    }
+}
+
+/****************************************************************************
+ * Name: up_enable_irq
+ ****************************************************************************/
+
+void up_enable_irq(int irq)
+{
+  uintptr_t regaddr;
+  uint32_t regval;
+  uint32_t bit;
+
+  if (stm32n6_irqinfo(irq, &regaddr, &bit, NVIC_ENA_OFFSET) == 0)
+    {
+      if (irq >= STM32_IRQ_FIRST)
+        {
+          putreg32(bit, regaddr);
+        }
+      else
+        {
+          regval  = getreg32(regaddr);
+          regval |= bit;
+          putreg32(regval, regaddr);
+        }
+    }
+}
+
+/****************************************************************************
+ * Name: arm_ack_irq
+ ****************************************************************************/
+
+void arm_ack_irq(int irq)
+{
+}
+
+/****************************************************************************
+ * Name: up_prioritize_irq
+ ****************************************************************************/
+
+#ifdef CONFIG_ARCH_IRQPRIO
+int up_prioritize_irq(int irq, int priority)
+{
+  uint32_t regaddr;
+  uint32_t regval;
+  int shift;
+
+  DEBUGASSERT(irq >= STM32_IRQ_MEMFAULT && irq < NR_IRQS &&
+              (unsigned)priority <= NVIC_SYSH_PRIORITY_MIN);
+
+  if (irq < STM32_IRQ_FIRST)
+    {
+      regaddr = NVIC_SYSH_PRIORITY(irq);
+      irq    -= 4;
+    }
+  else
+    {
+      irq    -= STM32_IRQ_FIRST;
+      regaddr = NVIC_IRQ_PRIORITY(irq);
+    }
+
+  regval  = getreg32(regaddr);
+  shift   = ((irq & 3) << 3);
+  regval &= ~(0xff << shift);
+  regval |= (priority << shift);
+  putreg32(regval, regaddr);
+
+  stm32n6_dumpnvic("prioritize", irq);
+  return OK;
+}
+#endif

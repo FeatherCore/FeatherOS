@@ -48,12 +48,6 @@
 #define RCC_CR_PLL1RDY      (1 << 25)
 #define RCC_CR_PLL1ON       (1 << 24)
 
-#define RCC_CFGR_SW_HSI     0
-#define RCC_CFGR_SW_HSE     1
-#define RCC_CFGR_SW_PLL1    2
-#define RCC_CFGR_SWS_SHIFT  2
-#define RCC_CFGR_SWS_MASK   (3 << RCC_CFGR_SWS_SHIFT)
-
 #define TIMEOUT_VALUE       0xfffff
 
 /****************************************************************************
@@ -140,9 +134,8 @@ void stm32n6_clockconfig(void)
 #endif
 
   regval = getreg32(STM32_RCC_CFGR1);
-  regval &= ~RCC_CFGR_SWS_MASK;
+  regval &= ~RCC_CFGR_SW_MASK;
   regval |= RCC_CFGR_SW_HSI;
   putreg32(regval, STM32_RCC_CFGR1);
 
-  SystemCoreClock = STM32N6_SYSCLK_FREQUENCY;
 }

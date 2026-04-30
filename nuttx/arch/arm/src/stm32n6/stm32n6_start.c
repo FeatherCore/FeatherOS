@@ -42,7 +42,6 @@
 #include "chip.h"
 #include "stm32n6_start.h"
 #include "stm32n6_lowsetup.h"
-#include "stm32n6_gpio.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -74,7 +73,7 @@ const uintptr_t g_idle_topstack = HEAP_BASE;
  * Public Functions
  ****************************************************************************/
 
-#ifdef CONFIG_ARMV7M_STACKCHECK
+#ifdef CONFIG_ARMV8M_STACKCHECK
 void __start(void) noinstrument_function;
 #endif
 
@@ -91,7 +90,7 @@ void __start(void)
   const uint32_t *src;
   uint32_t *dest;
 
-#ifdef CONFIG_ARMV7M_STACKCHECK
+#ifdef CONFIG_ARMV8M_STACKCHECK
   __asm__ volatile("sub r10, sp, %0" : :
                    "r"(CONFIG_IDLETHREAD_STACKSIZE - 64) :);
 #endif
@@ -103,7 +102,6 @@ void __start(void)
   stm32n6_clockconfig();
   arm_fpuconfig();
   stm32n6_lowsetup();
-  stm32n6_gpioinit();
   showprogress('B');
 
   for (dest = (uint32_t *)_START_BSS; dest < (uint32_t *)_END_BSS; )
@@ -131,7 +129,7 @@ void __start(void)
     }
 #endif
 
-#ifdef CONFIG_ARMV7M_STACKCHECK
+#ifdef CONFIG_ARMV8M_STACKCHECK
   arm_stack_check_init();
 #endif
 
@@ -139,9 +137,11 @@ void __start(void)
   up_perf_init((void *)STM32N6_SYSCLK_FREQUENCY);
 #endif
 
-#ifdef CONFIG_ARMV7M_ITMSYSLOG
+#ifdef CONFIG_ARMV8M_ITMSYSLOG
   itm_syslog_initialize();
 #endif
+
+  stm32n6_soc_early_init();
 
 #ifdef USE_EARLYSERIALINIT
   arm_earlyserialinit();
@@ -153,11 +153,13 @@ void __start(void)
   showprogress('F');
 #endif
 
-  stm32n6_boardinitialize();
+  stm32_boardinitialize();
   showprogress('G');
 
-#ifdef CONFIG_ARMV8M_DCACHE
+#ifdef CONFIG_ARMV8M_ICACHE
   up_enable_icache();
+#endif
+#ifdef CONFIG_ARMV8M_DCACHE
   up_enable_dcache();
 #endif
   showprogress('H');

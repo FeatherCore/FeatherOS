@@ -28,7 +28,12 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+
+#include <sys/types.h>
+#include <stdbool.h>
 #include <stdint.h>
+
+#include <nuttx/i2c/i2c_master.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -117,6 +122,8 @@ struct stm32n6_i2c_s
  ****************************************************************************/
 
 int stm32n6_i2c_initialize(uintptr_t i2cbase, uint32_t frequency);
+FAR struct i2c_master_s *stm32n6_i2cbus_initialize(int port);
+int stm32n6_i2cbus_uninitialize(FAR struct i2c_master_s *dev);
 void stm32n6_i2c_enable(uintptr_t i2cbase);
 void stm32n6_i2c_disable(uintptr_t i2cbase);
 int stm32n6_i2c_transfer(uintptr_t i2cbase, uint8_t addr,

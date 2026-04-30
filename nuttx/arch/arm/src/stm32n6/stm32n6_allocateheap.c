@@ -33,7 +33,7 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
-#include <nuttx/mm heap.h>
+#include <nuttx/mm/mm.h>
 
 #include "chip.h"
 #include "arm_internal.h"
@@ -47,7 +47,7 @@
  ****************************************************************************/
 
 #define HEAP_BASE  ((uintptr_t)_ebss + CONFIG_IDLETHREAD_STACKSIZE)
-#define HEAP_END   (STM32_AXISRAM1_BASE + STM32_AXISRAM1_SIZE)
+#define HEAP_END   (CONFIG_RAM_START + CONFIG_RAM_SIZE)
 
 /****************************************************************************
  * Public Functions

@@ -28,7 +28,11 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+
+#include <stdbool.h>
 #include <stdint.h>
+
+#include <nuttx/can/can.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -188,10 +192,12 @@ struct stm32n6_can_s
  * Public Function Prototypes
  ****************************************************************************/
 
-int stm32n6_can_initialize(uintptr_t canbase, uint32_t bitrate, uint32_t dbitrate);
+int stm32n6_can_initialize(uintptr_t canbase, uint32_t bitrate,
+                           uint32_t dbitrate);
+FAR struct can_dev_s *stm32n6_caninitialize(int port);
 void stm32n6_can_enable(uintptr_t canbase);
 void stm32n6_can_disable(uintptr_t canbase);
-int stm32n6_can_transmit(uintptr_t canbase, uint32_t id, bool extended, 
+int stm32n6_can_transmit(uintptr_t canbase, uint32_t id, bool extended,
                          bool fd, bool brs, uint8_t *data, uint8_t dlc);
 int stm32n6_can_receive(uintptr_t canbase, uint32_t *id, bool *extended,
                         uint8_t *data, uint8_t *dlc);

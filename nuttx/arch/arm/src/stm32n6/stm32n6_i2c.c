@@ -95,6 +95,7 @@ static void stm32n6_i2c_enable_clock(uintptr_t i2cbase)
     {
       regval |= RCC_APB1ENR_I2C3EN;
     }
+
   putreg32(regval, STM32_RCC_APB1ENR);
 
   regval = getreg32(STM32_RCC_APB4ENR);
@@ -102,6 +103,7 @@ static void stm32n6_i2c_enable_clock(uintptr_t i2cbase)
     {
       regval |= RCC_APB4ENR_I2C4EN;
     }
+
   putreg32(regval, STM32_RCC_APB4ENR);
 }
 
@@ -121,19 +123,40 @@ static int stm32n6_i2c_wait_isr(uintptr_t i2cbase, uint32_t mask)
 
 int stm32n6_i2c_initialize(uintptr_t i2cbase, uint32_t frequency)
 {
-  uint32_t regval;
   uint32_t timing;
 
   stm32n6_i2c_enable_clock(i2cbase);
 
   stm32n6_i2c_disable(i2cbase);
 
-  timing = 0x00F02B86;
+  timing = 0x00f02b86;
   stm32n6_i2c_putreg(i2cbase, STM32_I2C_TIMINGR_OFFSET, timing);
 
   stm32n6_i2c_enable(i2cbase);
 
   return OK;
+}
+
+/****************************************************************************
+ * Name: stm32n6_i2cbus_initialize
+ ****************************************************************************/
+
+FAR struct i2c_master_s *stm32n6_i2cbus_initialize(int port)
+{
+  (void)port;
+
+  return NULL;
+}
+
+/****************************************************************************
+ * Name: stm32n6_i2cbus_uninitialize
+ ****************************************************************************/
+
+int stm32n6_i2cbus_uninitialize(FAR struct i2c_master_s *dev)
+{
+  (void)dev;
+
+  return -ENOSYS;
 }
 
 void stm32n6_i2c_enable(uintptr_t i2cbase)
@@ -176,6 +199,7 @@ int stm32n6_i2c_transfer(uintptr_t i2cbase, uint8_t addr,
             {
               return ret;
             }
+
           stm32n6_i2c_putreg(i2cbase, STM32_I2C_TXDR_OFFSET, wbuffer[i]);
         }
 
@@ -203,7 +227,9 @@ int stm32n6_i2c_transfer(uintptr_t i2cbase, uint8_t addr,
             {
               return ret;
             }
-          rbuffer[i] = (uint8_t)stm32n6_i2c_getreg(i2cbase, STM32_I2C_RXDR_OFFSET);
+
+          rbuffer[i] =
+            (uint8_t)stm32n6_i2c_getreg(i2cbase, STM32_I2C_RXDR_OFFSET);
         }
 
       ret = stm32n6_i2c_wait_isr(i2cbase, I2C_ISR_STOPF);

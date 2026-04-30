@@ -37,5 +37,7 @@
 
 void stm32n6_clockconfig(void);
 void stm32n6_lowsetup(void);
+void stm32n6_soc_early_init(void);
+void stm32_boardinitialize(void);
 
 #endif /* __ARCH_ARM_SRC_STM32N6_STM32N6_START_H */

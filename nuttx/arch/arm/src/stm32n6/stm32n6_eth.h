@@ -127,11 +127,11 @@
 #define ETH_MACMIIAR_MB             (1 << 0)   /* MII busy */
 #define ETH_MACMIIAR_MW             (1 << 1)   /* MII write */
 #define ETH_MACMIIAR_CR_SHIFT       6          /* Clock range shift */
-#define ETH_MACMIIAR_CR_MASK        (0x1F << 6) /* Clock range mask */
+#define ETH_MACMIIAR_CR_MASK        (0x1F << 6)
 #define ETH_MACMIIAR_MR_SHIFT       6          /* MII register shift */
-#define ETH_MACMIIAR_MR_MASK        (0x1F << 6) /* MII register mask */
+#define ETH_MACMIIAR_MR_MASK        (0x1F << 6)
 #define ETH_MACMIIAR_PA_SHIFT       11         /* Physical layer address shift */
-#define ETH_MACMIIAR_PA_MASK        (0x1F << 11) /* Physical layer address mask */
+#define ETH_MACMIIAR_PA_MASK        (0x1F << 11)
 
 /* DMA Mode Register (DMAMR) */
 #define ETH_DMAMR_SWR               (1 << 0)   /* Software reset */
@@ -206,7 +206,7 @@
 #define ETH_DMATXDESC_LC            (1 << 9)   /* Late collision */
 #define ETH_DMATXDESC_EC            (1 << 8)   /* Excessive collision */
 #define ETH_DMATXDESC_VF            (1 << 7)   /* VLAN frame */
-#define ETH_DMATXDESC_CC_MASK       (0x0f << 3) /* Collision count mask */
+#define ETH_DMATXDESC_CC_MASK       (0x0f << 3)
 #define ETH_DMATXDESC_ED            (1 << 2)   /* Excessive deferral */
 #define ETH_DMATXDESC_UF            (1 << 1)   /* Underflow error */
 #define ETH_DMATXDESC_DB            (1 << 0)   /* Deferred bit */
@@ -214,7 +214,7 @@
 #define ETH_DMARXDESC_OWN           (1 << 31)  /* Own bit */
 #define ETH_DMARXDESC_FS            (1 << 6)   /* First segment */
 #define ETH_DMARXDESC_LS            (1 << 7)   /* Last segment */
-#define ETH_DMARXDESC_FL_MASK       (0x3fff << 16) /* Frame length mask */
+#define ETH_DMARXDESC_FL_MASK       (0x3fff << 16)
 
 /* Number of descriptors */
 #define ETH_NTXDESC                 4
@@ -259,11 +259,11 @@ struct stm32n6_eth_s
 
   struct stm32n6_eth_desc_s  *txdesc;   /* TX descriptor array */
   struct stm32n6_eth_desc_s  *rxdesc;   /* RX descriptor array */
-  uint8_t              *txbuf[ETH_NTXDESC];  /* TX buffer arrays */
-  uint8_t              *rxbuf[ETH_NRXDESC];  /* RX buffer arrays */
-  uint8_t              txhead;        /* Index to next TX descriptor to use */
-  uint8_t              txtail;        /* Index to next TX descriptor to reclaim */
-  uint8_t              rxndx;         /* Index to next RX descriptor to use */
+  uint8_t              *txbuf[ETH_NTXDESC];
+  uint8_t              *rxbuf[ETH_NRXDESC];
+  uint8_t              txhead;
+  uint8_t              txtail;
+  uint8_t              rxndx;
 
   /* Multicast hash table */
 
@@ -281,5 +281,6 @@ struct stm32n6_eth_s
  ****************************************************************************/
 
 int stm32n6_eth_initialize(void);
+int stm32n6_ethinitialize(int intf);
 
 #endif /* __ARCH_ARM_SRC_STM32N6_STM32N6_ETH_H */

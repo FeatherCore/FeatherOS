@@ -63,8 +63,3 @@ void stm32n6_soc_early_init(void)
 #if defined(CONFIG_STM32N6_RIF) && defined(CONFIG_STM32N6_RIF_OPEN)
 #endif
 }
-
-void stm32n6_boardinitialize(void)
-{
-  stm32n6_soc_early_init();
-}

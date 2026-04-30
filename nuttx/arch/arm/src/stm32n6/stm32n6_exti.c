@@ -33,6 +33,7 @@
 #include <errno.h>
 
 #include <nuttx/irq.h>
+#include <arch/irq.h>
 
 #include "arm_internal.h"
 #include "chip.h"
@@ -83,7 +84,7 @@ static inline void stm32n6_exti_putreg(uint32_t offset, uint32_t value)
   putreg32(value, STM32_EXTI_BASE + offset);
 }
 
-static void stm32n6_exti_isr(void *arg)
+static int stm32n6_exti_isr(int irq, void *context, void *arg)
 {
   uint32_t pending;
   uint32_t line;
@@ -98,6 +99,7 @@ static void stm32n6_exti_isr(void *arg)
             {
               g_exti_handlers[line](line, g_exti_args[line]);
             }
+
           pending &= ~(1 << line);
         }
     }
@@ -112,6 +114,7 @@ static void stm32n6_exti_isr(void *arg)
             {
               g_exti_handlers[line](line, g_exti_args[line]);
             }
+
           pending &= ~(1 << (line - 32));
         }
     }
@@ -126,9 +129,12 @@ static void stm32n6_exti_isr(void *arg)
             {
               g_exti_handlers[line](line, g_exti_args[line]);
             }
+
           pending &= ~(1 << (line - 64));
         }
     }
+
+  return OK;
 }
 
 /****************************************************************************
@@ -146,6 +152,18 @@ int stm32n6_exti_initialize(void)
   stm32n6_exti_putreg(EXTI_IMR1_OFFSET, 0);
   stm32n6_exti_putreg(EXTI_IMR2_OFFSET, 0);
   stm32n6_exti_putreg(EXTI_IMR3_OFFSET, 0);
+
+  irq_attach(STM32_IRQ_EXTI0, stm32n6_exti_isr, NULL);
+  irq_attach(STM32_IRQ_EXTI1, stm32n6_exti_isr, NULL);
+  irq_attach(STM32_IRQ_EXTI2, stm32n6_exti_isr, NULL);
+  irq_attach(STM32_IRQ_EXTI3, stm32n6_exti_isr, NULL);
+  irq_attach(STM32_IRQ_EXTI4, stm32n6_exti_isr, NULL);
+
+  up_enable_irq(STM32_IRQ_EXTI0);
+  up_enable_irq(STM32_IRQ_EXTI1);
+  up_enable_irq(STM32_IRQ_EXTI2);
+  up_enable_irq(STM32_IRQ_EXTI3);
+  up_enable_irq(STM32_IRQ_EXTI4);
 
   return OK;
 }

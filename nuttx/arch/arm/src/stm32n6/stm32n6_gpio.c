@@ -27,16 +27,14 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <errno.h>
-#include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/spinlock.h>
 
 #include "arm_internal.h"
-#include "chip.h"
 #include "hardware/stm32n6_gpio.h"
 #include "hardware/stm32n6_rcc.h"
 #include "stm32n6_gpio.h"
@@ -47,11 +45,7 @@
 
 static spinlock_t g_configgpio_lock = SP_UNLOCKED;
 
-/****************************************************************************
- * Public Data
- ****************************************************************************/
-
-const uint32_t g_gpiobase[STM32N6_NGPIO] =
+static const uintptr_t g_gpiobase[STM32N6_NGPIO] =
 {
   STM32_GPIOA_BASE,
   STM32_GPIOB_BASE,
@@ -64,20 +58,49 @@ const uint32_t g_gpiobase[STM32N6_NGPIO] =
   0,
   0,
   0,
+  0,
+  0,
   STM32_GPION_BASE,
   STM32_GPIOO_BASE,
   STM32_GPIOP_BASE,
   STM32_GPIOQ_BASE,
 };
 
+static const uint32_t g_gpioclock[STM32N6_NGPIO] =
+{
+  RCC_AHB4ENR_GPIOAEN,
+  RCC_AHB4ENR_GPIOBEN,
+  RCC_AHB4ENR_GPIOCEN,
+  RCC_AHB4ENR_GPIODEN,
+  RCC_AHB4ENR_GPIOEEN,
+  RCC_AHB4ENR_GPIOFEN,
+  RCC_AHB4ENR_GPIOGEN,
+  RCC_AHB4ENR_GPIOHEN,
+  0,
+  0,
+  0,
+  0,
+  0,
+  RCC_AHB4ENR_GPIONEN,
+  RCC_AHB4ENR_GPIOOEN,
+  RCC_AHB4ENR_GPIOPEN,
+  RCC_AHB4ENR_GPIOQEN,
+};
+
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-static inline int stm32n6_gpiobase(uint32_t pinset, uintptr_t *base)
+static inline unsigned int stm32n6_gpioport(uint32_t pinset)
 {
-  int port = (pinset >> 4) & 0xf;
+  return (pinset & GPIO_PORT_MASK) >> GPIO_PORT_SHIFT;
+}
 
+static int stm32n6_gpiobase(uint32_t pinset, uintptr_t *base)
+{
+  unsigned int port;
+
+  port = stm32n6_gpioport(pinset);
   if (port >= STM32N6_NGPIO || g_gpiobase[port] == 0)
     {
       return -EINVAL;
@@ -85,6 +108,20 @@ static inline int stm32n6_gpiobase(uint32_t pinset, uintptr_t *base)
 
   *base = g_gpiobase[port];
   return OK;
+}
+
+static void stm32n6_gpio_clock_enable(unsigned int port)
+{
+  uint32_t regval;
+
+  if (port >= STM32N6_NGPIO || g_gpioclock[port] == 0)
+    {
+      return;
+    }
+
+  regval = getreg32(STM32_RCC_AHB4ENR);
+  regval |= g_gpioclock[port];
+  putreg32(regval, STM32_RCC_AHB4ENR);
 }
 
 /****************************************************************************
@@ -107,6 +144,7 @@ int stm32n6_configgpio(uint32_t cfgset)
   uint32_t regval;
   uint32_t shift;
   irqstate_t flags;
+  unsigned int port;
   int ret;
 
   ret = stm32n6_gpiobase(cfgset, &base);
@@ -115,54 +153,64 @@ int stm32n6_configgpio(uint32_t cfgset)
       return ret;
     }
 
-  pin     = cfgset & 0xf;
-  mode    = (cfgset >> 8) & 0x3;
-  otype   = (cfgset >> 10) & 0x1;
-  ospeed  = (cfgset >> 11) & 0x3;
-  pupd    = (cfgset >> 13) & 0x3;
-  alt     = (cfgset >> 16) & 0xf;
+  port    = stm32n6_gpioport(cfgset);
+  pin     = (cfgset & GPIO_PIN_MASK) >> GPIO_PIN_SHIFT;
+  mode    = (cfgset & GPIO_MODE_MASK) >> GPIO_MODE_SHIFT;
+  otype   = (cfgset & GPIO_OTYPE_MASK) >> GPIO_OTYPE_SHIFT;
+  ospeed  = (cfgset & GPIO_SPEED_MASK) >> GPIO_SPEED_SHIFT;
+  pupd    = (cfgset & GPIO_PUPD_MASK) >> GPIO_PUPD_SHIFT;
+  alt     = (cfgset & GPIO_AF_MASK) >> GPIO_AF_SHIFT;
 
   flags = spin_lock_irqsave(&g_configgpio_lock);
 
-  regval = getreg32(STM32_RCC_AHB4ENR);
-  regval |= (1 << ((cfgset >> 4) & 0xf));
-  putreg32(regval, STM32_RCC_AHB4ENR);
+  stm32n6_gpio_clock_enable(port);
+
+  if (mode == (GPIO_OUTPUT >> GPIO_MODE_SHIFT))
+    {
+      stm32n6_gpiowrite(cfgset, (cfgset & GPIO_OUTPUT_SET) != 0);
+    }
 
   shift = pin * 2;
   regval = getreg32(base + STM32_GPIO_MODER_OFFSET);
   regval &= ~(3 << shift);
-  regval |= (mode << shift);
+  regval |= mode << shift;
   putreg32(regval, base + STM32_GPIO_MODER_OFFSET);
 
   regval = getreg32(base + STM32_GPIO_OTYPER_OFFSET);
   regval &= ~(1 << pin);
-  regval |= (otype << pin);
+  regval |= otype << pin;
   putreg32(regval, base + STM32_GPIO_OTYPER_OFFSET);
 
-  shift = pin * 2;
   regval = getreg32(base + STM32_GPIO_OSPEEDR_OFFSET);
   regval &= ~(3 << shift);
-  regval |= (ospeed << shift);
+  regval |= ospeed << shift;
   putreg32(regval, base + STM32_GPIO_OSPEEDR_OFFSET);
 
-  shift = pin * 2;
   regval = getreg32(base + STM32_GPIO_PUPDR_OFFSET);
   regval &= ~(3 << shift);
-  regval |= (pupd << shift);
+  regval |= pupd << shift;
   putreg32(regval, base + STM32_GPIO_PUPDR_OFFSET);
 
-  if (mode == GPIO_MODE_ALTERNATE)
+  if (mode == (GPIO_ALT >> GPIO_MODE_SHIFT))
     {
-      shift = (pin & 0x7) * 4;
+      shift = (pin & 7) * 4;
       regval = getreg32(base + STM32_GPIO_AFRL_OFFSET + (pin >> 3) * 4);
-      regval &= ~(0xf << shift);
-      regval |= (alt << shift);
+      regval &= ~(15 << shift);
+      regval |= alt << shift;
       putreg32(regval, base + STM32_GPIO_AFRL_OFFSET + (pin >> 3) * 4);
     }
 
   spin_unlock_irqrestore(&g_configgpio_lock, flags);
 
   return OK;
+}
+
+int stm32n6_unconfiggpio(uint32_t cfgset)
+{
+  cfgset &= GPIO_PORT_MASK | GPIO_PIN_MASK;
+  cfgset |= GPIO_ANALOG | GPIO_FLOAT;
+
+  return stm32n6_configgpio(cfgset);
 }
 
 void stm32n6_gpiowrite(uint32_t pinset, bool value)
@@ -176,7 +224,7 @@ void stm32n6_gpiowrite(uint32_t pinset, bool value)
       return;
     }
 
-  pin = pinset & 0xf;
+  pin = (pinset & GPIO_PIN_MASK) >> GPIO_PIN_SHIFT;
 
   if (value)
     {
@@ -201,7 +249,7 @@ bool stm32n6_gpioread(uint32_t pinset)
       return false;
     }
 
-  pin = pinset & 0xf;
+  pin = (pinset & GPIO_PIN_MASK) >> GPIO_PIN_SHIFT;
   regval = getreg32(base + STM32_GPIO_IDR_OFFSET);
 
   return (regval & (1 << pin)) != 0;

@@ -923,6 +923,24 @@ config MX25RXX_LXX
 
 endif # MTD_MX25RXX
 
+config MTD_MX66UW
+	bool "QuadSPI-based Macronix MX66UW1G45G FLASH"
+	default n
+	---help---
+		Support the Macronix MX66UW1G45G 1Gbit NOR FLASH in
+		conservative single-SPI command mode over a QSPI controller.
+
+if MTD_MX66UW
+
+config MX66UW_QSPI_FREQUENCY
+	int "MX66UW QuadSPI frequency"
+	default 24000000
+	---help---
+		Conservative bus frequency used before Octal DTR and training
+		are implemented.
+
+endif # MTD_MX66UW
+
 config MTD_GD55
 	bool "QuadSPI-based GigaDevices GD55 family FLASH"
 	default n

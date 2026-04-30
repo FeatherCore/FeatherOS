@@ -28,8 +28,8 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/spi/spi.h>
-#include <nuttx/mtd/mtd.h>
+
+#include <nuttx/spi/qspi.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -54,11 +54,6 @@
 #define STM32_XSPI_IR_OFFSET        0x44
 #define STM32_XSPI_ABR2_OFFSET      0x48
 #define STM32_XSPI_WRAPCR_OFFSET    0x50
-
-/* XSPI Base Addresses */
-#define STM32_XSPI1_BASE            (STM32N6_PERIPH_BASE + 0x08025000)
-#define STM32_XSPI2_BASE            (STM32N6_PERIPH_BASE + 0x0802A000)
-#define STM32_XSPI3_BASE            (STM32N6_PERIPH_BASE + 0x0802D000)
 
 /* XSPI Control Register (CR) */
 #define XSPI_CR_EN                  (1 << 0)   /* Enable */
@@ -120,56 +115,39 @@
 #define XSPI_CCR_INSTRUCTION_SHIFT  0
 #define XSPI_CCR_INSTRUCTION_MASK   0xFF
 
-/* Functional modes */
-#define XSPI_CCR_FMODE_IND_WRITE    0
-#define XSPI_CCR_FMODE_IND_READ     1
-#define XSPI_CCR_FMODE_AUTO_POLL    2
-#define XSPI_CCR_FMODE_MEM_MAP      3
-
-/* Instruction, Address, Data Modes */
-#define XSPI_CCR_IMODE_NONE         0
-#define XSPI_CCR_IMODE_1LINE        1
-#define XSPI_CCR_IMODE_2LINE        2
-#define XSPI_CCR_IMODE_4LINE        3
-#define XSPI_CCR_IMODE_8LINE        3
-
-#define XSPI_CCR_ADMODE_NONE        0
+#define XSPI_CCR_ADMODE_NONE        0        /* No address */
 #define XSPI_CCR_ADMODE_1LINE       1
 #define XSPI_CCR_ADMODE_2LINE       2
 #define XSPI_CCR_ADMODE_4LINE       3
 #define XSPI_CCR_ADMODE_8LINE       3
 
-#define XSPI_CCR_DMODE_NONE         0
-#define XSPI_CCR_DMODE_1LINE        1
-#define XSPI_CCR_DMODE_2LINE        2
-#define XSPI_CCR_DMODE_4LINE        3
-#define XSPI_CCR_DMODE_8LINE        3
+/* XSPI flag clear register */
+
+#define XSPI_FCR_CTEF               (1 << 0)
+#define XSPI_FCR_CTCF               (1 << 1)
+#define XSPI_FCR_CSMF               (1 << 3)
+#define XSPI_FCR_CTOF               (1 << 4)
+#define XSPI_FCR_ALL                (XSPI_FCR_CTEF | XSPI_FCR_CTCF | \
+                                     XSPI_FCR_CSMF | XSPI_FCR_CTOF)
+
+/* XSPI device configuration register 1 */
+
+#define XSPI_DCR1_DEVSIZE_SHIFT     16
+#define XSPI_DCR1_DEVSIZE_MASK      (0x1f << XSPI_DCR1_DEVSIZE_SHIFT)
+#define XSPI_DCR1_DEVSIZE(n)        ((uint32_t)(n) << \
+                                     XSPI_DCR1_DEVSIZE_SHIFT)
+#define XSPI_DCR1_CSHT_SHIFT        8
+#define XSPI_DCR1_CSHT_MASK         (0x3f << XSPI_DCR1_CSHT_SHIFT)
+#define XSPI_DCR1_CSHT(n)           ((uint32_t)(n) << XSPI_DCR1_CSHT_SHIFT)
 
 /* Default configuration */
 #define XSPI_FIFO_THRESHOLD         1
 #define XSPI_TIMEOUT_MS             1000
 
 /****************************************************************************
- * Public Types
- ****************************************************************************/
-
-struct stm32n6_xspi_s
-{
-  struct spi_dev_s    dev;          /* SPI device interface */
-  uint32_t            base;         /* XSPI register base address */
-  uint32_t            frequency;    /* Requested bus frequency */
-  uint32_t            actual;       /* Actual bus frequency */
-  uint8_t             nbits;        /* Width of word in bits (8 or 16) */
-  uint8_t             mode;         /* Mode 0,1,2,3 */
-  bool                devid;        /* Device ID */
-  struct wdog_s       wd;           /* Watchdog for timeout */
-  uint32_t            prescaler;    /* Prescaler value */
-};
-
-/****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
 
-int stm32n6_xspi_initialize(uint32_t base);
+FAR struct qspi_dev_s *stm32n6_xspi_initialize(int intf);
 
 #endif /* __ARCH_ARM_SRC_STM32N6_STM32N6_XSPI_H */

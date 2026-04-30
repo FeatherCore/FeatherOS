@@ -48,13 +48,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define STM32_SPI_CR1_OFFSET        0x00
-#define STM32_SPI_CR2_OFFSET        0x04
-#define STM32_SPI_SR_OFFSET         0x08
 #define STM32_SPI_DR_OFFSET         0x0C
-#define STM32_SPI_CRCPR_OFFSET      0x10
-#define STM32_SPI_RXCRCR_OFFSET     0x14
-#define STM32_SPI_TXCRCR_OFFSET     0x18
 
 #define STM32_SPI_CFG1_OFFSET       0x00
 #define STM32_SPI_CFG2_OFFSET       0x04
@@ -96,6 +90,11 @@ static void stm32n6_spi_enable_clock(uintptr_t spibase)
     {
       regval |= RCC_APB2ENR_SPI4EN;
     }
+  else if (spibase == STM32_SPI5_BASE)
+    {
+      regval |= RCC_APB2ENR_SPI5EN;
+    }
+
   putreg32(regval, STM32_RCC_APB2ENR);
 
   regval = getreg32(STM32_RCC_APB1ENR);
@@ -107,6 +106,7 @@ static void stm32n6_spi_enable_clock(uintptr_t spibase)
     {
       regval |= (1 << 15);
     }
+
   putreg32(regval, STM32_RCC_APB1ENR);
 }
 
@@ -139,11 +139,13 @@ int stm32n6_spi_initialize(uintptr_t spibase, uint32_t frequency,
   regval = 0;
   regval |= SPI_CR1_MSTR;
 
-  if (mode & SPI_MODE_CPOL)
+  if (mode == SPIDEV_MODE2 || mode == SPIDEV_MODE3)
     {
       regval |= SPI_CR1_CPOL;
     }
-  if (mode & SPI_MODE_CPHA)
+
+  if (mode == SPIDEV_MODE1 || mode == SPIDEV_MODE3 ||
+      mode == SPIDEV_MODETI)
     {
       regval |= SPI_CR1_CPHA;
     }
@@ -155,6 +157,17 @@ int stm32n6_spi_initialize(uintptr_t spibase, uint32_t frequency,
   stm32n6_spi_putreg(spibase, STM32_SPI_CR2_OFFSET, regval);
 
   return OK;
+}
+
+/****************************************************************************
+ * Name: stm32n6_spibus_initialize
+ ****************************************************************************/
+
+FAR struct spi_dev_s *stm32n6_spibus_initialize(int bus)
+{
+  (void)bus;
+
+  return NULL;
 }
 
 void stm32n6_spi_enable(uintptr_t spibase)

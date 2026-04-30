@@ -118,6 +118,7 @@
 #define RCC_APB2ENR_USART10EN          (1 << 7)
 #define RCC_APB2ENR_SPI1EN             (1 << 12)
 #define RCC_APB2ENR_SPI4EN             (1 << 13)
+#define RCC_APB2ENR_SPI5EN             (1 << 20)
 
 #define RCC_APB4ENR_I2C4EN             (1 << 7)
 

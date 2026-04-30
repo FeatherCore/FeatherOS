@@ -40,9 +40,7 @@
 
 /* Cortex-M55 Debug Registers */
 #define DCB_BASE                   0xe000edf0
-#define DWT_BASE                   0xe0001000
 #define TPIU_BASE                  0xe0040000
-#define ITM_BASE                   0xe0000000
 
 /* RCC (Reset and Clock Control) */
 #define STM32_RCC_BASE             (STM32N6_PERIPH_BASE + 0x0028000)

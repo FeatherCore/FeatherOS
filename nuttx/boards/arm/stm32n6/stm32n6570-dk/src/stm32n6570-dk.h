@@ -1,5 +1,5 @@
 /****************************************************************************
- * boards/arm/stm32n6570-dk/src/stm32n6570-dk.h
+ * boards/arm/stm32n6/stm32n6570-dk/src/stm32n6570-dk.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -20,26 +20,24 @@
  *
  ****************************************************************************/
 
+#ifndef __BOARDS_ARM_STM32N6_STM32N6570_DK_SRC_STM32N6570_DK_H
+#define __BOARDS_ARM_STM32N6_STM32N6570_DK_SRC_STM32N6570_DK_H
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 
-#include <stdint.h>
-#include <stdbool.h>
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
 
-#include "arm_internal.h"
-#include "chip.h"
-#include "stm32_gpio.h"
+void stm32_boardinitialize(void);
+int stm32_bringup(void);
 
-void stm32_boardinitialize(void)
-{
-#if defined(CONFIG_STM32N6_GPIO)
-  stm32n6_gpioinit();
+#ifdef CONFIG_STM32N6570_DK_XSPI2_FLASH
+int stm32_xspi_initialize(void);
 #endif
 
-#if defined(CONFIG_STM32N6_UART1_SERIALDRIVER)
-  stm32n6_uart_configure(STM32_USART1_BASE, STM32_USART1_BAUD);
-#endif
-
-#if defined(CONFIG_STM32N6_UART2_SERIALDRIVER)
-  stm32n6_uart_configure(STM32_USART2_BASE, STM32_USART2_BAUD);
-#endif
-}
+#endif /* __BOARDS_ARM_STM32N6_STM32N6570_DK_SRC_STM32N6570_DK_H */

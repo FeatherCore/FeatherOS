@@ -569,6 +569,18 @@ config ARCH_CHIP_STM32H7
 		STMicro STM32H7 architectures (ARM Cortex-M7 or
 		dual ARM Cortex-M7 Cortex-M4).
 
+config ARCH_CHIP_STM32N6
+	bool "STMicro STM32 N6"
+	select ARCH_CORTEXM55
+	select ARCH_HAVE_MPU
+	select ARCH_HAVE_SPI_BITORDER
+	select ARM_HAVE_MPU_UNIFIED
+	select ARMV8M_HAVE_STACKCHECK
+	select ARCH_HAVE_TICKLESS
+	select ARCH_HAVE_TIMEKEEPING
+	---help---
+		STMicro STM32N6 architectures (ARM Cortex-M55).
+
 config ARCH_CHIP_STM32L4
 	bool "STMicro STM32 L4"
 	select ARCH_CORTEXM4
@@ -1211,6 +1223,7 @@ config ARCH_CHIP
 	default "stm32f0l0g0"	if ARCH_CHIP_STM32F0 || ARCH_CHIP_STM32L0 || ARCH_CHIP_STM32G0 || ARCH_CHIP_STM32C0
 	default "stm32f7"	if ARCH_CHIP_STM32F7
 	default "stm32h7"	if ARCH_CHIP_STM32H7
+	default "stm32n6"	if ARCH_CHIP_STM32N6
 	default "stm32l4"	if ARCH_CHIP_STM32L4
 	default "stm32h5"	if ARCH_CHIP_STM32H5
 	default "stm32l5"	if ARCH_CHIP_STM32L5
@@ -1698,6 +1711,9 @@ source "arch/arm/src/stm32f7/Kconfig"
 endif
 if ARCH_CHIP_STM32H7
 source "arch/arm/src/stm32h7/Kconfig"
+endif
+if ARCH_CHIP_STM32N6
+source "arch/arm/src/stm32n6/Kconfig"
 endif
 if ARCH_CHIP_STM32L4
 source "arch/arm/src/stm32l4/Kconfig"

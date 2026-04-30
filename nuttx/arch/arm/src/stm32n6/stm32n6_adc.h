@@ -169,6 +169,8 @@
 #define ADC_SMPR_SMP_79_5CYCLES     6  /* 79.5 cycles */
 #define ADC_SMPR_SMP_160_5CYCLES    7  /* 160.5 cycles */
 
+#define STM32N6_ADC_MAX_CHANNELS    20
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -178,7 +180,7 @@ struct stm32n6_adc_s
   const struct adc_ops_s *ops;    /* Arch-specific ADC operations */
   uint32_t base;                  /* ADC register base address */
   uint8_t irq;                    /* ADC interrupt number */
-  uint8_t chanlist[ADC_MAX_CHANNELS]; /* Channels in sequence */
+  uint8_t chanlist[STM32N6_ADC_MAX_CHANNELS];
   uint8_t nchannels;              /* Number of channels in sequence */
 };
 
@@ -187,5 +189,8 @@ struct stm32n6_adc_s
  ****************************************************************************/
 
 int stm32n6_adc_initialize(void);
+FAR struct adc_dev_s *stm32n6_adcinitialize(int intf,
+                                            FAR const uint8_t *chanlist,
+                                            int nchannels);
 
 #endif /* __ARCH_ARM_SRC_STM32N6_STM32N6_ADC_H */

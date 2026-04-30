@@ -28,7 +28,12 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+
+#include <sys/types.h>
+#include <stdbool.h>
 #include <stdint.h>
+
+#include <nuttx/spi/spi.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -64,13 +69,8 @@
 #define SPI_CR2_LDMARX          (1 << 13)
 #define SPI_CR2_LDMATX          (1 << 14)
 
-#define SPI_SR_RXNE             (1 << 0)
-#define SPI_SR_TXE              (1 << 1)
 #define SPI_SR_CHSIDE           (1 << 2)
 #define SPI_SR_UDR              (1 << 3)
-#define SPI_SR_CRCERR           (1 << 4)
-#define SPI_SR_MODF             (1 << 5)
-#define SPI_SR_OVR              (1 << 6)
 #define SPI_SR_BSY              (1 << 7)
 #define SPI_SR_FRE              (1 << 8)
 #define SPI_SR_FTLVL_SHIFT      11
@@ -148,6 +148,7 @@ struct stm32n6_spidev_s
 
 int stm32n6_spi_initialize(uintptr_t spibase, uint32_t frequency,
                            uint8_t mode, uint8_t nbits);
+FAR struct spi_dev_s *stm32n6_spibus_initialize(int bus);
 void stm32n6_spi_enable(uintptr_t spibase);
 void stm32n6_spi_disable(uintptr_t spibase);
 void stm32n6_spi_send(uintptr_t spibase, uint8_t ch);

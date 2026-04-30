@@ -157,6 +157,10 @@ if(CONFIG_MTD)
     list(APPEND SRCS mx25rxx.c)
   endif()
 
+  if(CONFIG_MTD_MX66UW)
+    list(APPEND SRCS mx66uw.c)
+  endif()
+
   if(CONFIG_MTD_IS25XP)
     list(APPEND SRCS is25xp.c)
   endif()

@@ -1,5 +1,5 @@
 /****************************************************************************
- * arch/arm/src/stm32n6/stm32n6 ltdc.h
+ * arch/arm/src/stm32n6/stm32n6_ltdc.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -33,8 +33,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#define STM32_LTDC_BASE              (STM32N6_PERIPH_BASE + 0x08001000)
 
 /* LTDC Register Offsets */
 

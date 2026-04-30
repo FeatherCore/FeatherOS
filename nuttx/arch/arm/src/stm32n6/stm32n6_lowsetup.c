@@ -38,21 +38,15 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define USART_CR1_UE        (1 << 0)
-#define USART_CR1_TE        (1 << 3)
-#define USART_CR1_RE        (1 << 2)
-#define USART_CR1_M0        (1 << 12)
-#define USART_CR1_OVER8     (1 << 15)
-#define USART_CR2_STOP_1    0
 #define USART_BRR_DIV_MASK  0xffff
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-#if defined(CONFIG_STM32N6_UART1) || defined(CONFIG_STM32N6_UART2) || \
-    defined(CONFIG_STM32N6_UART3) || defined(CONFIG_STM32N6_UART4) || \
-    defined(CONFIG_STM32N6_UART5) || defined(CONFIG_STM32N6_UART6)
+#if defined(CONFIG_STM32N6_USART1) || defined(CONFIG_STM32N6_USART2) || \
+    defined(CONFIG_STM32N6_USART3) || defined(CONFIG_STM32N6_UART4) || \
+    defined(CONFIG_STM32N6_UART5) || defined(CONFIG_STM32N6_USART6)
 
 static inline void stm32n6_uart_configure(uintptr_t uart_base,
                                           uint32_t baudrate)
@@ -69,7 +63,7 @@ static inline void stm32n6_uart_configure(uintptr_t uart_base,
   putreg32(regval, uart_base + STM32_USART_CR1_OFFSET);
 
   regval = getreg32(uart_base + STM32_USART_CR2_OFFSET);
-  regval &= ~(3 << 12);
+  regval &= ~USART_CR2_STOP_MASK;
   regval |= USART_CR2_STOP_1;
   putreg32(regval, uart_base + STM32_USART_CR2_OFFSET);
 
@@ -88,38 +82,38 @@ static inline void stm32n6_uart_configure(uintptr_t uart_base,
 
 void stm32n6_lowsetup(void)
 {
-#if defined(CONFIG_STM32N6_UART1) && defined(CONFIG_STM32N6_UART1_SERIALDRIVER)
-  stm32n6_uart_configure(STM32_USART1_BASE, CONFIG_STM32N6_UART1_BAUD);
+#if defined(CONFIG_STM32N6_USART1) && defined(CONFIG_USART1_SERIALDRIVER)
+  stm32n6_uart_configure(STM32_USART1_BASE, CONFIG_USART1_BAUD);
 #endif
 
-#if defined(CONFIG_STM32N6_UART2) && defined(CONFIG_STM32N6_UART2_SERIALDRIVER)
-  stm32n6_uart_configure(STM32_USART2_BASE, CONFIG_STM32N6_UART2_BAUD);
+#if defined(CONFIG_STM32N6_USART2) && defined(CONFIG_USART2_SERIALDRIVER)
+  stm32n6_uart_configure(STM32_USART2_BASE, CONFIG_USART2_BAUD);
 #endif
 
-#if defined(CONFIG_STM32N6_UART3) && defined(CONFIG_STM32N6_UART3_SERIALDRIVER)
-  stm32n6_uart_configure(STM32_USART3_BASE, CONFIG_STM32N6_UART3_BAUD);
+#if defined(CONFIG_STM32N6_USART3) && defined(CONFIG_USART3_SERIALDRIVER)
+  stm32n6_uart_configure(STM32_USART3_BASE, CONFIG_USART3_BAUD);
 #endif
 
-#if defined(CONFIG_STM32N6_UART4) && defined(CONFIG_STM32N6_UART4_SERIALDRIVER)
-  stm32n6_uart_configure(STM32_UART4_BASE, CONFIG_STM32N6_UART4_BAUD);
+#if defined(CONFIG_STM32N6_UART4) && defined(CONFIG_UART4_SERIALDRIVER)
+  stm32n6_uart_configure(STM32_UART4_BASE, CONFIG_UART4_BAUD);
 #endif
 
-#if defined(CONFIG_STM32N6_UART5) && defined(CONFIG_STM32N6_UART5_SERIALDRIVER)
-  stm32n6_uart_configure(STM32_UART5_BASE, CONFIG_STM32N6_UART5_BAUD);
+#if defined(CONFIG_STM32N6_UART5) && defined(CONFIG_UART5_SERIALDRIVER)
+  stm32n6_uart_configure(STM32_UART5_BASE, CONFIG_UART5_BAUD);
 #endif
 
-#if defined(CONFIG_STM32N6_UART6) && defined(CONFIG_STM32N6_UART6_SERIALDRIVER)
-  stm32n6_uart_configure(STM32_USART6_BASE, CONFIG_STM32N6_UART6_BAUD);
+#if defined(CONFIG_STM32N6_USART6) && defined(CONFIG_USART6_SERIALDRIVER)
+  stm32n6_uart_configure(STM32_USART6_BASE, CONFIG_USART6_BAUD);
 #endif
 }
 
 void arm_lowputc(char ch)
 {
-#if defined(CONFIG_STM32N6_UART1)
+#if defined(CONFIG_STM32N6_USART1)
   while ((getreg32(STM32_USART1_BASE + STM32_USART_ISR_OFFSET) &
           (1 << 7)) == 0);
   putreg32((uint32_t)ch, STM32_USART1_BASE + STM32_USART_TDR_OFFSET);
-#elif defined(CONFIG_STM32N6_UART2)
+#elif defined(CONFIG_STM32N6_USART2)
   while ((getreg32(STM32_USART2_BASE + STM32_USART_ISR_OFFSET) &
           (1 << 7)) == 0);
   putreg32((uint32_t)ch, STM32_USART2_BASE + STM32_USART_TDR_OFFSET);

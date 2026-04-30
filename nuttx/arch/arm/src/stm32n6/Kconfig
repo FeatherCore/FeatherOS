@@ -1,611 +1,424 @@
-############################################################################
-# arch/arm/src/stm32n6/Kconfig
 #
-# SPDX-License-Identifier: Apache-2.0
+# For a description of the syntax of this configuration file, see
+# the file kconfig-language.txt in the NuttX tools repository.
 #
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.  The
-# ASF licenses this file to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance with the
-# License.  You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
-# License for the specific language governing permissions and limitations
-# under the License.
-#
-############################################################################
-
-comment "STMicroelectronics STM32N6 Configuration"
 
 if ARCH_CHIP_STM32N6
 
-config ARCH_CHIP_STM32N6
-	bool
-	default n
+comment "STM32N6 Configuration Options"
+
+choice
+	prompt "STM32N6 Chip Selection"
+	default ARCH_CHIP_STM32N657XX
 
 config ARCH_CHIP_STM32N657XX
 	bool "STM32N657xx"
-	select ARCH_CHIP_STM32N6
 	select ARCH_CORTEXM55
-	select ARCH_HAVE_MPU
-	select ARM_HAVE_MPU_UNIFIED
 	select ARCH_HAVE_FPU
+	select ARCH_HAVE_MPU
+	select ARCH_HAVE_IRQPRIO
+	select ARCH_HAVE_IRQTRIGGER
 	select ARMV8M_HAVE_ICACHE
 	select ARMV8M_HAVE_DCACHE
+	select ARMV8M_SYSTICK
 	select ARM_HAVE_DSP
 	select ARM_HAVE_MVE
-	select ARCH_ARMV8M
+	select ARM_HAVE_MPU_UNIFIED
 	---help---
-		STMicroelectronics STM32N657xx (ARM Cortex-M55).
-		ARMv8.1-M Mainline with DSP, MVE, FPU, I/D Cache, TrustZone, RIF.
+		STMicro STM32N657xx Cortex-M55 devices.
 
-if ARCH_CHIP_STM32N6
+endchoice
 
-comment "STM32N6 Core Configuration"
-
-config ARMV8M_HAVE_ICACHE
-	bool
-	default y
-
-config ARMV8M_HAVE_DCACHE
-	bool
-	default y
-
-config ARMV8M_DCACHE_LINE_SIZE
-	int "D-Cache line size"
-	default 32
-	depends on ARMV8M_HAVE_DCACHE
-
-config ARMV8M_ICACHE_LINE_SIZE
-	int "I-Cache line size"
-	default 32
-	depends on ARMV8M_HAVE_ICACHE
-
-comment "STM32N6 Peripherals"
+comment "STM32N6 Core"
 
 config STM32N6_NPU
-	bool "Enable Neural-ART NPU"
-	default y
-	---help---
-		Enable the Neural-ART neural network accelerator (NPU).
-		The NPU provides hardware acceleration for neural network inference.
+	bool "Neural-ART NPU"
+	default n
 
 config STM32N6_NPU_CACHE
-	bool "Enable NPU Cache (CACHEAXI)"
-	default y
+	bool "NPU CACHEAXI"
+	default n
 	depends on STM32N6_NPU
-	---help---
-		Enable the NPU cache for improved performance.
-		The CACHEAXI is required for optimal NPU operation.
 
 config STM32N6_RIF
-	bool "Enable Resource Isolation Framework (RIF)"
-	default y
-	---help---
-		Enable the Resource Isolation Framework for hardware-based
-		resource partitioning and security.
+	bool "Resource Isolation Framework"
+	default n
 
 config STM32N6_RIF_OPEN
-	bool "Configure RIF with full access"
-	default y
+	bool "Open RIF resources during early bring-up"
+	default n
 	depends on STM32N6_RIF
-	---help---
-		Configure the Resource Isolation Framework to allow full access
-		from the secure world to all SoC resources.
 
-config STM32N6_LTDC
-	bool "Enable LCD-TFT Display Controller (LTDC)"
-	default n
-	---help---
-		Enable the LCD-TFT Display Controller for graphical output.
-
-config STM32N6_DCMIPP
-	bool "Enable Digital Camera Interface (DCMIPP)"
-	default n
-	---help---
-		Enable the Digital Camera Interface Parallel Processor.
-
-config STM32N6_ETH
-	bool "Enable Ethernet Controller"
-	default n
-	---help---
-		Enable the Ethernet MAC controller.
-
-config STM32N6_USB
-	bool "Enable USB OTG HS"
-	default n
-	---help---
-		Enable USB OTG High Speed controllers.
-
-config STM32N6_XSPI
-	bool "Enable Octo-SPI (XSPI)"
-	default n
-	---help---
-		Enable the Octo-SPI interface for external memory.
-
-config STM32N6_JPEG
-	bool "Enable JPEG Codec"
-	default n
-	---help---
-		Enable the JPEG hardware codec.
-
-config STM32N6_VENC
-	bool "Enable Video Encoder (VENC)"
-	default n
-	---help---
-		Enable the video encoder for hardware encoding.
-
-config STM32N6_SDMMC
-	bool "Enable SDMMC controllers"
-	default n
-	---help---
-		Enable SD/MMC card controllers.
-
-config STM32N6_DMA2D
-	bool "Enable 2D Graphics Accelerator (DMA2D)"
-	default n
-	---help---
-		Enable the 2D graphics acceleration engine.
+comment "STM32N6 Peripheral Selection"
 
 config STM32N6_GPIO
-	bool "Enable GPIO support"
+	bool "GPIO"
 	default y
-	---help---
-		Enable GPIO driver support.
 
-config STM32N6_UART
-	bool "Enable UART/USART support"
-	default y
-	---help---
-		Enable UART/USART serial driver support.
-
-if STM32N6_UART
-
-config STM32N6_UART1
-	bool "Enable USART1"
+config STM32N6_USART
+	bool
 	default n
 
-config STM32N6_UART1_SERIALDRIVER
-	bool "USART1 serial driver"
+menu "STM32N6 U[S]ART Selection"
+
+config STM32N6_USART1
+	bool "USART1"
 	default n
-	depends on STM32N6_UART1
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select STM32N6_USART
+	select USART1_SERIALDRIVER
 
-config STM32N6_UART1_BAUD
-	int "USART1 Baud Rate"
-	default 115200
-	depends on STM32N6_UART1_SERIALDRIVER
-
-config STM32N6_UART2
-	bool "Enable USART2"
+config STM32N6_USART2
+	bool "USART2"
 	default n
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select STM32N6_USART
+	select USART2_SERIALDRIVER
 
-config STM32N6_UART2_SERIALDRIVER
-	bool "USART2 serial driver"
+config STM32N6_USART3
+	bool "USART3"
 	default n
-	depends on STM32N6_UART2
-
-config STM32N6_UART2_BAUD
-	int "USART2 Baud Rate"
-	default 115200
-	depends on STM32N6_UART2_SERIALDRIVER
-
-config STM32N6_UART3
-	bool "Enable USART3"
-	default n
-
-config STM32N6_UART3_SERIALDRIVER
-	bool "USART3 serial driver"
-	default n
-	depends on STM32N6_UART3
-
-config STM32N6_UART3_BAUD
-	int "USART3 Baud Rate"
-	default 115200
-	depends on STM32N6_UART3_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select STM32N6_USART
+	select USART3_SERIALDRIVER
 
 config STM32N6_UART4
-	bool "Enable UART4"
+	bool "UART4"
 	default n
-
-config STM32N6_UART4_SERIALDRIVER
-	bool "UART4 serial driver"
-	default n
-	depends on STM32N6_UART4
-
-config STM32N6_UART4_BAUD
-	int "UART4 Baud Rate"
-	default 115200
-	depends on STM32N6_UART4_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select STM32N6_USART
+	select UART4_SERIALDRIVER
 
 config STM32N6_UART5
-	bool "Enable UART5"
+	bool "UART5"
 	default n
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select STM32N6_USART
+	select UART5_SERIALDRIVER
 
-config STM32N6_UART5_SERIALDRIVER
-	bool "UART5 serial driver"
+config STM32N6_USART6
+	bool "USART6"
 	default n
-	depends on STM32N6_UART5
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select STM32N6_USART
+	select USART6_SERIALDRIVER
 
-config STM32N6_UART5_BAUD
-	int "UART5 Baud Rate"
-	default 115200
-	depends on STM32N6_UART5_SERIALDRIVER
-
-config STM32N6_UART6
-	bool "Enable USART6"
-	default n
-
-config STM32N6_UART6_SERIALDRIVER
-	bool "USART6 serial driver"
-	default n
-	depends on STM32N6_UART6
-
-config STM32N6_UART6_BAUD
-	int "USART6 Baud Rate"
-	default 115200
-	depends on STM32N6_UART6_SERIALDRIVER
-
-endif # STM32N6_UART
-
-config STM32N6_SPI
-	bool "Enable SPI support"
-	default n
-	---help---
-		Enable SPI driver support.
+endmenu
 
 config STM32N6_I2C
-	bool "Enable I2C support"
+	bool
 	default n
-	---help---
-		Enable I2C driver support.
 
-config STM32N6_DMA
-	bool "Enable DMA support"
+config STM32N6_I2C1
+	bool "I2C1"
 	default n
+	select STM32N6_I2C
+
+config STM32N6_I2C2
+	bool "I2C2"
+	default n
+	select STM32N6_I2C
+
+config STM32N6_I2C4
+	bool "I2C4"
+	default n
+	select STM32N6_I2C
+
+config STM32N6_SPI
+	bool
+	default n
+
+config STM32N6_SPI5
+	bool "SPI5"
+	default n
+	select STM32N6_SPI
+
+config STM32N6_FDCAN
+	bool
+	default n
+
+config STM32N6_FDCAN1
+	bool "FDCAN1"
+	default n
+	select STM32N6_FDCAN
+
+config STM32N6_XSPI
+	bool
+	default n
+
+config STM32N6_XSPI1
+	bool "XSPI1"
+	default n
+	select STM32N6_XSPI
+
+config STM32N6_XSPI2
+	bool "XSPI2"
+	default n
+	select STM32N6_XSPI
+
+config STM32N6_XSPI2_FLASH
+	bool "XSPI2 Macronix MX66UW1G45G NOR Flash"
+	default n
+	depends on STM32N6_XSPI2
+	select MTD
+	select MTD_MX66UW
 	---help---
-		Enable DMA driver support.
+		Enable the STM32N6570-DK external NOR FLASH on XSPI2 and
+		register it as an MTD device during board bring-up.
+
+config STM32N6_USB
+	bool
+	default n
+
+config STM32N6_USBOTGHS1
+	bool "USB OTG HS1"
+	default n
+	select STM32N6_USB
+
+config STM32N6_ETH
+	bool "Ethernet MAC"
+	default n
+
+config STM32N6_LTDC
+	bool "LCD-TFT Display Controller"
+	default n
 
 config STM32N6_ADC
-	bool "Enable ADC support"
+	bool
 	default n
-	---help---
-		Enable ADC driver support.
+
+config STM32N6_ADC1
+	bool "ADC1"
+	default n
+	select STM32N6_ADC
+
+config STM32N6_TIMERS
+	bool "TIM timers"
+	default n
+
+config STM32N6_PWM
+	bool
+	default n
+
+config STM32N6_TIM1_PWM
+	bool "TIM1 PWM"
+	default n
+	select STM32N6_PWM
+	select STM32N6_TIMERS
+
+config STM32N6_TIM15_PWM
+	bool "TIM15 PWM"
+	default n
+	select STM32N6_PWM
+	select STM32N6_TIMERS
+
+config STM32N6_SDMMC
+	bool
+	default n
+
+config STM32N6_SDMMC2
+	bool "SDMMC2"
+	default n
+	select STM32N6_SDMMC
+
+config STM32N6_DMA
+	bool "DMA"
+	default n
+
+config STM32N6_EXTI
+	bool "EXTI"
+	default n
+
+config STM32N6_HSEM
+	bool "Hardware semaphore"
+	default n
+
+config STM32N6_LPTIM
+	bool "Low-power timers"
+	default n
+
+config STM32N6_FLASH
+	bool "Flash controller"
+	default n
+
+config STM32N6_PWR
+	bool "Power controller"
+	default n
+
+config STM32N6_WWDG
+	bool "Window watchdog"
+	default n
+
+config STM32N6_IWDG
+	bool "Independent watchdog"
+	default n
+
+config STM32N6_JPEG
+	bool "JPEG codec"
+	default n
+
+config STM32N6_VENC
+	bool "Video encoder"
+	default n
+
+config STM32N6_DMA2D
+	bool "DMA2D"
+	default n
+	depends on EXPERIMENTAL
+
+config STM32N6_DCMIPP
+	bool "DCMIPP"
+	default n
+	depends on EXPERIMENTAL
 
 comment "STM32N6 Memory Configuration"
 
 config STM32N6_AXISRAM1
-	bool "Enable AXISRAM1 (512KB)"
+	bool "AXISRAM1"
 	default y
-	---help---
-		Enable AXISRAM1 bank. Default 512KB at 0x34000000.
 
 config STM32N6_AXISRAM2
-	bool "Enable AXISRAM2 (512KB)"
+	bool "AXISRAM2"
 	default y
-	---help---
-		Enable AXISRAM2 bank. Default 512KB at 0x34180000.
 
 config STM32N6_AXISRAM3
-	bool "Enable AXISRAM3 (448KB)"
+	bool "AXISRAM3"
 	default n
-	---help---
-		Enable AXISRAM3 bank via RAMCFG.
 
 config STM32N6_AXISRAM4
-	bool "Enable AXISRAM4 (448KB)"
+	bool "AXISRAM4"
 	default n
-	---help---
-		Enable AXISRAM4 bank via RAMCFG.
 
 config STM32N6_AXISRAM5
-	bool "Enable AXISRAM5 (448KB)"
+	bool "AXISRAM5"
 	default n
-	---help---
-		Enable AXISRAM5 bank via RAMCFG.
 
 config STM32N6_AXISRAM6
-	bool "Enable AXISRAM6 (448KB)"
+	bool "AXISRAM6"
 	default n
-	---help---
-		Enable AXISRAM6 bank via RAMCFG.
 
 comment "STM32N6 Clock Configuration"
 
 config STM32N6_HSI_FREQUENCY
 	int "HSI frequency in Hz"
 	default 64000000
-	---help---
-		Internal HSI oscillator frequency. Default is 64 MHz.
 
 config STM32N6_HSE_FREQUENCY
 	int "HSE frequency in Hz"
 	default 48000000
-	---help---
-		External HSE oscillator frequency. Default is 48 MHz.
 
 config STM32N6_LSI_FREQUENCY
 	int "LSI frequency in Hz"
 	default 32000
-	---help---
-		Internal LSI oscillator frequency. Default is 32 kHz.
 
 config STM32N6_LSE_FREQUENCY
 	int "LSE frequency in Hz"
 	default 32768
-	---help---
-		External LSE oscillator frequency. Default is 32.768 kHz.
 
 config STM32N6_HSE_BYPASS
-	bool "HSE crystal oscillator bypass"
+	bool "HSE bypass"
 	default n
-	---help---
-		Enable HSE bypass mode for external clock input.
 
 config STM32N6_HSE_DIV2
-	bool "Enable HSE/2 output"
+	bool "HSE divided by 2"
 	default n
-	---help---
-		Enable HSE divided by 2 output.
 
 config STM32N6_LSE_BYPASS
-	bool "LSE crystal oscillator bypass"
+	bool "LSE bypass"
 	default n
-	---help---
-		Enable LSE bypass mode for external clock input.
 
 config STM32N6_LSE_DRIVING
-	int "LSE driving capability (0-3)"
+	int "LSE driving capability"
 	default 2
 	range 0 3
-	---help---
-		LSE oscillator driving capability. 0=low, 3=high.
 
-comment "STM32N6 PLL Configuration"
-
-config STM32N6_PLL1_SOURCE
+choice
 	prompt "PLL1 source clock"
-	default "HSI"
-	choices "HSI" "HSE" "MSI"
-	---help---
-		PLL1 source clock selection.
+	default STM32N6_PLL1SRC_HSI
+
+config STM32N6_PLL1SRC_HSI
+	bool "HSI"
+
+config STM32N6_PLL1SRC_HSE
+	bool "HSE"
+
+config STM32N6_PLL1SRC_MSI
+	bool "MSI"
+
+endchoice
 
 config STM32N6_PLL1_M
 	int "PLL1 M divider"
 	default 2
 	range 1 63
-	---help---
-		PLL1 M divider value.
 
 config STM32N6_PLL1_N
 	int "PLL1 N multiplier"
 	default 100
 	range 4 512
-	---help---
-		PLL1 N multiplier value.
 
 config STM32N6_PLL1_P1
 	int "PLL1 P1 divider"
 	default 2
 	range 1 128
-	---help---
-		PLL1 P1 output divider.
 
 config STM32N6_PLL1_P2
 	int "PLL1 P2 divider"
 	default 2
 	range 1 128
-	---help---
-		PLL1 P2 output divider.
 
-config STM32N6_PLL2_SOURCE
-	prompt "PLL2 source clock"
-	default "HSI"
-	choices "HSI" "HSE" "MSI"
-	---help---
-		PLL2 source clock selection.
+choice
+	prompt "Voltage scaling"
+	default STM32N6_VOS_SCALE0
 
-config STM32N6_PLL2_M
-	int "PLL2 M divider"
-	default 2
-	range 1 63
+config STM32N6_VOS_SCALE0
+	bool "Scale 0"
 
-config STM32N6_PLL2_N
-	int "PLL2 N multiplier"
-	default 100
-	range 4 512
+config STM32N6_VOS_SCALE1
+	bool "Scale 1"
 
-config STM32N6_PLL2_P1
-	int "PLL2 P1 divider"
-	default 2
-	range 1 128
+config STM32N6_VOS_SCALE2
+	bool "Scale 2"
 
-config STM32N6_PLL2_P2
-	int "PLL2 P2 divider"
-	default 2
-	range 1 128
+endchoice
 
-config STM32N6_PLL3_SOURCE
-	prompt "PLL3 source clock"
-	default "HSI"
-	choices "HSI" "HSE" "MSI"
-	---help---
-		PLL3 source clock selection.
-
-config STM32N6_PLL3_M
-	int "PLL3 M divider"
-	default 2
-	range 1 63
-
-config STM32N6_PLL3_N
-	int "PLL3 N multiplier"
-	default 100
-	range 4 512
-
-config STM32N6_PLL3_P1
-	int "PLL3 P1 divider"
-	default 2
-	range 1 128
-
-config STM32N6_PLL3_P2
-	int "PLL3 P2 divider"
-	default 2
-	range 1 128
-
-config STM32N6_PLL4_SOURCE
-	prompt "PLL4 source clock"
-	default "HSI"
-	choices "HSI" "HSE" "MSI"
-	---help---
-		PLL4 source clock selection.
-
-config STM32N6_PLL4_M
-	int "PLL4 M divider"
-	default 2
-	range 1 63
-
-config STM32N6_PLL4_N
-	int "PLL4 N multiplier"
-	default 100
-	range 4 512
-
-config STM32N6_PLL4_P1
-	int "PLL4 P1 divider"
-	default 2
-	range 1 128
-
-config STM32N6_PLL4_P2
-	int "PLL4 P2 divider"
-	default 2
-	range 1 128
-
-comment "STM32N6 Bus Prescalers"
+config STM32N6_VOS_SCALE
+	int
+	default 0 if STM32N6_VOS_SCALE0
+	default 1 if STM32N6_VOS_SCALE1
+	default 2 if STM32N6_VOS_SCALE2
 
 config STM32N6_AHB_PRESCALER
 	int "AHB prescaler"
 	default 1
 	range 1 512
-	---help---
-		AHB bus prescaler value.
 
 config STM32N6_APB1_PRESCALER
 	int "APB1 prescaler"
 	default 1
 	range 1 16
-	---help---
-		APB1 bus prescaler value.
 
 config STM32N6_APB2_PRESCALER
 	int "APB2 prescaler"
 	default 1
 	range 1 16
-	---help---
-		APB2 bus prescaler value.
 
 config STM32N6_APB4_PRESCALER
 	int "APB4 prescaler"
 	default 1
 	range 1 16
-	---help---
-		APB4 bus prescaler value.
 
 config STM32N6_APB5_PRESCALER
 	int "APB5 prescaler"
 	default 1
 	range 1 16
-	---help---
-		APB5 bus prescaler value.
-
-comment "STM32N6 Voltage Scaling"
-
-config STM32N6_VOS_SCALE
-	prompt "Voltage scaling"
-	default "SCALE0"
-	choices "SCALE0" "SCALE1" "SCALE2"
-	---help---
-		Voltage scaling for power optimization.
-		SCALE0 = highest performance, SCALE2 = lowest power.
-
-comment "STM32N6 Additional Features"
-
-config STM32N6_TIMERS
-	bool "Enable TIM timer support"
-	default y
-	---help---
-		Enable basic TIM timer support.
-
-config STM32N6_EXTI
-	bool "Enable EXTI interrupt support"
-	default y
-	---help---
-		Enable External Interrupt/Event Controller support.
-
-config STM32N6_HSEM
-	bool "Enable Hardware Semaphore (HSEM)"
-	default y
-	---help---
-		Enable Hardware Semaphore for multiprocessor synchronization.
 
 config STM32N6_SYSCLK_FREQUENCY
 	int "System clock frequency in Hz"
 	default 64000000
-	---help---
-		System clock (SYSCLK) frequency in Hz.
-		Default is 64MHz from HSI.
 
 config STM32N6_HCLK_FREQUENCY
 	int "AHB clock frequency in Hz"
 	default 64000000
-	---help---
-		AHB bus clock (HCLK) frequency in Hz.
-		Default matches SYSCLK.
 
-config STM32N6_LPTIM
-	bool "Enable Low-Power Timer (LPTIM)"
-	default y
-	---help---
-		Enable Low-Power Timer support. LPTIMs continue to operate in low-power modes
-		and provide timing services while minimizing power consumption.
-
-config STM32N6_FLASH
-	bool "Enable Flash memory controller"
-	default y
-	---help---
-		Enable Flash memory controller for programming and erasing operations.
-		Required for bootloader and flash-based storage operations.
-
-config STM32N6_PWR
-	bool "Enable Power Management Unit (PWR)"
-	default y
-	---help---
-		Enable Power Management Unit for voltage scaling, power modes,
-		and low-power operation control.
-
-config STM32N6_WWDG
-	bool "Enable Window Watchdog (WWDG)"
-	default n
-	---help---
-		Enable Window Watchdog for enhanced system reliability.
-		Provides a safety mechanism that requires timely refreshes within a window.
-
-config STM32N6_IWDG
-	bool "Enable Independent Watchdog (IWDG)"
-	default y
-	---help---
-		Enable Independent Watchdog for system reliability.
-		Provides a safety mechanism that requires periodic refreshes.
-
-config STM32N6_FDCAN
-	bool "Enable CAN-FD support"
-	default n
-	---help---
-		Enable FDCAN controllers (CAN-FD protocol support).
-		Provides CAN-FD protocol support with flexible data rate.
-
-endif # ARCH_CHIP_STM32N6
-
-endif # ARCH_CHIP_STM32N6
+endif

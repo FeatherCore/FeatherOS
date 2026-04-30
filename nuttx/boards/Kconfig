@@ -1911,6 +1911,16 @@ config ARCH_BOARD_STM32H750B_DK
 	---help---
 		STMicro STM32H750B-DK board based on the STMicro STM32H750B MCU.
 
+config ARCH_BOARD_STM32N6570_DK
+	bool "STM32N6570-DK board"
+	depends on ARCH_CHIP_STM32N657XX
+	select ARCH_HAVE_LEDS
+	select ARCH_HAVE_BUTTONS
+	select ARCH_HAVE_IRQBUTTONS
+	---help---
+		STMicro STM32N6570-DK Discovery kit based on the STM32N657xx
+		Cortex-M55 MCU.
+
 config ARCH_BOARD_LINUM_STM32H753BI
 	bool "Linum (STM32H753BI) board"
 	depends on ARCH_CHIP_STM32H753BI
@@ -3663,6 +3673,7 @@ config ARCH_BOARD
 	default "nucleo-h745zi"             if ARCH_BOARD_NUCLEO_H745ZI
 	default "stm32h745i-disco"          if ARCH_BOARD_STM32H745I_DISCO
 	default "stm32h750b-dk"             if ARCH_BOARD_STM32H750B_DK
+	default "stm32n6570-dk"             if ARCH_BOARD_STM32N6570_DK
 	default "linum-stm32h753bi"         if ARCH_BOARD_LINUM_STM32H753BI
 	default "openh743i"                 if ARCH_BOARD_OPENH743I
 	default "nucleo-l073rz"             if ARCH_BOARD_NUCLEO_L073RZ
@@ -4400,6 +4411,9 @@ source "boards/arm/stm32h7/stm32h745i-disco/Kconfig"
 endif
 if ARCH_BOARD_STM32H750B_DK
 source "boards/arm/stm32h7/stm32h750b-dk/Kconfig"
+endif
+if ARCH_BOARD_STM32N6570_DK
+source "boards/arm/stm32n6/stm32n6570-dk/Kconfig"
 endif
 if ARCH_BOARD_LINUM_STM32H753BI
 source "boards/arm/stm32h7/linum-stm32h753bi/Kconfig"

@@ -1,5 +1,5 @@
 /****************************************************************************
- * boards/arm/stm32n6570-dk/src/stm32n6570-dk.h
+ * arch/arm/include/stm32n6/chip.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -20,35 +20,31 @@
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_STM32N6570_DK_H
-#define __BOARDS_ARM_STM32N6570_DK_H
-
-/****************************************************************************
- * Included Files
- ****************************************************************************/
-
-#include <nuttx/config.h>
+#ifndef __ARCH_ARM_INCLUDE_STM32N6_CHIP_H
+#define __ARCH_ARM_INCLUDE_STM32N6_CHIP_H
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define STM32_BOARD_USART1
-
-#ifdef CONFIG_STM32N6_UART1
-#  define STM32_USART1_SERIALDRIVER 1
-#  define STM32_USART1_BAUD         CONFIG_STM32N6_UART1_BAUD
+#if !defined(CONFIG_ARCH_CHIP_STM32N657XX)
+#  error STM32N6 chip not identified
 #endif
 
-#ifdef CONFIG_STM32N6_UART2
-#  define STM32_USART2_SERIALDRIVER 1
-#  define STM32_USART2_BAUD         CONFIG_STM32N6_UART2_BAUD
-#endif
+#define STM32N6_NGPIO              17
+#define STM32N6_NUSART             6
+#define STM32N6_NI2C               4
+#define STM32N6_NSPI               6
+#define STM32N6_NFDCAN             3
+#define STM32N6_NXSPI              3
 
-/****************************************************************************
- * Public Function Prototypes
- ****************************************************************************/
+#define ARMV8M_PERIPHERAL_INTERRUPTS 180
 
-void stm32_boardinitialize(void);
+/* 16 programmable interrupt priority levels. */
 
-#endif /* __BOARDS_ARM_STM32N6570_DK_H */
+#define NVIC_SYSH_PRIORITY_MIN     0xf0
+#define NVIC_SYSH_PRIORITY_DEFAULT 0x80
+#define NVIC_SYSH_PRIORITY_MAX     0x00
+#define NVIC_SYSH_PRIORITY_STEP    0x10
+
+#endif /* __ARCH_ARM_INCLUDE_STM32N6_CHIP_H */
