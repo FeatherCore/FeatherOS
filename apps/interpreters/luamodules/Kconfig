@@ -6,8 +6,8 @@
 #
 
 menu "LUA Modules"
-source "/home/uan-gpd/codes/FeatherOS/apps/interpreters/luamodules/cjson/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/interpreters/luamodules/lfs/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/interpreters/luamodules/luasyslog/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/interpreters/luamodules/luv/Kconfig"
+source "$APPSDIR/interpreters/luamodules/cjson/Kconfig"
+source "$APPSDIR/interpreters/luamodules/lfs/Kconfig"
+source "$APPSDIR/interpreters/luamodules/luasyslog/Kconfig"
+source "$APPSDIR/interpreters/luamodules/luv/Kconfig"
 endmenu # LUA Modules

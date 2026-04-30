@@ -6,7 +6,7 @@
 #
 
 menu "arch"
-source "/home/uan-gpd/codes/FeatherOS/apps/testing/arch/himem_test/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/testing/arch/mtetest/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/testing/arch/x86-64-ABI/Kconfig"
+source "$APPSDIR/testing/arch/himem_test/Kconfig"
+source "$APPSDIR/testing/arch/mtetest/Kconfig"
+source "$APPSDIR/testing/arch/x86-64-ABI/Kconfig"
 endmenu # arch

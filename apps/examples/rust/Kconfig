@@ -6,7 +6,7 @@
 #
 
 menu "Rust Examples"
-source "/home/uan-gpd/codes/FeatherOS/apps/examples/rust/baremetal/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/examples/rust/hello/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/examples/rust/slint/Kconfig"
+source "$APPSDIR/examples/rust/baremetal/Kconfig"
+source "$APPSDIR/examples/rust/hello/Kconfig"
+source "$APPSDIR/examples/rust/slint/Kconfig"
 endmenu # Rust Examples

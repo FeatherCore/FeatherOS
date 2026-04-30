@@ -6,9 +6,9 @@
 #
 
 menu "Machine Learning Support"
-source "/home/uan-gpd/codes/FeatherOS/apps/mlearning/cmsis-nn/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/mlearning/cmsis/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/mlearning/darknet/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/mlearning/libnnablart/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/mlearning/tflite-micro/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/mlearning/cmsis-nn/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/mlearning/cmsis/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/mlearning/darknet/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/mlearning/libnnablart/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/mlearning/tflite-micro/Kconfig"
 endmenu # Machine Learning Support

@@ -11,9 +11,7 @@ impl FramePolicy {
     };
 
     pub const fn new(target_frame_us: u32) -> Self {
-        Self {
-            target_frame_us,
-        }
+        Self { target_frame_us }
     }
 }
 
@@ -222,7 +220,9 @@ pub struct GameRuntime<const ENTITIES: usize, const INPUT: usize, const DIRTY: u
     pub input: InputQueue<INPUT>,
 }
 
-impl<const ENTITIES: usize, const INPUT: usize, const DIRTY: usize> GameRuntime<ENTITIES, INPUT, DIRTY> {
+impl<const ENTITIES: usize, const INPUT: usize, const DIRTY: usize>
+    GameRuntime<ENTITIES, INPUT, DIRTY>
+{
     pub const fn new(camera: Camera) -> Self {
         Self {
             entities: EntityWorld::new(),

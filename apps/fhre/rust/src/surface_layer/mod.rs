@@ -78,11 +78,18 @@ impl Surface {
             return true;
         }
 
-        let Some(mut scratch) = LayerScratch::new(shadow.w, shadow.h, self.layer_budget.max_bytes) else {
+        let Some(mut scratch) = LayerScratch::new(shadow.w, shadow.h, self.layer_budget.max_bytes)
+        else {
             return false;
         };
         fill_shadow_mask(&mut scratch.pixels, shadow, base, style);
-        blur_rgba(&mut scratch.pixels, shadow.w, shadow.h, scratch.stride, style.width.min(32));
+        blur_rgba(
+            &mut scratch.pixels,
+            shadow.w,
+            shadow.h,
+            scratch.stride,
+            style.width.min(32),
+        );
         self.composite_layer(&scratch.pixels, shadow, scratch.stride);
         true
     }
@@ -101,7 +108,8 @@ impl Surface {
             return true;
         }
 
-        let Some(mut scratch) = LayerScratch::new(target.w, target.h, self.layer_budget.max_bytes) else {
+        let Some(mut scratch) = LayerScratch::new(target.w, target.h, self.layer_budget.max_bytes)
+        else {
             stats.mark_layer_alloc_failure();
             self.draw_layer_fallback(target, spec);
             return false;
@@ -123,10 +131,24 @@ impl Surface {
         if spec.blur_radius != 0 {
             let pixels = (target.w as u32).saturating_mul(target.h as u32);
             stats.mark_blur_pixels(pixels);
-            blur_rgba(&mut scratch.pixels, target.w, target.h, scratch.stride, spec.blur_radius.min(32));
+            blur_rgba(
+                &mut scratch.pixels,
+                target.w,
+                target.h,
+                scratch.stride,
+                spec.blur_radius.min(32),
+            );
         }
 
-        apply_layer_effects(&mut scratch.pixels, target.w, target.h, scratch.stride, spec, target, self);
+        apply_layer_effects(
+            &mut scratch.pixels,
+            target.w,
+            target.h,
+            scratch.stride,
+            spec,
+            target,
+            self,
+        );
         self.composite_layer(&scratch.pixels, target, scratch.stride);
         true
     }
@@ -167,7 +189,10 @@ impl Surface {
                     if !layer.push_mask(spec) {
                         stats.mark_mask_stack_overflow();
                     }
-                    stats.mark_draw_dispatch_for(crate::DrawTaskKind::MaskRect, dispatch.classify(crate::DrawTaskKind::MaskRect));
+                    stats.mark_draw_dispatch_for(
+                        crate::DrawTaskKind::MaskRect,
+                        dispatch.classify(crate::DrawTaskKind::MaskRect),
+                    );
                     stats.mark_command_kind(cmd);
                     i += 1;
                     continue;
@@ -185,7 +210,10 @@ impl Surface {
                     if !layer.push_mask(spec) {
                         stats.mark_mask_stack_overflow();
                     }
-                    stats.mark_draw_dispatch_for(crate::DrawTaskKind::MaskBitmap, dispatch.classify(crate::DrawTaskKind::MaskBitmap));
+                    stats.mark_draw_dispatch_for(
+                        crate::DrawTaskKind::MaskBitmap,
+                        dispatch.classify(crate::DrawTaskKind::MaskBitmap),
+                    );
                     stats.mark_command_kind(cmd);
                     i += 1;
                     continue;
@@ -236,7 +264,12 @@ impl Surface {
                 let sx = (x - target.x) as usize;
                 let off = sy * stride + sx * 4;
                 if off + 3 < pixels.len() {
-                    let color = Color::rgba(pixels[off], pixels[off + 1], pixels[off + 2], pixels[off + 3]);
+                    let color = Color::rgba(
+                        pixels[off],
+                        pixels[off + 1],
+                        pixels[off + 2],
+                        pixels[off + 3],
+                    );
                     if color.a != 0 {
                         self.put_pixel(x, y, color);
                     }
@@ -260,7 +293,11 @@ fn fill_shadow_mask(pixels: &mut [u8], shadow: Rect, base: Rect, style: ShadowSt
                 return;
             }
             let point = Point::new(global_x, global_y);
-            if rounded_rect_contains(base, style.radius.saturating_add(style.spread.max(0) as u16), point) {
+            if rounded_rect_contains(
+                base,
+                style.radius.saturating_add(style.spread.max(0) as u16),
+                point,
+            ) {
                 pixels[off] = style.color.r;
                 pixels[off + 1] = style.color.g;
                 pixels[off + 2] = style.color.b;
@@ -276,7 +313,9 @@ fn rounded_rect_contains(rect: Rect, radius: u16, point: Point) -> bool {
     if rect.is_empty() || !rect.contains_point(point) {
         return false;
     }
-    let radius = (radius as i32).min(rect.w as i32 / 2).min(rect.h as i32 / 2);
+    let radius = (radius as i32)
+        .min(rect.w as i32 / 2)
+        .min(rect.h as i32 / 2);
     if radius <= 0 {
         return true;
     }
@@ -291,8 +330,16 @@ fn rounded_rect_contains(rect: Rect, radius: u16, point: Point) -> bool {
     if !(in_left || in_right) || !(in_top || in_bottom) {
         return true;
     }
-    let dx = if in_left { left_center - point.x } else { point.x - right_center };
-    let dy = if in_top { top_center - point.y } else { point.y - bottom_center };
+    let dx = if in_left {
+        left_center - point.x
+    } else {
+        point.x - right_center
+    };
+    let dy = if in_top {
+        top_center - point.y
+    } else {
+        point.y - bottom_center
+    };
     dx.saturating_mul(dx) + dy.saturating_mul(dy) <= radius.saturating_mul(radius)
 }
 
@@ -329,8 +376,10 @@ fn apply_layer_effects(
                     let mix = recolor.a as u16;
                     let inv = 255u16.saturating_sub(mix);
                     pixels[off] = ((pixels[off] as u16 * inv + recolor.r as u16 * mix) / 255) as u8;
-                    pixels[off + 1] = ((pixels[off + 1] as u16 * inv + recolor.g as u16 * mix) / 255) as u8;
-                    pixels[off + 2] = ((pixels[off + 2] as u16 * inv + recolor.b as u16 * mix) / 255) as u8;
+                    pixels[off + 1] =
+                        ((pixels[off + 1] as u16 * inv + recolor.g as u16 * mix) / 255) as u8;
+                    pixels[off + 2] =
+                        ((pixels[off + 2] as u16 * inv + recolor.b as u16 * mix) / 255) as u8;
                 }
                 pixels[off + 3] = a;
             }
@@ -354,7 +403,14 @@ fn blur_rgba(pixels: &mut [u8], width: u16, height: u16, stride: usize, radius: 
     box_blur_vertical(&temp, pixels, width, height, stride, radius as i32);
 }
 
-fn box_blur_horizontal(src: &[u8], dst: &mut [u8], width: u16, height: u16, stride: usize, radius: i32) {
+fn box_blur_horizontal(
+    src: &[u8],
+    dst: &mut [u8],
+    width: u16,
+    height: u16,
+    stride: usize,
+    radius: i32,
+) {
     let width = width as i32;
     let height = height as i32;
     let mut y = 0;
@@ -389,7 +445,14 @@ fn box_blur_horizontal(src: &[u8], dst: &mut [u8], width: u16, height: u16, stri
     }
 }
 
-fn box_blur_vertical(src: &[u8], dst: &mut [u8], width: u16, height: u16, stride: usize, radius: i32) {
+fn box_blur_vertical(
+    src: &[u8],
+    dst: &mut [u8],
+    width: u16,
+    height: u16,
+    stride: usize,
+    radius: i32,
+) {
     let width = width as i32;
     let height = height as i32;
     let mut y = 0;
@@ -425,7 +488,12 @@ fn box_blur_vertical(src: &[u8], dst: &mut [u8], width: u16, height: u16, stride
 }
 
 fn translate_rect(rect: Rect, dx: i32, dy: i32) -> Rect {
-    Rect::new(rect.x.saturating_add(dx), rect.y.saturating_add(dy), rect.w, rect.h)
+    Rect::new(
+        rect.x.saturating_add(dx),
+        rect.y.saturating_add(dy),
+        rect.w,
+        rect.h,
+    )
 }
 
 fn translate_mask_spec(mut spec: MaskSpec, dx: i32, dy: i32) -> MaskSpec {

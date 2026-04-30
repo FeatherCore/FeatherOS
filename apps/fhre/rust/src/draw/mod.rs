@@ -1,5 +1,8 @@
 use crate::{
-    backend::{DrawBackendDispatch, DrawTaskKind, RenderBackend, RenderStats},
+    backend::{
+        DrawBackendDispatch, DrawChain, DrawChainOp, DrawChainOpKind, DrawTaskKind,
+        RenderBackend, RenderStats, DEFAULT_DRAW_CHAIN_OPS,
+    },
     dirty::DirtyRegion,
     surface::Surface,
     Color, Fixed16, Point, Rect,
@@ -33,11 +36,31 @@ pub enum BlendMode {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GradientStyle {
     None,
-    Vertical { start: Color, end: Color },
-    Horizontal { start: Color, end: Color },
-    Linear { start: Point, end: Point, start_color: Color, end_color: Color },
-    Radial { center: Point, radius: u16, inner: Color, outer: Color },
-    Conical { center: Point, start: Color, end: Color },
+    Vertical {
+        start: Color,
+        end: Color,
+    },
+    Horizontal {
+        start: Color,
+        end: Color,
+    },
+    Linear {
+        start: Point,
+        end: Point,
+        start_color: Color,
+        end_color: Color,
+    },
+    Radial {
+        center: Point,
+        radius: u16,
+        inner: Color,
+        outer: Color,
+    },
+    Conical {
+        center: Point,
+        start: Color,
+        end: Color,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -613,9 +636,7 @@ impl DrawCommand {
             Self::EndLayer | Self::PopMask => 0,
             Self::DrawTriangle { depth, .. }
             | Self::DrawGradientTriangle { depth, .. }
-            | Self::DrawTexturedTriangle { depth, .. } => {
-                (depth.a + depth.b + depth.c) / 3
-            }
+            | Self::DrawTexturedTriangle { depth, .. } => (depth.a + depth.b + depth.c) / 3,
         }
     }
 
@@ -721,10 +742,7 @@ impl DrawCommand {
                 ..
             } => surface.draw_image_id_tint(rect, image, opacity, fit, tint),
             Self::DrawImageStyled {
-                rect,
-                image,
-                style,
-                ..
+                rect, image, style, ..
             } => surface.draw_image_id_styled(rect, image, style),
             Self::DrawSvgIcon {
                 rect,
@@ -764,7 +782,11 @@ impl DrawCommand {
                 opacity,
                 ..
             } => {
-                let _ = surface.push_mask(MaskSpec::bitmap(rect, image).inverted(inverted).opacity(opacity));
+                let _ = surface.push_mask(
+                    MaskSpec::bitmap(rect, image)
+                        .inverted(inverted)
+                        .opacity(opacity),
+                );
             }
             Self::PopMask => {
                 let _ = surface.pop_mask();
@@ -773,11 +795,7 @@ impl DrawCommand {
                 p0, p1, p2, color, ..
             } => surface.fill_triangle(p0, p1, p2, color),
             Self::DrawGradientTriangle {
-                p0,
-                p1,
-                p2,
-                style,
-                ..
+                p0, p1, p2, style, ..
             } => surface.fill_gradient_triangle(p0, p1, p2, style),
             Self::DrawTexturedTriangle {
                 p0,
@@ -838,7 +856,13 @@ impl DrawCommand {
             Self::StrokeStyledLine {
                 from,
                 to,
-                style: LineStyle { width, cap_start, cap_end, .. },
+                style:
+                    LineStyle {
+                        width,
+                        cap_start,
+                        cap_end,
+                        ..
+                    },
                 ..
             } => {
                 let cap_extra = if cap_start == LineCap::Square || cap_end == LineCap::Square {
@@ -880,7 +904,12 @@ impl DrawCommand {
                 ..
             } => {
                 let r = radius as i32 + style.width as i32 + 1;
-                Some(Rect::from_edges(center.x - r, center.y - r, center.x + r, center.y + r))
+                Some(Rect::from_edges(
+                    center.x - r,
+                    center.y - r,
+                    center.x + r,
+                    center.y + r,
+                ))
             }
             Self::DrawText {
                 pos, text, scale, ..
@@ -1036,7 +1065,12 @@ impl DrawCommand {
                 color,
                 scale,
             },
-            Self::DrawLabel { rect, depth, text, style } => Self::DrawLabel {
+            Self::DrawLabel {
+                rect,
+                depth,
+                text,
+                style,
+            } => Self::DrawLabel {
                 rect: translate_rect(rect, dx, dy),
                 depth,
                 text,
@@ -1284,6 +1318,68 @@ impl<const N: usize> DrawList<N> {
         }
     }
 
+    pub fn compile_draw_chain<const OPS: usize>(
+        &self,
+        dirty_clip: Option<Rect>,
+    ) -> DrawChain<OPS> {
+        let mut chain = DrawChain::new();
+        let mut active_clip = None;
+        let mut i = 0usize;
+        while i < self.len {
+            let cmd = self.cmds[i];
+            let clip = effective_chain_clip(self.clips[i], dirty_clip);
+            let Some(op_kind) = chain_op_kind(cmd) else {
+                i += 1;
+                continue;
+            };
+
+            let bounds = chain_op_bounds(cmd, clip);
+            if chain_op_culls_with_clip(op_kind) {
+                let Some(command_bounds) = cmd.bounds() else {
+                    i += 1;
+                    continue;
+                };
+                let clipped = match clip {
+                    Some(clip) => command_bounds.clipped_to(clip),
+                    None => command_bounds,
+                };
+                if clipped.is_empty() {
+                    i += 1;
+                    continue;
+                }
+            } else if let Some(clip) = clip {
+                if clip.is_empty() {
+                    i += 1;
+                    continue;
+                }
+            }
+
+            if clip != active_clip {
+                let clip_bounds = clip.unwrap_or(Rect::EMPTY);
+                let _ = chain.push(DrawChainOp::new(
+                    DrawChainOpKind::Clip,
+                    None,
+                    clip_bounds,
+                    clip,
+                    saturating_u16(i),
+                    0,
+                ));
+                active_clip = clip;
+            }
+
+            let _ = chain.push(DrawChainOp::new(
+                op_kind,
+                cmd.task_kind(),
+                bounds,
+                clip,
+                saturating_u16(i),
+                1,
+            ));
+            i += 1;
+        }
+        chain
+    }
+
     pub fn execute(&self, surface: &mut Surface) {
         self.execute_on(surface);
     }
@@ -1297,6 +1393,8 @@ impl<const N: usize> DrawList<N> {
         stats.clear();
         stats.mark_overflowed(self.overflowed);
         let dispatch = DrawBackendDispatch::from_capabilities(backend.capabilities());
+        let chain = self.compile_draw_chain::<DEFAULT_DRAW_CHAIN_OPS>(None);
+        let _ = backend.submit_draw_chain(&chain, stats);
         let mut active_clip = None;
         let mut i = 0;
         while i < self.len {
@@ -1356,7 +1454,9 @@ impl<const N: usize> DrawList<N> {
                     opacity,
                     ..
                 } => {
-                    let spec = MaskSpec::bitmap(rect, image).inverted(inverted).opacity(opacity);
+                    let spec = MaskSpec::bitmap(rect, image)
+                        .inverted(inverted)
+                        .opacity(opacity);
                     if !backend.push_mask(spec) {
                         stats.mark_mask_stack_overflow();
                     }
@@ -1422,6 +1522,8 @@ impl<const N: usize> DrawList<N> {
             }
 
             stats.dirty_pass_started();
+            let chain = self.compile_draw_chain::<DEFAULT_DRAW_CHAIN_OPS>(Some(dirty_rect));
+            let _ = backend.submit_draw_chain(&chain, stats);
             let mut i = 0;
             while i < self.len {
                 let cmd = self.cmds[i];
@@ -1496,7 +1598,9 @@ impl<const N: usize> DrawList<N> {
                         opacity,
                         ..
                     } => {
-                        let spec = MaskSpec::bitmap(rect, image).inverted(inverted).opacity(opacity);
+                        let spec = MaskSpec::bitmap(rect, image)
+                            .inverted(inverted)
+                            .opacity(opacity);
                         if !backend.push_mask(spec) {
                             stats.mark_mask_stack_overflow();
                         }
@@ -1577,6 +1681,114 @@ impl<const N: usize> DrawList<N> {
     }
 }
 
+fn effective_chain_clip(command_clip: Option<Rect>, dirty_clip: Option<Rect>) -> Option<Rect> {
+    match dirty_clip {
+        Some(dirty) => match command_clip {
+            Some(command) => Some(command.clipped_to(dirty)),
+            None => Some(dirty),
+        },
+        None => command_clip,
+    }
+}
+
+fn chain_op_kind(cmd: DrawCommand) -> Option<DrawChainOpKind> {
+    match cmd {
+        DrawCommand::Noop => None,
+        DrawCommand::SetClip(_) => Some(DrawChainOpKind::Clip),
+        DrawCommand::FillRect { color, .. } => {
+            if color.a == 255 {
+                Some(DrawChainOpKind::SolidFill)
+            } else {
+                Some(DrawChainOpKind::AlphaFill)
+            }
+        }
+        DrawCommand::FillStyled { style, .. }
+            if style.radius == 0
+                && style.gradient == GradientStyle::None
+                && style.blend == BlendMode::Normal =>
+        {
+            if style.color.a == 255 {
+                Some(DrawChainOpKind::SolidFill)
+            } else {
+                Some(DrawChainOpKind::AlphaFill)
+            }
+        }
+        DrawCommand::DrawImage { opacity, .. } | DrawCommand::DrawImageFit { opacity, .. } => {
+            if opacity == 255 {
+                Some(DrawChainOpKind::ImageBlit)
+            } else {
+                Some(DrawChainOpKind::ImageBlend)
+            }
+        }
+        DrawCommand::DrawImageTint { .. } => Some(DrawChainOpKind::ImageBlend),
+        DrawCommand::DrawImageStyled { style, .. }
+            if style.blend == BlendMode::Normal
+                && style.tint.is_none()
+                && style.clip_radius == 0
+                && !style.tile =>
+        {
+            if style.opacity == 255 {
+                Some(DrawChainOpKind::ImageBlit)
+            } else {
+                Some(DrawChainOpKind::ImageBlend)
+            }
+        }
+        DrawCommand::DrawMask { .. }
+        | DrawCommand::PushMask { .. }
+        | DrawCommand::PushBitmapMask { .. } => Some(DrawChainOpKind::MaskEnter),
+        DrawCommand::PopMask => Some(DrawChainOpKind::MaskExit),
+        DrawCommand::BeginLayer { .. } => Some(DrawChainOpKind::LayerEnter),
+        DrawCommand::EndLayer => Some(DrawChainOpKind::LayerExit),
+        DrawCommand::Clear(_)
+        | DrawCommand::FillRoundRect { .. }
+        | DrawCommand::FillGradient { .. }
+        | DrawCommand::FillStyled { .. }
+        | DrawCommand::FillCircle { .. }
+        | DrawCommand::StrokeLine { .. }
+        | DrawCommand::StrokeStyledLine { .. }
+        | DrawCommand::DrawBorder { .. }
+        | DrawCommand::DrawShadow { .. }
+        | DrawCommand::DrawArc { .. }
+        | DrawCommand::DrawText { .. }
+        | DrawCommand::DrawLabel { .. }
+        | DrawCommand::DrawImageStyled { .. }
+        | DrawCommand::DrawSvgIcon { .. }
+        | DrawCommand::DrawSvgDocument { .. }
+        | DrawCommand::DrawBlur { .. }
+        | DrawCommand::DrawLayer { .. }
+        | DrawCommand::DrawTriangle { .. }
+        | DrawCommand::DrawGradientTriangle { .. }
+        | DrawCommand::DrawTexturedTriangle { .. } => Some(DrawChainOpKind::FallbackRange),
+    }
+}
+
+fn chain_op_bounds(cmd: DrawCommand, clip: Option<Rect>) -> Rect {
+    match cmd {
+        DrawCommand::SetClip(rect) => rect,
+        _ => match (cmd.bounds(), clip) {
+            (Some(bounds), Some(clip)) => bounds.clipped_to(clip),
+            (Some(bounds), None) => bounds,
+            (None, Some(clip)) => clip,
+            (None, None) => Rect::EMPTY,
+        },
+    }
+}
+
+fn chain_op_culls_with_clip(op: DrawChainOpKind) -> bool {
+    matches!(
+        op,
+        DrawChainOpKind::SolidFill
+            | DrawChainOpKind::AlphaFill
+            | DrawChainOpKind::ImageBlit
+            | DrawChainOpKind::ImageBlend
+            | DrawChainOpKind::FallbackRange
+    )
+}
+
+fn saturating_u16(value: usize) -> u16 {
+    value.min(u16::MAX as usize) as u16
+}
+
 fn min3_i32(a: i32, b: i32, c: i32) -> i32 {
     a.min(b).min(c)
 }
@@ -1590,7 +1802,12 @@ fn translate_point(point: Point, dx: i32, dy: i32) -> Point {
 }
 
 fn translate_rect(rect: Rect, dx: i32, dy: i32) -> Rect {
-    Rect::new(rect.x.saturating_add(dx), rect.y.saturating_add(dy), rect.w, rect.h)
+    Rect::new(
+        rect.x.saturating_add(dx),
+        rect.y.saturating_add(dy),
+        rect.w,
+        rect.h,
+    )
 }
 
 fn translate_mask_spec(mut spec: MaskSpec, dx: i32, dy: i32) -> MaskSpec {

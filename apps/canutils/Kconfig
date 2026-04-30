@@ -6,13 +6,13 @@
 #
 
 menu "CAN Utilities"
-source "/home/uan-gpd/codes/FeatherOS/apps/canutils/candump/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/canutils/canlib/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/canutils/cansend/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/canutils/lely-canopen/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/canutils/libcanutils/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/canutils/libdronecan/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/canutils/libobd2/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/canutils/libopencyphal/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/canutils/slcan/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/canutils/candump/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/canutils/canlib/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/canutils/cansend/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/canutils/lely-canopen/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/canutils/libcanutils/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/canutils/libdronecan/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/canutils/libobd2/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/canutils/libopencyphal/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/canutils/slcan/Kconfig"
 endmenu # CAN Utilities

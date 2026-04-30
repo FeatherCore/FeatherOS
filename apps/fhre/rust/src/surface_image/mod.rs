@@ -1,7 +1,9 @@
 use crate::{
     image::{builtin_image, ImageFormat, ImageView},
-    raster::clamp_i32,
-    BlendMode, Color, ImageDrawStyle, ImageFit, ImageId, PixelFormat, Point, Rect, Surface, TexCoord,
+    raster::{clamp_i32, rgb565},
+    surface_pixels::blend_rgb565_raw,
+    BlendMode, Color, ImageDrawStyle, ImageFit, ImageId, PixelFormat, Point, Rect, Surface,
+    TexCoord,
 };
 
 impl Surface {
@@ -92,7 +94,14 @@ impl Surface {
             }
             self.set_clip(old_clip);
         } else {
-            self.draw_image_view_mapped(rect, view, style.opacity, style.fit, style.tint, style.blend);
+            self.draw_image_view_mapped(
+                rect,
+                view,
+                style.opacity,
+                style.fit,
+                style.tint,
+                style.blend,
+            );
         }
 
         if pushed_radius_mask {
@@ -104,7 +113,13 @@ impl Surface {
         self.draw_image_view_fit(rect, image, opacity, ImageFit::Stretch);
     }
 
-    pub fn draw_image_view_fit(&mut self, rect: Rect, image: ImageView, opacity: u8, fit: ImageFit) {
+    pub fn draw_image_view_fit(
+        &mut self,
+        rect: Rect,
+        image: ImageView,
+        opacity: u8,
+        fit: ImageFit,
+    ) {
         self.draw_image_view_mapped(rect, image, opacity, fit, None, BlendMode::Normal);
     }
 
@@ -152,17 +167,10 @@ impl Surface {
         }
 
         if tint.is_none()
-            && opacity == 255
             && blend == BlendMode::Normal
-            && !self.has_masks()
             && self.format == PixelFormat::Rgb565
-            && image.format == ImageFormat::Rgb565
+            && self.blit_rgb565_normal_fast(rect, dst_rect, image, fit, opacity, x0, y0, x1, y1)
         {
-            if fit == ImageFit::Stretch && rect.w == image.width && rect.h == image.height {
-                self.copy_rgb565_image_rows(rect, image, x0, y0, x1, y1);
-            } else {
-                self.blit_rgb565_scaled_nearest(dst_rect, image, x0, y0, x1, y1);
-            }
             return;
         }
 
@@ -254,6 +262,79 @@ impl Surface {
             }
             y += 1;
         }
+    }
+
+    fn blit_rgb565_normal_fast(
+        &mut self,
+        rect: Rect,
+        dst_rect: Rect,
+        image: ImageView,
+        fit: ImageFit,
+        opacity: u8,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+    ) -> bool {
+        if image.data.is_null() || opacity == 0 || dst_rect.w == 0 || dst_rect.h == 0 {
+            return true;
+        }
+
+        let has_masks = self.has_masks();
+        if image.format == ImageFormat::Rgb565 && opacity == 255 && !has_masks {
+            if fit == ImageFit::Stretch && rect.w == image.width && rect.h == image.height {
+                self.copy_rgb565_image_rows(rect, image, x0, y0, x1, y1);
+            } else {
+                self.blit_rgb565_scaled_nearest(dst_rect, image, x0, y0, x1, y1);
+            }
+            return true;
+        }
+
+        let dst_w = dst_rect.w.max(1) as i32;
+        let dst_h = dst_rect.h.max(1) as i32;
+        let src_w = image.width.max(1) as i32;
+        let src_h = image.height.max(1) as i32;
+        let mut y = y0;
+        while y < y1 {
+            let sy = ((y - dst_rect.y).saturating_mul(src_h) / dst_h)
+                .max(0)
+                .min(src_h - 1) as usize;
+            let dst_y = y as usize * self.stride;
+            let mut x = x0;
+            while x < x1 {
+                let sx = ((x - dst_rect.x).saturating_mul(src_w) / dst_w)
+                    .max(0)
+                    .min(src_w - 1) as usize;
+                if let Some((src_r, src_g, src_b, mut src_a)) =
+                    image_rgba8888_at(image, sx, sy, opacity)
+                {
+                    if has_masks {
+                        let mask = self.mask_alpha(Point::new(x, y)) as u32;
+                        src_a = (src_a * mask) / 255;
+                    }
+                    if src_a != 0 {
+                        unsafe {
+                            let dst = self.pixels.add(dst_y + x as usize * 2) as *mut u16;
+                            if src_a == 255 {
+                                core::ptr::write_unaligned(
+                                    dst,
+                                    rgb565(Color::rgb(src_r as u8, src_g as u8, src_b as u8)),
+                                );
+                            } else {
+                                let raw = core::ptr::read_unaligned(dst);
+                                core::ptr::write_unaligned(
+                                    dst,
+                                    blend_rgb565_raw(raw, src_r, src_g, src_b, src_a),
+                                );
+                            }
+                        }
+                    }
+                }
+                x += 1;
+            }
+            y += 1;
+        }
+        true
     }
 
     pub fn fill_textured_triangle(
@@ -350,10 +431,29 @@ impl Surface {
             return;
         }
         let base = tint.unwrap_or(Color::rgba(96, 112, 128, opacity));
-        let color = Color::rgba(base.r, base.g, base.b, ((base.a as u16 * opacity as u16) / 255) as u8);
-        self.fill_round_rect(rect, (rect.w.min(rect.h) / 5).max(2), Color::rgba(color.r, color.g, color.b, color.a / 2));
-        self.draw_wide_line(Point::new(rect.x, rect.y), Point::new(rect.right() - 1, rect.bottom() - 1), 1, color);
-        self.draw_wide_line(Point::new(rect.right() - 1, rect.y), Point::new(rect.x, rect.bottom() - 1), 1, color);
+        let color = Color::rgba(
+            base.r,
+            base.g,
+            base.b,
+            ((base.a as u16 * opacity as u16) / 255) as u8,
+        );
+        self.fill_round_rect(
+            rect,
+            (rect.w.min(rect.h) / 5).max(2),
+            Color::rgba(color.r, color.g, color.b, color.a / 2),
+        );
+        self.draw_wide_line(
+            Point::new(rect.x, rect.y),
+            Point::new(rect.right() - 1, rect.bottom() - 1),
+            1,
+            color,
+        );
+        self.draw_wide_line(
+            Point::new(rect.right() - 1, rect.y),
+            Point::new(rect.x, rect.bottom() - 1),
+            1,
+            color,
+        );
     }
 }
 
@@ -400,4 +500,64 @@ fn image_fit_rect(rect: Rect, src_w: u16, src_h: u16, fit: ImageFit) -> (Rect, R
         ImageFit::Stretch => rect,
     };
     (dst, crop)
+}
+
+fn image_rgba8888_at(
+    image: ImageView,
+    x: usize,
+    y: usize,
+    opacity: u8,
+) -> Option<(u32, u32, u32, u32)> {
+    match image.format {
+        ImageFormat::Rgb565 => {
+            let offset = y
+                .checked_mul(image.stride)?
+                .checked_add(x.checked_mul(2)?)?;
+            let lo = image_byte(image, offset)?;
+            let hi = image_byte(image, offset + 1)?;
+            let raw = u16::from_le_bytes([lo, hi]);
+            Some((
+                (((raw >> 11) & 0x1f) as u32 * 255) / 31,
+                (((raw >> 5) & 0x3f) as u32 * 255) / 63,
+                ((raw & 0x1f) as u32 * 255) / 31,
+                opacity as u32,
+            ))
+        }
+        ImageFormat::Rgb888 => {
+            let offset = y
+                .checked_mul(image.stride)?
+                .checked_add(x.checked_mul(3)?)?;
+            Some((
+                image_byte(image, offset)? as u32,
+                image_byte(image, offset + 1)? as u32,
+                image_byte(image, offset + 2)? as u32,
+                opacity as u32,
+            ))
+        }
+        ImageFormat::Rgba8888 => {
+            let offset = y
+                .checked_mul(image.stride)?
+                .checked_add(x.checked_mul(4)?)?;
+            let alpha = ((image_byte(image, offset + 3)? as u32 * opacity as u32) / 255).min(255);
+            Some((
+                image_byte(image, offset)? as u32,
+                image_byte(image, offset + 1)? as u32,
+                image_byte(image, offset + 2)? as u32,
+                alpha,
+            ))
+        }
+        ImageFormat::A8 => {
+            let offset = y.checked_mul(image.stride)?.checked_add(x)?;
+            let alpha = ((image_byte(image, offset)? as u32 * opacity as u32) / 255).min(255);
+            Some((255, 255, 255, alpha))
+        }
+    }
+}
+
+fn image_byte(image: ImageView, offset: usize) -> Option<u8> {
+    if image.data.is_null() || offset >= image.len {
+        None
+    } else {
+        Some(unsafe { *image.data.add(offset) })
+    }
 }

@@ -1,4 +1,10 @@
-use crate::{png::DecodedImage, ImageFormat};
+use crate::{
+    backend::{
+        CodecAcceleratorCapabilities, CodecPipelinePlan, CodecStageKind, CodecStagePlan,
+    },
+    png::DecodedImage,
+    ImageFormat,
+};
 use alloc::vec::Vec;
 
 const JPEG_SOI: &[u8; 2] = b"\xff\xd8";
@@ -14,14 +20,9 @@ const JPEG_APP14: u8 = 0xee;
 const PROGRESSIVE_COEFF_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
 const ZIGZAG: [usize; 64] = [
-    0, 1, 8, 16, 9, 2, 3, 10,
-    17, 24, 32, 25, 18, 11, 4, 5,
-    12, 19, 26, 33, 40, 48, 41, 34,
-    27, 20, 13, 6, 7, 14, 21, 28,
-    35, 42, 49, 56, 57, 50, 43, 36,
-    29, 22, 15, 23, 30, 37, 44, 51,
-    58, 59, 52, 45, 38, 31, 39, 46,
-    53, 60, 61, 54, 47, 55, 62, 63,
+    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20,
+    13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59,
+    52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
 ];
 
 const IDCT_BASIS: [[i32; 8]; 8] = [
@@ -290,7 +291,34 @@ impl JpegDecoder {
         Self::decode_with_options(bytes, JpegDecodeOptions::DEFAULT)
     }
 
-    pub fn decode_with_options(bytes: &[u8], options: JpegDecodeOptions) -> Result<DecodedImage, JpegError> {
+    pub fn plan_pipeline<const STAGES: usize>() -> CodecPipelinePlan<STAGES> {
+        Self::plan_pipeline_with_caps(CodecAcceleratorCapabilities::NONE)
+    }
+
+    pub fn plan_pipeline_with_caps<const STAGES: usize>(
+        caps: CodecAcceleratorCapabilities,
+    ) -> CodecPipelinePlan<STAGES> {
+        let supported = caps.jpeg && caps.max_stages >= 8;
+        let mut plan = CodecPipelinePlan::new();
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Read, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Inspect, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Header, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Entropy, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Transform, true, supported));
+        let _ = plan.push(CodecStagePlan::new(
+            CodecStageKind::ColorConvert,
+            true,
+            supported,
+        ));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Pack, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::CacheInsert, false, true));
+        plan
+    }
+
+    pub fn decode_with_options(
+        bytes: &[u8],
+        options: JpegDecodeOptions,
+    ) -> Result<DecodedImage, JpegError> {
         let source = parse_jpeg(bytes, true)?;
         if source.progressive && !options.allow_progressive {
             return Err(JpegError::UnsupportedProgressive);
@@ -304,7 +332,8 @@ impl JpegDecoder {
             decode_baseline(&source)?
         };
         if options.apply_exif_orientation {
-            Ok(apply_exif_orientation(image, source.exif_orientation).ok_or(JpegError::Unsupported)?)
+            Ok(apply_exif_orientation(image, source.exif_orientation)
+                .ok_or(JpegError::Unsupported)?)
         } else {
             Ok(image)
         }
@@ -359,7 +388,9 @@ fn parse_jpeg<'a>(bytes: &'a [u8], require_scan: bool) -> Result<JpegSource<'a>,
                 let mut scan = parse_sos(segment, &mut source)?;
                 let scan_start = offset;
                 let scan_end = find_scan_end(bytes, scan_start)?;
-                scan.data = bytes.get(scan_start..scan_end).ok_or(JpegError::Truncated)?;
+                scan.data = bytes
+                    .get(scan_start..scan_end)
+                    .ok_or(JpegError::Truncated)?;
                 if source.scan.is_empty() {
                     source.scan = scan.data;
                 }
@@ -429,7 +460,11 @@ fn parse_exif_orientation(segment: &[u8]) -> Option<u8> {
 
 fn read_tiff_u16(bytes: &[u8], offset: usize, le: bool) -> Option<u16> {
     let raw = [*bytes.get(offset)?, *bytes.get(offset + 1)?];
-    Some(if le { u16::from_le_bytes(raw) } else { u16::from_be_bytes(raw) })
+    Some(if le {
+        u16::from_le_bytes(raw)
+    } else {
+        u16::from_be_bytes(raw)
+    })
 }
 
 fn read_tiff_u32(bytes: &[u8], offset: usize, le: bool) -> Option<u32> {
@@ -439,7 +474,11 @@ fn read_tiff_u32(bytes: &[u8], offset: usize, le: bool) -> Option<u32> {
         *bytes.get(offset + 2)?,
         *bytes.get(offset + 3)?,
     ];
-    Some(if le { u32::from_le_bytes(raw) } else { u32::from_be_bytes(raw) })
+    Some(if le {
+        u32::from_le_bytes(raw)
+    } else {
+        u32::from_be_bytes(raw)
+    })
 }
 
 fn parse_dqt(segment: &[u8], source: &mut JpegSource<'_>) -> Result<(), JpegError> {
@@ -452,7 +491,9 @@ fn parse_dqt(segment: &[u8], source: &mut JpegSource<'_>) -> Result<(), JpegErro
         if precision != 0 || table_id >= 4 {
             return Err(JpegError::Unsupported);
         }
-        let table = segment.get(offset..offset + 64).ok_or(JpegError::Truncated)?;
+        let table = segment
+            .get(offset..offset + 64)
+            .ok_or(JpegError::Truncated)?;
         let mut i = 0usize;
         while i < 64 {
             source.quant[table_id][ZIGZAG[i]] = table[i] as u16;
@@ -474,7 +515,9 @@ fn parse_dht(segment: &[u8], source: &mut JpegSource<'_>) -> Result<(), JpegErro
         if table_id >= 4 || class > 1 {
             return Err(JpegError::Unsupported);
         }
-        let counts = segment.get(offset..offset + 16).ok_or(JpegError::Truncated)?;
+        let counts = segment
+            .get(offset..offset + 16)
+            .ok_or(JpegError::Truncated)?;
         offset += 16;
         let mut total = 0usize;
         let mut i = 0usize;
@@ -482,7 +525,9 @@ fn parse_dht(segment: &[u8], source: &mut JpegSource<'_>) -> Result<(), JpegErro
             total += counts[i] as usize;
             i += 1;
         }
-        let symbols = segment.get(offset..offset + total).ok_or(JpegError::Truncated)?;
+        let symbols = segment
+            .get(offset..offset + total)
+            .ok_or(JpegError::Truncated)?;
         offset += total;
         if class == 0 {
             source.huff_dc[table_id].build(counts, symbols)?;
@@ -493,7 +538,11 @@ fn parse_dht(segment: &[u8], source: &mut JpegSource<'_>) -> Result<(), JpegErro
     Ok(())
 }
 
-fn parse_sof(segment: &[u8], source: &mut JpegSource<'_>, progressive: bool) -> Result<(), JpegError> {
+fn parse_sof(
+    segment: &[u8],
+    source: &mut JpegSource<'_>,
+    progressive: bool,
+) -> Result<(), JpegError> {
     if segment.len() < 6 || segment[0] != 8 {
         return Err(JpegError::Unsupported);
     }
@@ -523,7 +572,8 @@ fn parse_sof(segment: &[u8], source: &mut JpegSource<'_>, progressive: bool) -> 
             td: 0,
             ta: 0,
         };
-        if source.components[i].h > 2 || source.components[i].v > 2 || source.components[i].tq >= 4 {
+        if source.components[i].h > 2 || source.components[i].v > 2 || source.components[i].tq >= 4
+        {
             return Err(JpegError::Unsupported);
         }
         i += 1;
@@ -536,7 +586,11 @@ fn parse_sos<'a>(segment: &[u8], source: &mut JpegSource<'a>) -> Result<ScanData
         return Err(JpegError::Truncated);
     }
     let count = segment[0] as usize;
-    if count == 0 || count > source.component_count || count > 4 || segment.len() < 1 + count * 2 + 3 {
+    if count == 0
+        || count > source.component_count
+        || count > 4
+        || segment.len() < 1 + count * 2 + 3
+    {
         return Err(JpegError::Unsupported);
     }
     if !source.progressive && count != source.component_count {
@@ -578,11 +632,20 @@ fn parse_sos<'a>(segment: &[u8], source: &mut JpegSource<'a>) -> Result<ScanData
     let successive = *segment.get(spectral + 2).ok_or(JpegError::Truncated)?;
     scan.successive_high = successive >> 4;
     scan.successive_low = successive & 0x0f;
-    if !source.progressive && (scan.spectral_start != 0 || scan.spectral_end != 63 || scan.successive_high != 0 || scan.successive_low != 0) {
+    if !source.progressive
+        && (scan.spectral_start != 0
+            || scan.spectral_end != 63
+            || scan.successive_high != 0
+            || scan.successive_low != 0)
+    {
         return Err(JpegError::Unsupported);
     }
     if source.progressive {
-        if scan.spectral_start > scan.spectral_end || scan.spectral_end > 63 || scan.successive_high > 13 || scan.successive_low > 13 {
+        if scan.spectral_start > scan.spectral_end
+            || scan.spectral_end > 63
+            || scan.successive_high > 13
+            || scan.successive_low > 13
+        {
             return Err(JpegError::Unsupported);
         }
         if count > 1 && !(scan.spectral_start == 0 && scan.spectral_end == 0) {
@@ -632,7 +695,13 @@ fn decode_baseline(source: &JpegSource<'_>) -> Result<DecodedImage, JpegError> {
                     let mut bx = 0usize;
                     while bx < c.h as usize {
                         let block_index = by * c.h as usize + bx;
-                        decode_block(source, &mut bits, c, &mut last_dc[ci], &mut blocks[ci][block_index])?;
+                        decode_block(
+                            source,
+                            &mut bits,
+                            c,
+                            &mut last_dc[ci],
+                            &mut blocks[ci][block_index],
+                        )?;
                         bx += 1;
                     }
                     by += 1;
@@ -681,8 +750,12 @@ fn decode_progressive(source: &JpegSource<'_>) -> Result<DecodedImage, JpegError
         let comp_h = div_ceil(source.height as usize * c.v as usize, max_v as usize);
         block_w[ci] = div_ceil(comp_w, 8);
         block_h[ci] = div_ceil(comp_h, 8);
-        let blocks = block_w[ci].checked_mul(block_h[ci]).ok_or(JpegError::Decode)?;
-        let bytes = blocks.checked_mul(core::mem::size_of::<[i16; 64]>()).ok_or(JpegError::Decode)?;
+        let blocks = block_w[ci]
+            .checked_mul(block_h[ci])
+            .ok_or(JpegError::Decode)?;
+        let bytes = blocks
+            .checked_mul(core::mem::size_of::<[i16; 64]>())
+            .ok_or(JpegError::Decode)?;
         if bytes > PROGRESSIVE_COEFF_BUDGET_BYTES {
             return Err(JpegError::Decode);
         }
@@ -693,7 +766,14 @@ fn decode_progressive(source: &JpegSource<'_>) -> Result<DecodedImage, JpegError
     let mut last_dc = [0i16; 4];
     let mut s = 0usize;
     while s < source.scans.len() {
-        decode_progressive_scan(source, source.scans[s], &mut coeffs, block_w, block_h, &mut last_dc)?;
+        decode_progressive_scan(
+            source,
+            source.scans[s],
+            &mut coeffs,
+            block_w,
+            block_h,
+            &mut last_dc,
+        )?;
         s += 1;
     }
 
@@ -721,7 +801,12 @@ fn decode_progressive(source: &JpegSource<'_>) -> Result<DecodedImage, JpegError
                         let src_y = my * c.v as usize + by;
                         if src_x < block_w[cidx] && src_y < block_h[cidx] {
                             let coeff_index = src_y * block_w[cidx] + src_x;
-                            dequant_idct_block(source, cidx, &coeffs[cidx][coeff_index], &mut blocks[cidx][block_index]);
+                            dequant_idct_block(
+                                source,
+                                cidx,
+                                &coeffs[cidx][coeff_index],
+                                &mut blocks[cidx][block_index],
+                            );
                         } else {
                             blocks[cidx][block_index] = [0; 64];
                         }
@@ -844,7 +929,14 @@ fn decode_progressive_scan(
                             let y = my * c.v as usize + by;
                             if x < block_w[ci] && y < block_h[ci] {
                                 let index = y * block_w[ci] + x;
-                                decode_progressive_dc_block(source, &mut bits, scan, scan.components[si], &mut last_dc[ci], &mut coeffs[ci][index])?;
+                                decode_progressive_dc_block(
+                                    source,
+                                    &mut bits,
+                                    scan,
+                                    scan.components[si],
+                                    &mut last_dc[ci],
+                                    &mut coeffs[ci][index],
+                                )?;
                             }
                             bx += 1;
                         }
@@ -853,7 +945,14 @@ fn decode_progressive_scan(
                     si += 1;
                 }
                 units = units.saturating_add(1);
-                maybe_consume_restart(source, &mut bits, &mut units, mcu_rows.saturating_mul(mcu_cols), last_dc, &mut eob_run)?;
+                maybe_consume_restart(
+                    source,
+                    &mut bits,
+                    &mut units,
+                    mcu_rows.saturating_mul(mcu_cols),
+                    last_dc,
+                    &mut eob_run,
+                )?;
                 mx += 1;
             }
             my += 1;
@@ -867,12 +966,33 @@ fn decode_progressive_scan(
             while bx < block_w[ci] {
                 let index = by * block_w[ci] + bx;
                 if scan.spectral_start == 0 && scan.spectral_end == 0 {
-                    decode_progressive_dc_block(source, &mut bits, scan, scan_component, &mut last_dc[ci], &mut coeffs[ci][index])?;
+                    decode_progressive_dc_block(
+                        source,
+                        &mut bits,
+                        scan,
+                        scan_component,
+                        &mut last_dc[ci],
+                        &mut coeffs[ci][index],
+                    )?;
                 } else {
-                    decode_progressive_ac_block(source, &mut bits, scan, scan_component, &mut coeffs[ci][index], &mut eob_run)?;
+                    decode_progressive_ac_block(
+                        source,
+                        &mut bits,
+                        scan,
+                        scan_component,
+                        &mut coeffs[ci][index],
+                        &mut eob_run,
+                    )?;
                 }
                 units = units.saturating_add(1);
-                maybe_consume_restart(source, &mut bits, &mut units, block_w[ci].saturating_mul(block_h[ci]), last_dc, &mut eob_run)?;
+                maybe_consume_restart(
+                    source,
+                    &mut bits,
+                    &mut units,
+                    block_w[ci].saturating_mul(block_h[ci]),
+                    last_dc,
+                    &mut eob_run,
+                )?;
                 bx += 1;
             }
             by += 1;
@@ -891,7 +1011,10 @@ fn maybe_consume_restart(
     last_dc: &mut [i16; 4],
     eob_run: &mut usize,
 ) -> Result<(), JpegError> {
-    if source.restart_interval != 0 && *units < total && *units % source.restart_interval as usize == 0 {
+    if source.restart_interval != 0
+        && *units < total
+        && *units % source.restart_interval as usize == 0
+    {
         bits.consume_restart_marker()?;
         *last_dc = [0; 4];
         *eob_run = 0;
@@ -1036,7 +1159,11 @@ fn refine_nonzero_coeffs(
     Ok(())
 }
 
-fn read_refinement_bit(bits: &mut BitReader<'_>, coeff: &mut i16, bit: u8) -> Result<(), JpegError> {
+fn read_refinement_bit(
+    bits: &mut BitReader<'_>,
+    coeff: &mut i16,
+    bit: u8,
+) -> Result<(), JpegError> {
     if bits.read_bit()? != 0 {
         refine_coeff(coeff, bit);
     }
@@ -1162,8 +1289,12 @@ fn write_mcu(
             } else if source.component_count == 4 {
                 let k = sample_component(source.components[3], max_h, max_v, blocks[3], px, py);
                 if source.adobe_transform == Some(2) {
-                    let cb = sample_component(source.components[1], max_h, max_v, blocks[1], px, py) - 128;
-                    let cr = sample_component(source.components[2], max_h, max_v, blocks[2], px, py) - 128;
+                    let cb =
+                        sample_component(source.components[1], max_h, max_v, blocks[1], px, py)
+                            - 128;
+                    let cr =
+                        sample_component(source.components[2], max_h, max_v, blocks[2], px, py)
+                            - 128;
                     let (r, g, b) = ycbcr_to_rgb(y_sample, cb, cr);
                     apply_k(r, g, b, k)
                 } else {
@@ -1175,8 +1306,10 @@ fn write_mcu(
                     )
                 }
             } else {
-                let cb = sample_component(source.components[1], max_h, max_v, blocks[1], px, py) - 128;
-                let cr = sample_component(source.components[2], max_h, max_v, blocks[2], px, py) - 128;
+                let cb =
+                    sample_component(source.components[1], max_h, max_v, blocks[1], px, py) - 128;
+                let cr =
+                    sample_component(source.components[2], max_h, max_v, blocks[2], px, py) - 128;
                 ycbcr_to_rgb(y_sample, cb, cr)
             };
             let rgb565 = rgb_to_565(r as u8, g as u8, b as u8);
@@ -1189,7 +1322,14 @@ fn write_mcu(
     }
 }
 
-fn sample_component(c: Component, max_h: u8, max_v: u8, blocks: [[i16; 64]; 4], px: usize, py: usize) -> i32 {
+fn sample_component(
+    c: Component,
+    max_h: u8,
+    max_v: u8,
+    blocks: [[i16; 64]; 4],
+    px: usize,
+    py: usize,
+) -> i32 {
     let sx = px * c.h as usize / max_h as usize;
     let sy = py * c.v as usize / max_v as usize;
     let block_x = (sx / 8).min(c.h as usize - 1);
@@ -1254,7 +1394,9 @@ fn apply_exif_orientation(image: DecodedImage, orientation: u8) -> Option<Decode
                 8 => (width - 1 - dy, dx),
                 _ => (dx, dy),
             };
-            let src = sy.checked_mul(image.stride)?.checked_add(sx.checked_mul(2)?)?;
+            let src = sy
+                .checked_mul(image.stride)?
+                .checked_add(sx.checked_mul(2)?)?;
             let dst = dy.checked_mul(out_w)?.checked_add(dx)?.checked_mul(2)?;
             out[dst] = *image.data.get(src)?;
             out[dst + 1] = *image.data.get(src + 1)?;

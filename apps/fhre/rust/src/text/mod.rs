@@ -81,10 +81,7 @@ impl<const N: usize> TextLayout<N> {
         self.len == 0
     }
 
-    pub fn from_glyph_run<const G: usize>(
-        run: &GlyphRun<G>,
-        options: TextLayoutOptions,
-    ) -> Self {
+    pub fn from_glyph_run<const G: usize>(run: &GlyphRun<G>, options: TextLayoutOptions) -> Self {
         let mut layout = Self::new();
         let limit = options.max_width.max(1) as i32;
         let line_h = options
@@ -96,10 +93,10 @@ impl<const N: usize> TextLayout<N> {
         let mut y = 0i32;
         let mut i = 0usize;
         while i < run.len {
-            let advance = run.items[i].advance.max(1) as i32
-                + options.letter_spacing.max(0) as i32;
+            let advance = run.items[i].advance.max(1) as i32 + options.letter_spacing.max(0) as i32;
             if options.wrap && i > glyph_start && width.saturating_add(advance) > limit {
-                let (char_start, char_len) = glyph_run_line_char_range(run, glyph_start, i - glyph_start);
+                let (char_start, char_len) =
+                    glyph_run_line_char_range(run, glyph_start, i - glyph_start);
                 layout.push(TextLayoutLine {
                     byte_start: 0,
                     byte_end: 0,
@@ -157,7 +154,10 @@ fn glyph_run_line_char_range<const G: usize>(
         index += 1;
     }
     if start == u16::MAX {
-        (glyph_start.min(u16::MAX as usize) as u16, glyph_len.min(u16::MAX as usize) as u16)
+        (
+            glyph_start.min(u16::MAX as usize) as u16,
+            glyph_len.min(u16::MAX as usize) as u16,
+        )
     } else {
         (start, stop.saturating_sub(start))
     }

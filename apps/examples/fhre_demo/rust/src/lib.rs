@@ -10,21 +10,21 @@ use core::ffi::c_int;
 use core::ffi::c_void;
 use core::panic::PanicInfo;
 use fhre::{
-    fixed_from_i32, fixed_to_i32, parse_svg_document, parse_svg_path, ArcStyle, BlendMode,
-    BorderAlign, BorderSides, BorderStyle, Camera, CodecErrorKind, CodecStats, Color,
-    ComponentStorage, DirtyTracker, DrawCommand,
-    DrawList, DrawTaskKind, Entity, FillStyle, FontId, FrameClock, FramePolicy, FrameStats, GameRuntime,
-    GlyphCache, GlyphRasterOptions, GlyphRun, GlyphRunCache, GlyphRunCacheStats, GlyphRunItem,
-    GlyphView, GradientStyle, ImageCache, ImageCacheStats, ImageDrawStyle, ImageFit, ImageId,
-    ImageView, InputEvent, KeyCode, LayerSpec, LineStyle,
+    fixed_from_i32, fixed_to_i32, parse_svg_path, ArcStyle, BlendMode, BorderAlign, BorderSides,
+    BorderStyle, Camera, CodecErrorKind, CodecPipelineStats, CodecStats, Color, ComponentStorage,
+    DefaultSvgDocument, DirtyTracker, DrawCommand, DrawList, DrawTaskKind, Entity, FillStyle,
+    FontId, FrameClock, FramePolicy, FrameStats, GameRuntime, GlyphCache, GlyphRasterOptions,
+    GlyphRun, GlyphRunCache,
+    GlyphRunCacheStats, GlyphRunItem, GlyphView, GradientStyle, ImageCache, ImageCacheStats,
+    ImageDrawStyle, ImageFit, ImageId, ImageView, InputEvent, KeyCode, LayerSpec, LineStyle,
     MaskSpec, MeshDrawOptions, MeshRef, Point, PresentStats, Rect, RenderNode, RenderStats,
-    ResourceLoader, Schedule, ShadowStyle, Size, SvgCache, TextAlign, TextDecor, TextStyle,
-    DefaultSvgDocument, SvgDocumentView, SvgId, TexCoord, TexturedMeshRef, TexturedVertex3D,
-    ShapeOptions, SvgFilterEffect, SvgPaint, SvgUnsupportedFeature, Transform3D, TriangleStyle,
-    TtfDecoder, TtfError, Vec3, Vertex3D,
-    FHRE_VERSION, GLYPH_RUN_FLAG_GPOS, GLYPH_RUN_FLAG_GSUB, GLYPH_RUN_FLAG_KERN,
-    GLYPH_RUN_RESOLVER_CAPACITY,
-    IMAGE_MASK_DOT, IMAGE_SWATCH,
+    ResourceLoader, Schedule, ShadowStyle, ShapeOptions, Size, SvgCache, SvgDocumentCache,
+    SvgDocumentCacheStats, SvgDocumentView, SvgFilterEffect, SvgId, SvgPaint,
+    SvgUnsupportedFeature, TexCoord, TextAlign, TextDecor, TextStyle, TexturedMeshRef,
+    TexturedVertex3D, Transform3D, TriangleStyle, TtfDecoder, TtfError, Vec3, Vertex3D,
+    DEFAULT_CODEC_PIPELINE_STAGES, FHRE_VERSION, GLYPH_RUN_FLAG_GPOS, GLYPH_RUN_FLAG_GSUB,
+    GLYPH_RUN_FLAG_KERN, GLYPH_RUN_RESOLVER_CAPACITY, IMAGE_MASK_DOT, IMAGE_SWATCH,
+    SVG_DOCUMENT_COMMANDS, SVG_DOCUMENT_PATHS,
 };
 
 #[path = "../../../common/fhre_nuttx_runtime.rs"]
@@ -70,7 +70,7 @@ const DEMO_IMAGE_LVGL_PROGRESSIVE: ImageId = ImageId(911);
 const DEMO_IMAGE_PROGRESSIVE_CMYK_UNSUPPORTED: ImageId = ImageId(915);
 const DEMO_TTF_FONT: FontId = FontId(1);
 const DEMO_TTF_SIZE: u16 = 18;
-const DEMO_TEXT: &str = "DejaVuSans TTF";
+const DEMO_TEXT: &str = "FHRE Tiny TTF";
 const DEMO_KERNING_TEXT: &str = "AVATAR To WA Yo";
 const DEMO_SVG_IDS: [SvgId; 11] = [
     SvgId(900),
@@ -123,13 +123,11 @@ enum CodecFixtureFeature {
     JpegExif,
     JpegProgressive,
     JpegProgressiveCmyk,
-    TtfBasic,
     TtfGpos,
     OtfCff,
     SvgPath,
     SvgShapeStyle,
     SvgClipMaskFilter,
-    SvgTiger,
     Negative,
 }
 
@@ -205,14 +203,18 @@ impl CodecFixtureStats {
         }
     }
 
-    fn record(&mut self, feature: CodecFixtureFeature, expect: CodecExpectation, actual: Option<CodecErrorKind>) {
+    fn record(
+        &mut self,
+        feature: CodecFixtureFeature,
+        expect: CodecExpectation,
+        actual: Option<CodecErrorKind>,
+    ) {
         self.total = self.total.saturating_add(1);
         if !matches!(
             feature,
             CodecFixtureFeature::Fraw
                 | CodecFixtureFeature::PngBasic
                 | CodecFixtureFeature::JpegBaseline
-                | CodecFixtureFeature::TtfBasic
                 | CodecFixtureFeature::SvgPath
                 | CodecFixtureFeature::Negative
         ) {
@@ -244,7 +246,8 @@ impl CodecFixtureStats {
     }
 
     fn mark_progressive_jpeg_scan_fallback(&mut self) {
-        self.progressive_jpeg_scan_fallbacks = self.progressive_jpeg_scan_fallbacks.saturating_add(1);
+        self.progressive_jpeg_scan_fallbacks =
+            self.progressive_jpeg_scan_fallbacks.saturating_add(1);
     }
 
     fn mark_cff_raster_glyph(&mut self) {
@@ -328,7 +331,7 @@ impl CodecFixtureStats {
     }
 }
 
-const DEMO_CODEC_FIXTURES: [CodecFixture; 34] = [
+const DEMO_CODEC_FIXTURES: [CodecFixture; 32] = [
     CodecFixture::Image {
         id: DEMO_IMAGE_FRAW,
         path: b"images/demo_icon.fraw\0",
@@ -482,14 +485,8 @@ const DEMO_CODEC_FIXTURES: [CodecFixture; 34] = [
         expect: CodecExpectation::Failure(CodecErrorKind::Unsupported),
     },
     CodecFixture::Ttf {
-        path: b"fonts/dejavu_sans.ttf\0",
-        cache_demo_font: true,
-        feature: CodecFixtureFeature::TtfBasic,
-        expect: CodecExpectation::Success,
-    },
-    CodecFixture::Ttf {
         path: b"fonts/test_gpos_one.ttf\0",
-        cache_demo_font: false,
+        cache_demo_font: true,
         feature: CodecFixtureFeature::TtfGpos,
         expect: CodecExpectation::Success,
     },
@@ -563,13 +560,6 @@ const DEMO_CODEC_FIXTURES: [CodecFixture; 34] = [
         expect: CodecExpectation::Success,
     },
     CodecFixture::Svg {
-        id: SvgId(909),
-        path: b"svg/lvgl_tiger.svg\0",
-        slot: 9,
-        feature: CodecFixtureFeature::SvgTiger,
-        expect: CodecExpectation::Failure(CodecErrorKind::Overflow),
-    },
-    CodecFixture::Svg {
         id: SvgId(910),
         path: b"svg/clip_mask_filter.svg\0",
         slot: 10,
@@ -589,7 +579,11 @@ static mut DEMO_IMAGE_CACHE: Option<ImageCache> = None;
 static mut DEMO_TTF_GLYPHS: GlyphCache<96, 65536> = GlyphCache::new();
 static mut DEMO_GLYPH_RUN_CACHE: GlyphRunCache<16> = GlyphRunCache::new();
 static mut DEMO_TTF_KERNING: [DemoKerningPair; 16] = [DemoKerningPair::EMPTY; 16];
-static mut DEMO_SVG_DOCS: [Option<DefaultSvgDocument>; 11] = [None, None, None, None, None, None, None, None, None, None, None];
+static mut DEMO_SVG_DOCUMENT_CACHE: SvgDocumentCache<
+    11,
+    SVG_DOCUMENT_PATHS,
+    SVG_DOCUMENT_COMMANDS,
+> = SvgDocumentCache::new();
 static mut DEMO_CODEC_STATS: CodecStats = CodecStats::new();
 static mut DEMO_FIXTURE_STATS: CodecFixtureStats = CodecFixtureStats::new();
 
@@ -623,13 +617,11 @@ const TEXTURED_VERTICES: [TexturedVertex3D; 4] = [
 ];
 const TEXTURED_INDICES: [u16; 6] = [0, 1, 2, 0, 2, 3];
 const DEMO_FRAW: [u8; 86] = [
-    b'F', b'H', b'R', b'E', b'I', b'M', b'G', b'1',
-    4, 0, 4, 0, 3, 0, 16, 0, 0, 0, 64, 0, 0, 0,
-    255, 255, 255, 255, 80, 132, 248, 255, 82, 214, 232, 255, 255, 255, 255, 255,
-    80, 132, 248, 255, 82, 214, 232, 190, 255, 255, 255, 220, 82, 214, 232, 255,
-    82, 214, 232, 255, 255, 255, 220, 80, 132, 248, 190, 255, 255, 255, 255,
-    255, 255, 255, 255, 82, 214, 232, 255, 80, 132, 248, 255, 255, 255, 255, 255,
-    255,
+    b'F', b'H', b'R', b'E', b'I', b'M', b'G', b'1', 4, 0, 4, 0, 3, 0, 16, 0, 0, 0, 64, 0, 0, 0,
+    255, 255, 255, 255, 80, 132, 248, 255, 82, 214, 232, 255, 255, 255, 255, 255, 80, 132, 248,
+    255, 82, 214, 232, 190, 255, 255, 255, 220, 82, 214, 232, 255, 82, 214, 232, 255, 255, 255,
+    220, 80, 132, 248, 190, 255, 255, 255, 255, 255, 255, 255, 255, 82, 214, 232, 255, 80, 132,
+    248, 255, 255, 255, 255, 255, 255,
 ];
 
 struct DemoFrawLoader;
@@ -758,7 +750,8 @@ fn demo_shape_glyph_run_uncached(
         let source_start = i.min(u16::MAX as usize) as u16;
         let mut source_len = 1u16;
         let mut codepoint = chars[i] as u32;
-        let mut advance = demo_cached_glyph_advance(codepoint, size).unwrap_or((size / 2).max(4) as i16);
+        let mut advance =
+            demo_cached_glyph_advance(codepoint, size).unwrap_or((size / 2).max(4) as i16);
         let mut shaping = 0u8;
 
         if options.enable_gsub() && chars[i] == 'f' {
@@ -835,20 +828,7 @@ fn demo_cached_glyph_advance(codepoint: u32, size: u16) -> Option<i16> {
 }
 
 fn demo_svg_resolver(id: SvgId) -> Option<SvgDocumentView> {
-    let mut index = 0usize;
-    while index < DEMO_SVG_IDS.len() {
-        if DEMO_SVG_IDS[index] == id {
-            unsafe {
-                let docs = core::ptr::addr_of!(DEMO_SVG_DOCS);
-                if let Some(doc) = &(*docs)[index] {
-                    return Some(SvgDocumentView::from_ref(doc));
-                }
-            }
-            return None;
-        }
-        index += 1;
-    }
-    None
+    unsafe { (*core::ptr::addr_of_mut!(DEMO_SVG_DOCUMENT_CACHE)).view(id) }
 }
 
 fn demo_image_cache_stats() -> ImageCacheStats {
@@ -865,6 +845,10 @@ fn demo_glyph_run_cache_stats() -> GlyphRunCacheStats {
     unsafe { (*core::ptr::addr_of!(DEMO_GLYPH_RUN_CACHE)).stats() }
 }
 
+fn demo_svg_document_cache_stats() -> SvgDocumentCacheStats {
+    unsafe { (*core::ptr::addr_of!(DEMO_SVG_DOCUMENT_CACHE)).stats() }
+}
+
 fn reset_demo_codec_stats() {
     unsafe {
         *core::ptr::addr_of_mut!(DEMO_CODEC_STATS) = CodecStats::new();
@@ -876,6 +860,12 @@ fn reset_demo_codec_stats() {
 fn record_demo_codec_error(kind: CodecErrorKind) {
     unsafe {
         (*core::ptr::addr_of_mut!(DEMO_CODEC_STATS)).record(kind);
+    }
+}
+
+fn record_demo_codec_pipeline(stats: CodecPipelineStats) {
+    unsafe {
+        (*core::ptr::addr_of_mut!(DEMO_CODEC_STATS)).record_pipeline(stats);
     }
 }
 
@@ -919,17 +909,29 @@ fn apply_fixture_feature_stats(stats: &mut RenderStats, fixtures: CodecFixtureSt
     stats.opentype_shaping_runs = stats
         .opentype_shaping_runs
         .saturating_add(fixtures.opentype_shaping_runs);
-    stats.opentype_gsub_hits = stats.opentype_gsub_hits.saturating_add(fixtures.opentype_gsub_hits);
-    stats.opentype_gpos_hits = stats.opentype_gpos_hits.saturating_add(fixtures.opentype_gpos_hits);
-    stats.opentype_kern_hits = stats.opentype_kern_hits.saturating_add(fixtures.opentype_kern_hits);
+    stats.opentype_gsub_hits = stats
+        .opentype_gsub_hits
+        .saturating_add(fixtures.opentype_gsub_hits);
+    stats.opentype_gpos_hits = stats
+        .opentype_gpos_hits
+        .saturating_add(fixtures.opentype_gpos_hits);
+    stats.opentype_kern_hits = stats
+        .opentype_kern_hits
+        .saturating_add(fixtures.opentype_kern_hits);
     stats.svg_clip_paths = stats.svg_clip_paths.saturating_add(fixtures.svg_clip_paths);
     stats.svg_masks = stats.svg_masks.saturating_add(fixtures.svg_masks);
     stats.svg_filters = stats.svg_filters.saturating_add(fixtures.svg_filters);
     stats.svg_gradients = stats.svg_gradients.saturating_add(fixtures.svg_gradients);
-    stats.svg_real_clip_paths = stats.svg_real_clip_paths.saturating_add(fixtures.svg_real_clip_paths);
+    stats.svg_real_clip_paths = stats
+        .svg_real_clip_paths
+        .saturating_add(fixtures.svg_real_clip_paths);
     stats.svg_real_masks = stats.svg_real_masks.saturating_add(fixtures.svg_real_masks);
-    stats.svg_filter_fallbacks = stats.svg_filter_fallbacks.saturating_add(fixtures.svg_filter_fallbacks);
-    stats.svg_gradient_fallbacks = stats.svg_gradient_fallbacks.saturating_add(fixtures.svg_gradient_fallbacks);
+    stats.svg_filter_fallbacks = stats
+        .svg_filter_fallbacks
+        .saturating_add(fixtures.svg_filter_fallbacks);
+    stats.svg_gradient_fallbacks = stats
+        .svg_gradient_fallbacks
+        .saturating_add(fixtures.svg_gradient_fallbacks);
     stats.vector_mask_rasters = stats
         .vector_mask_rasters
         .saturating_add(fixtures.vector_mask_rasters);
@@ -953,12 +955,7 @@ fn apply_fixture_feature_stats(stats: &mut RenderStats, fixtures: CodecFixtureSt
 fn prewarm_demo_resources() {
     reset_demo_codec_stats();
     unsafe {
-        let docs = core::ptr::addr_of_mut!(DEMO_SVG_DOCS);
-        let mut index = 0usize;
-        while index < (*docs).len() {
-            (*docs)[index] = None;
-            index += 1;
-        }
+        (*core::ptr::addr_of_mut!(DEMO_SVG_DOCUMENT_CACHE)).clear();
         let cache_slot = core::ptr::addr_of_mut!(DEMO_IMAGE_CACHE);
         if (*cache_slot).is_none() {
             *cache_slot = Some(ImageCache::new(8, 2 * 1024 * 1024));
@@ -974,7 +971,11 @@ fn prewarm_demo_resources() {
 
 fn prewarm_demo_glyph_runs() {
     const RUNS: [(&str, u16, bool); 5] = [
-        ("wrap align selection underline strikethrough spans here", 14, false),
+        (
+            "wrap align selection underline strikethrough spans here",
+            14,
+            false,
+        ),
         ("KERN OFF: AVATAR To WA Yo", 13, false),
         ("KERN ON : AVATAR To WA Yo", 13, true),
         ("MISSING: \u{E000}", 13, false),
@@ -1054,36 +1055,22 @@ fn prewarm_image_fixture(
         let Some(cache) = &mut *cache_slot else {
             return Some(CodecErrorKind::Overflow);
         };
-        let before = cache.stats();
         let mut loader = NuttxResourceLoader::new(FHRE_RESOURCE_PREFIX);
-        if cache.prewarm(id, path, &mut loader, pinned) {
-            return None;
-        }
-        let after_primary = cache.stats();
-        let primary_error = image_error_from_delta(before, after_primary);
-        if fallback_fraw {
-            let mut fallback = DemoFrawLoader;
-            if cache.prewarm(id, b"demo.fraw\0", &mut fallback, pinned) {
-                return None;
+        match cache.prewarm_result(id, path, &mut loader, pinned) {
+            Ok(_) => None,
+            Err(primary_error) => {
+                if fallback_fraw {
+                    let mut fallback = DemoFrawLoader;
+                    if cache
+                        .prewarm_result(id, b"demo.fraw\0", &mut fallback, pinned)
+                        .is_ok()
+                    {
+                        return None;
+                    }
+                }
+                Some(primary_error)
             }
         }
-        Some(primary_error)
-    }
-}
-
-fn image_error_from_delta(before: ImageCacheStats, after: ImageCacheStats) -> CodecErrorKind {
-    if after.load_failures > before.load_failures {
-        CodecErrorKind::MissingResource
-    } else if after.decode_invalid > before.decode_invalid {
-        CodecErrorKind::Invalid
-    } else if after.decode_truncated > before.decode_truncated {
-        CodecErrorKind::Truncated
-    } else if after.decode_unsupported > before.decode_unsupported {
-        CodecErrorKind::Unsupported
-    } else if after.decode_overflow > before.decode_overflow {
-        CodecErrorKind::Overflow
-    } else {
-        CodecErrorKind::Invalid
     }
 }
 
@@ -1093,6 +1080,8 @@ fn prewarm_ttf_fixture(path: &'static [u8], cache_demo_font: bool) -> Option<Cod
     if !loader.load(path, &mut bytes) {
         return Some(CodecErrorKind::MissingResource);
     }
+    let plan = TtfDecoder::plan_pipeline::<DEFAULT_CODEC_PIPELINE_STAGES>();
+    record_demo_codec_pipeline(plan.stats());
     let face = match TtfDecoder::parse(&bytes) {
         Ok(face) => face,
         Err(error) => {
@@ -1234,30 +1223,23 @@ fn map_ttf_error(error: TtfError) -> CodecErrorKind {
 }
 
 fn prewarm_svg_fixture(id: SvgId, path: &'static [u8], slot: usize) -> Option<CodecErrorKind> {
-    let mut loader = NuttxResourceLoader::new(FHRE_RESOURCE_PREFIX);
-    let mut bytes = Vec::new();
     if slot >= DEMO_SVG_IDS.len() || DEMO_SVG_IDS[slot] != id {
         return Some(CodecErrorKind::Invalid);
     }
-    if !loader.load(path, &mut bytes) {
-        return Some(CodecErrorKind::MissingResource);
-    }
-    let Ok(data) = core::str::from_utf8(&bytes) else {
+    let plan = DefaultSvgDocument::plan_pipeline::<DEFAULT_CODEC_PIPELINE_STAGES>();
+    record_demo_codec_pipeline(plan.stats());
+    let mut loader = NuttxResourceLoader::new(FHRE_RESOURCE_PREFIX);
+    let view = unsafe {
+        let cache = core::ptr::addr_of_mut!(DEMO_SVG_DOCUMENT_CACHE);
+        match (*cache).prewarm_result(id, path, &mut loader, Rect::new(0, 0, 16, 16)) {
+            Ok(view) => view,
+            Err(error) => return Some(error),
+        }
+    };
+    let Some(doc) = view.get() else {
         return Some(CodecErrorKind::Invalid);
     };
-    let Some(doc) = parse_svg_document::<{ fhre::SVG_DOCUMENT_PATHS }, { fhre::SVG_DOCUMENT_COMMANDS }>(
-        data,
-        Rect::new(0, 0, 16, 16),
-    ) else {
-        return Some(CodecErrorKind::Invalid);
-    };
-    if doc.overflowed {
-        return Some(CodecErrorKind::Overflow);
-    }
-    record_demo_svg_document_features(&doc);
-    unsafe {
-        DEMO_SVG_DOCS[slot] = Some(doc);
-    }
+    record_demo_svg_document_features(doc);
     None
 }
 
@@ -1315,9 +1297,13 @@ fn record_demo_svg_document_features(doc: &DefaultSvgDocument) {
         if node.filter != SvgFilterEffect::None {
             record_demo_fixture_feature(CodecFixtureStats::mark_svg_filter);
         }
-        if matches!(node.fill, SvgPaint::LinearGradient(_, _) | SvgPaint::RadialGradient(_, _))
-            || matches!(node.stroke, SvgPaint::LinearGradient(_, _) | SvgPaint::RadialGradient(_, _))
-        {
+        if matches!(
+            node.fill,
+            SvgPaint::LinearGradient(_, _) | SvgPaint::RadialGradient(_, _)
+        ) || matches!(
+            node.stroke,
+            SvgPaint::LinearGradient(_, _) | SvgPaint::RadialGradient(_, _)
+        ) {
             record_demo_fixture_feature(CodecFixtureStats::mark_svg_gradient);
         }
         i += 1;
@@ -1478,7 +1464,15 @@ impl DemoState {
         state
     }
 
-    fn spawn_bubble(&mut self, x: i32, y: i32, phase: u8, radius: u16, primary: Color, secondary: Color) {
+    fn spawn_bubble(
+        &mut self,
+        x: i32,
+        y: i32,
+        phase: u8,
+        radius: u16,
+        primary: Color,
+        secondary: Color,
+    ) {
         if let Some(entity) = self.runtime.entities.spawn() {
             self.transforms.insert(entity, Transform3D::screen(x, y, 8));
             self.bubbles.insert(
@@ -1505,7 +1499,10 @@ fn handle_demo_input(state: &mut DemoState) -> u32 {
                 continue;
             }
             match key.code {
-                KeyCode::Right | KeyCode::Down | KeyCode::Char(KEY_N) | KeyCode::Char(KEY_CAP_N) => {
+                KeyCode::Right
+                | KeyCode::Down
+                | KeyCode::Char(KEY_N)
+                | KeyCode::Char(KEY_CAP_N) => {
                     state.mode = state.mode.next();
                     state.dirty.force_full();
                 }
@@ -1626,7 +1623,8 @@ pub extern "C" fn fhre_demo_main(_argc: i32, _argv: *mut *mut u8) -> i32 {
             PresentStats::skipped()
         };
         let present_us = elapsed_us(present_start, now_us());
-        last_frame_stats = clock.finish_frame(draw_us, present_us, pumped.saturating_add(handled), present);
+        last_frame_stats =
+            clock.finish_frame(draw_us, present_us, pumped.saturating_add(handled), present);
         sleep_remaining(frame_start, last_frame_stats);
     }
 }
@@ -1634,8 +1632,10 @@ pub extern "C" fn fhre_demo_main(_argc: i32, _argv: *mut *mut u8) -> i32 {
 fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: FrameStats) -> bool {
     fb.surface.set_image_resolver(Some(demo_image_resolver));
     fb.surface.set_glyph_resolver(Some(demo_glyph_resolver));
-    fb.surface.set_glyph_id_resolver(Some(demo_glyph_id_resolver));
-    fb.surface.set_glyph_run_resolver(Some(demo_glyph_run_resolver));
+    fb.surface
+        .set_glyph_id_resolver(Some(demo_glyph_id_resolver));
+    fb.surface
+        .set_glyph_run_resolver(Some(demo_glyph_run_resolver));
     fb.surface.set_kerning_resolver(Some(demo_kerning_resolver));
     fb.surface.set_svg_resolver(Some(demo_svg_resolver));
     let width = fb.surface.width();
@@ -1820,7 +1820,9 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
                 color: Color::rgba(255, 255, 255, 210),
                 width: 5,
                 radius: 0,
-                sides: BorderSides(BorderSides::LEFT.0 | BorderSides::BOTTOM.0 | BorderSides::RIGHT.0),
+                sides: BorderSides(
+                    BorderSides::LEFT.0 | BorderSides::BOTTOM.0 | BorderSides::RIGHT.0,
+                ),
                 align: BorderAlign::Center,
             },
         });
@@ -1987,7 +1989,12 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
 
     if state.mode == StressMode::Mask || state.mode == StressMode::Stress {
         let mask = Rect::new(panel.rect.x + 42, panel.rect.y + 132, 160, 86);
-        let rounded = Rect::new(mask.x + 6, mask.y + 6, mask.w.saturating_sub(12), mask.h.saturating_sub(12));
+        let rounded = Rect::new(
+            mask.x + 6,
+            mask.y + 6,
+            mask.w.saturating_sub(12),
+            mask.h.saturating_sub(12),
+        );
         list.push(DrawCommand::PushMask {
             depth: fixed_from_i32(10),
             spec: MaskSpec::rounded(rounded, 22),
@@ -2046,7 +2053,12 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
             },
         });
         list.push(DrawCommand::FillStyled {
-            rect: Rect::new(blur_layer.x + 10, blur_layer.y + 8, blur_layer.w - 20, blur_layer.h - 16),
+            rect: Rect::new(
+                blur_layer.x + 10,
+                blur_layer.y + 8,
+                blur_layer.w - 20,
+                blur_layer.h - 16,
+            ),
             depth: fixed_from_i32(16),
             style: FillStyle::rounded(Color::rgba(255, 255, 255, 168), 12),
         });
@@ -2070,7 +2082,12 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
         ];
         for i in 0..24 {
             let image = ids[(i as usize) % ids.len()];
-            let rect = Rect::new(panel.rect.x + 22 + (i % 6) * 34, panel.rect.y + 132 + (i / 6) * 28, 28, 22);
+            let rect = Rect::new(
+                panel.rect.x + 22 + (i % 6) * 34,
+                panel.rect.y + 132 + (i / 6) * 28,
+                28,
+                22,
+            );
             if i & 1 == 0 {
                 list.push(DrawCommand::DrawImageFit {
                     rect,
@@ -2145,7 +2162,12 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
                 line_spacing: 2,
                 kerning: false,
                 decor: TextDecor(TextDecor::UNDERLINE.0 | TextDecor::STRIKETHROUGH.0),
-                selection: Some((11, 20, Color::rgba(8, 16, 24, 240), Color::rgba(82, 214, 232, 150))),
+                selection: Some((
+                    11,
+                    20,
+                    Color::rgba(8, 16, 24, 240),
+                    Color::rgba(82, 214, 232, 150),
+                )),
             },
         });
         list.push(DrawCommand::DrawLabel {
@@ -2201,7 +2223,12 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
     if state.mode == StressMode::Vector || state.mode == StressMode::Stress {
         for i in 0..16 {
             list.push(DrawCommand::DrawSvgIcon {
-                rect: Rect::new(panel.rect.x + 22 + (i % 8) * 24, panel.rect.y + 210 + (i / 8) * 24, 18, 18),
+                rect: Rect::new(
+                    panel.rect.x + 22 + (i % 8) * 24,
+                    panel.rect.y + 210 + (i / 8) * 24,
+                    18,
+                    18,
+                ),
                 depth: fixed_from_i32(10),
                 icon: SvgId((i % 8) as u16),
                 color: Color::rgba(238, 250, 255, 190),
@@ -2217,7 +2244,12 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
         ];
         for i in 0..DEMO_SVG_IDS.len() {
             list.push(DrawCommand::DrawSvgDocument {
-                rect: Rect::new(panel.rect.x + 22 + (i as i32 % 5) * 45, panel.rect.y + 132 + (i as i32 / 5) * 44, 38, 38),
+                rect: Rect::new(
+                    panel.rect.x + 22 + (i as i32 % 5) * 45,
+                    panel.rect.y + 132 + (i as i32 / 5) * 44,
+                    38,
+                    38,
+                ),
                 depth: fixed_from_i32(10),
                 document: DEMO_SVG_IDS[i],
                 color: colors[i % colors.len()],
@@ -2277,7 +2309,12 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
     });
 
     list.push(DrawCommand::FillRoundRect {
-        rect: Rect::new(panel.rect.x + 22, panel.rect.y + 92, panel.rect.w.saturating_sub(44), 34),
+        rect: Rect::new(
+            panel.rect.x + 22,
+            panel.rect.y + 92,
+            panel.rect.w.saturating_sub(44),
+            34,
+        ),
         depth: fixed_from_i32(6),
         radius: 12,
         color: Color::rgba(255, 255, 255, 210),
@@ -2285,7 +2322,8 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
     let progress_rect = Rect::new(
         panel.rect.x + 34,
         panel.rect.y + 105,
-        ((panel.rect.w as u32 * ((frame % 180) + 30) / 240) as u16).min(panel.rect.w.saturating_sub(68)),
+        ((panel.rect.w as u32 * ((frame % 180) + 30) / 240) as u16)
+            .min(panel.rect.w.saturating_sub(68)),
         8,
     );
     list.push(DrawCommand::FillRoundRect {
@@ -2315,11 +2353,15 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
     if state.mode == StressMode::Stress {
         state.dirty.force_full();
     }
-    state.dirty.mark_transition(state.previous_progress, progress_rect);
+    state
+        .dirty
+        .mark_transition(state.previous_progress, progress_rect);
     state.previous_progress = Some(progress_rect);
     for (index, bounds) in current_bubble_bounds.iter().copied().enumerate() {
         if let Some(bounds) = bounds {
-            state.dirty.mark_transition(state.previous_bubble_bounds[index], bounds);
+            state
+                .dirty
+                .mark_transition(state.previous_bubble_bounds[index], bounds);
             state.previous_bubble_bounds[index] = Some(bounds);
         }
     }
@@ -2338,21 +2380,24 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
     let mut stats = RenderStats::new();
     list.execute_dirty_tracked_on(&mut fb.surface, state.dirty.region(), &mut stats);
     let cache_stats = demo_image_cache_stats();
+    let svg_doc_cache_stats = demo_svg_document_cache_stats();
     let glyph_run_cache_stats = demo_glyph_run_cache_stats();
     let codec_stats = demo_codec_stats();
     let fixture_stats = demo_fixture_stats();
     stats.mark_dirty_copy_bytes(dirty_copy_bytes);
     stats.mark_frame_stats(frame_stats);
     stats.mark_image_cache(cache_stats);
+    stats.mark_svg_document_cache(svg_doc_cache_stats);
     stats.mark_glyph_run_cache(glyph_run_cache_stats);
     stats.mark_codec_stats(codec_stats);
     apply_fixture_feature_stats(&mut stats, fixture_stats);
     let mut display_stats = state.last_render_stats;
     display_stats.mark_frame_stats(frame_stats);
     display_stats.mark_image_cache(cache_stats);
+    display_stats.mark_svg_document_cache(svg_doc_cache_stats);
     display_stats.mark_glyph_run_cache(glyph_run_cache_stats);
     display_stats.mark_codec_stats(codec_stats);
-    let mut hud: DrawList<176> = DrawList::new();
+    let mut hud: DrawList<208> = DrawList::new();
     push_stats_commands(
         &mut hud,
         panel.rect,
@@ -2371,7 +2416,7 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
 }
 
 fn push_stats_commands(
-    list: &mut DrawList<176>,
+    list: &mut DrawList<208>,
     panel: Rect,
     stats: RenderStats,
     cache: ImageCacheStats,
@@ -2384,9 +2429,22 @@ fn push_stats_commands(
     let w = panel.w.saturating_sub(182).max(32);
     let bench = stats.benchmark_summary();
     push_text(list, x, y, mode.label(), Color::rgba(255, 255, 255, 245));
-    push_text(list, x + 54, y, mode.benchmark_profile(), Color::rgba(238, 250, 255, 180));
+    push_text(
+        list,
+        x + 54,
+        y,
+        mode.benchmark_profile(),
+        Color::rgba(238, 250, 255, 180),
+    );
     push_bar_back(list, x, y + 14, w, 7);
-    push_bar(list, x, y + 14, stats.commands_drawn.min(w as u32), 7, Color::rgba(82, 214, 232, 220));
+    push_bar(
+        list,
+        x,
+        y + 14,
+        stats.commands_drawn.min(w as u32),
+        7,
+        Color::rgba(82, 214, 232, 220),
+    );
     push_bar_back(list, x, y + 27, w, 7);
     push_bar(
         list,
@@ -2396,9 +2454,29 @@ fn push_stats_commands(
         7,
         Color::rgba(80, 132, 248, 220),
     );
-    push_text(list, x, y + 42, "CACHE LOAD/HIT/FAIL", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 55, cache.loads.saturating_mul(14).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
-    push_bar(list, x + 48, y + 55, cache.hits.saturating_mul(14).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
+    push_text(
+        list,
+        x,
+        y + 42,
+        "CACHE LOAD/HIT/FAIL",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 55,
+        cache.loads.saturating_mul(14).min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_bar(
+        list,
+        x + 48,
+        y + 55,
+        cache.hits.saturating_mul(14).min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
     push_bar(
         list,
         x + 96,
@@ -2411,32 +2489,208 @@ fn push_stats_commands(
         5,
         Color::rgba(255, 96, 96, 220),
     );
-    push_text(list, x, y + 66, "FRAME DRAW/PRESENT/LATE", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 79, frame.draw_us.saturating_div(100).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
-    push_bar(list, x + 58, y + 79, frame.present_us.saturating_div(100).min(w as u32), 5, Color::rgba(80, 132, 248, 220));
-    push_bar(list, x + 116, y + 79, frame.late_frames.saturating_mul(3).min(w as u32), 5, Color::rgba(255, 170, 80, 220));
-    push_text(list, x, y + 92, "DIRTY PASS/COPY/INPUT", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 105, stats.dirty_passes.saturating_mul(10).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
-    push_bar(list, x + 58, y + 105, stats.dirty_copy_bytes.saturating_div(2048).min(w as u32), 5, Color::rgba(80, 132, 248, 220));
-    push_bar(list, x + 116, y + 105, frame.input_events.saturating_mul(8).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
-    push_text(list, x, y + 118, "PRESENT PAN/COPY/SKIP", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 131, stats.pan_presents.saturating_mul(12).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
-    push_bar(list, x + 58, y + 131, stats.copy_presents.saturating_mul(12).min(w as u32), 5, Color::rgba(80, 132, 248, 220));
-    push_bar(list, x + 116, y + 131, stats.skipped_presents.saturating_mul(12).min(w as u32), 5, Color::rgba(255, 96, 96, 220));
-    push_text(list, x, y + 144, "TASK F/B/L/A", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 157, stats.fill_commands.saturating_mul(8).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
-    push_bar(list, x + 46, y + 157, stats.border_commands.saturating_mul(12).min(w as u32), 5, Color::rgba(80, 132, 248, 220));
-    push_bar(list, x + 92, y + 157, stats.line_commands.saturating_mul(8).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
-    push_bar(list, x + 138, y + 157, stats.arc_commands.saturating_mul(16).min(w as u32), 5, Color::rgba(255, 170, 80, 220));
-    push_text(list, x, y + 168, "TASK I/T/V/TRI", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 181, stats.image_commands.saturating_mul(10).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
-    push_bar(list, x + 46, y + 181, stats.text_commands.saturating_mul(10).min(w as u32), 5, Color::rgba(80, 132, 248, 220));
-    push_bar(list, x + 92, y + 181, stats.vector_commands.saturating_mul(10).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
-    push_bar(list, x + 138, y + 181, stats.triangle_commands.saturating_mul(14).min(w as u32), 5, Color::rgba(255, 170, 80, 220));
-    push_text(list, x, y + 192, "LAYER/MASK/CODEC/FALL", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 205, stats.layer_commands.saturating_mul(12).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
-    push_bar(list, x + 46, y + 205, stats.mask_commands.saturating_mul(12).min(w as u32), 5, Color::rgba(80, 132, 248, 220));
-    push_bar(list, x + 92, y + 205, stats.codec_fallbacks.saturating_mul(12).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
+    push_text(
+        list,
+        x,
+        y + 66,
+        "FRAME DRAW/PRESENT/LATE",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 79,
+        frame.draw_us.saturating_div(100).min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 58,
+        y + 79,
+        frame.present_us.saturating_div(100).min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
+    push_bar(
+        list,
+        x + 116,
+        y + 79,
+        frame.late_frames.saturating_mul(3).min(w as u32),
+        5,
+        Color::rgba(255, 170, 80, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 92,
+        "DIRTY PASS/COPY/INPUT",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 105,
+        stats.dirty_passes.saturating_mul(10).min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 58,
+        y + 105,
+        stats.dirty_copy_bytes.saturating_div(2048).min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
+    push_bar(
+        list,
+        x + 116,
+        y + 105,
+        frame.input_events.saturating_mul(8).min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 118,
+        "PRESENT PAN/COPY/SKIP",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 131,
+        stats.pan_presents.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 58,
+        y + 131,
+        stats.copy_presents.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
+    push_bar(
+        list,
+        x + 116,
+        y + 131,
+        stats.skipped_presents.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(255, 96, 96, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 144,
+        "TASK F/B/L/A",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 157,
+        stats.fill_commands.saturating_mul(8).min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 46,
+        y + 157,
+        stats.border_commands.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
+    push_bar(
+        list,
+        x + 92,
+        y + 157,
+        stats.line_commands.saturating_mul(8).min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_bar(
+        list,
+        x + 138,
+        y + 157,
+        stats.arc_commands.saturating_mul(16).min(w as u32),
+        5,
+        Color::rgba(255, 170, 80, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 168,
+        "TASK I/T/V/TRI",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 181,
+        stats.image_commands.saturating_mul(10).min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 46,
+        y + 181,
+        stats.text_commands.saturating_mul(10).min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
+    push_bar(
+        list,
+        x + 92,
+        y + 181,
+        stats.vector_commands.saturating_mul(10).min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_bar(
+        list,
+        x + 138,
+        y + 181,
+        stats.triangle_commands.saturating_mul(14).min(w as u32),
+        5,
+        Color::rgba(255, 170, 80, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 192,
+        "LAYER/MASK/CODEC/FALL",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 205,
+        stats.layer_commands.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 46,
+        y + 205,
+        stats.mask_commands.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
+    push_bar(
+        list,
+        x + 92,
+        y + 205,
+        stats.codec_fallbacks.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
     push_bar(
         list,
         x + 138,
@@ -2450,8 +2704,21 @@ fn push_stats_commands(
         5,
         Color::rgba(255, 96, 96, 220),
     );
-    push_text(list, x, y + 216, "PATH SW/ACC/FB", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 229, stats.software_path_hits.min(w as u32), 5, Color::rgba(82, 214, 232, 220));
+    push_text(
+        list,
+        x,
+        y + 216,
+        "PATH SW/ACC/FB",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 229,
+        stats.software_path_hits.min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
     push_bar(
         list,
         x + 58,
@@ -2468,19 +2735,120 @@ fn push_stats_commands(
         5,
         Color::rgba(255, 96, 96, 220),
     );
-    push_text(list, x, y + 240, "CODEC M/I/T/U/O", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 253, stats.codec_missing_resources.saturating_mul(12).min(w as u32), 5, Color::rgba(255, 96, 96, 220));
-    push_bar(list, x + 36, y + 253, stats.codec_invalid.saturating_mul(12).min(w as u32), 5, Color::rgba(255, 170, 80, 220));
-    push_bar(list, x + 72, y + 253, stats.codec_truncated.saturating_mul(12).min(w as u32), 5, Color::rgba(80, 132, 248, 220));
-    push_bar(list, x + 108, y + 253, stats.codec_unsupported.saturating_mul(12).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
-    push_bar(list, x + 144, y + 253, stats.codec_overflow.saturating_mul(12).min(w as u32), 5, Color::rgba(194, 92, 230, 220));
-    push_text(list, x, y + 264, "DISP F/I/T/V", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 277, task_dispatch_hits(stats, DrawTaskKind::Fill).saturating_mul(8).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
-    push_bar(list, x + 46, y + 277, task_dispatch_hits(stats, DrawTaskKind::Image).saturating_mul(8).min(w as u32), 5, Color::rgba(80, 132, 248, 220));
-    push_bar(list, x + 92, y + 277, task_dispatch_hits(stats, DrawTaskKind::Label).saturating_mul(8).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
-    push_bar(list, x + 138, y + 277, task_dispatch_hits(stats, DrawTaskKind::Vector).saturating_mul(8).min(w as u32), 5, Color::rgba(255, 170, 80, 220));
-    push_text(list, x, y + 288, "DISP L/M/B/3D", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 301, task_dispatch_hits(stats, DrawTaskKind::Layer).saturating_mul(8).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
+    push_text(
+        list,
+        x,
+        y + 240,
+        "CODEC M/I/T/U/O",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 253,
+        stats
+            .codec_missing_resources
+            .saturating_mul(12)
+            .min(w as u32),
+        5,
+        Color::rgba(255, 96, 96, 220),
+    );
+    push_bar(
+        list,
+        x + 36,
+        y + 253,
+        stats.codec_invalid.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(255, 170, 80, 220),
+    );
+    push_bar(
+        list,
+        x + 72,
+        y + 253,
+        stats.codec_truncated.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
+    push_bar(
+        list,
+        x + 108,
+        y + 253,
+        stats.codec_unsupported.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_bar(
+        list,
+        x + 144,
+        y + 253,
+        stats.codec_overflow.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(194, 92, 230, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 264,
+        "DISP F/I/T/V",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 277,
+        task_dispatch_hits(stats, DrawTaskKind::Fill)
+            .saturating_mul(8)
+            .min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 46,
+        y + 277,
+        task_dispatch_hits(stats, DrawTaskKind::Image)
+            .saturating_mul(8)
+            .min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
+    push_bar(
+        list,
+        x + 92,
+        y + 277,
+        task_dispatch_hits(stats, DrawTaskKind::Label)
+            .saturating_mul(8)
+            .min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_bar(
+        list,
+        x + 138,
+        y + 277,
+        task_dispatch_hits(stats, DrawTaskKind::Vector)
+            .saturating_mul(8)
+            .min(w as u32),
+        5,
+        Color::rgba(255, 170, 80, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 288,
+        "DISP L/M/B/3D",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 301,
+        task_dispatch_hits(stats, DrawTaskKind::Layer)
+            .saturating_mul(8)
+            .min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
     push_bar(
         list,
         x + 46,
@@ -2492,7 +2860,16 @@ fn push_stats_commands(
         5,
         Color::rgba(80, 132, 248, 220),
     );
-    push_bar(list, x + 92, y + 301, task_dispatch_hits(stats, DrawTaskKind::Blur).saturating_mul(8).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
+    push_bar(
+        list,
+        x + 92,
+        y + 301,
+        task_dispatch_hits(stats, DrawTaskKind::Blur)
+            .saturating_mul(8)
+            .min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
     push_bar(
         list,
         x + 138,
@@ -2504,8 +2881,20 @@ fn push_stats_commands(
         5,
         Color::rgba(255, 170, 80, 220),
     );
-    push_text(list, x, y + 312, top_dispatch_label(stats), Color::rgba(238, 250, 255, 210));
-    push_text(list, x + 82, y + 312, top_fallback_label(stats), Color::rgba(238, 250, 255, 210));
+    push_text(
+        list,
+        x,
+        y + 312,
+        top_dispatch_label(stats),
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_text(
+        list,
+        x + 82,
+        y + 312,
+        top_fallback_label(stats),
+        Color::rgba(238, 250, 255, 210),
+    );
     push_bar(
         list,
         x,
@@ -2538,26 +2927,179 @@ fn push_stats_commands(
         5,
         Color::rgba(255, 96, 96, 220),
     );
-    push_text(list, x, y + 336, "V3 JPG/CFF/SH", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 349, stats.progressive_jpeg_decodes.saturating_mul(18).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
-    push_bar(list, x + 46, y + 349, stats.cff_raster_glyphs.saturating_mul(18).min(w as u32), 5, Color::rgba(80, 132, 248, 220));
-    push_bar(list, x + 92, y + 349, stats.opentype_shaping_runs.saturating_mul(18).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
-    push_bar(list, x + 138, y + 349, stats.progressive_jpeg_scan_fallbacks.saturating_mul(18).min(w as u32), 5, Color::rgba(255, 96, 96, 220));
-    push_text(list, x, y + 360, "SVG C/M/F/G", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 373, stats.svg_clip_paths.saturating_mul(16).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
-    push_bar(list, x + 46, y + 373, stats.svg_masks.saturating_mul(16).min(w as u32), 5, Color::rgba(80, 132, 248, 220));
-    push_bar(list, x + 92, y + 373, stats.svg_filters.saturating_mul(16).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
-    push_bar(list, x + 138, y + 373, stats.svg_gradients.saturating_mul(16).min(w as u32), 5, Color::rgba(255, 170, 80, 220));
-    push_text(list, x, y + 384, "V31 SVG/TXT", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 397, stats.svg_real_clip_paths.saturating_add(stats.svg_real_masks).saturating_mul(16).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
-    push_bar(list, x + 46, y + 397, stats.svg_filter_fallbacks.saturating_add(stats.svg_gradient_fallbacks).saturating_mul(16).min(w as u32), 5, Color::rgba(255, 96, 96, 220));
-    push_bar(list, x + 92, y + 397, stats.opentype_gsub_hits.saturating_add(stats.opentype_gpos_hits).saturating_mul(12).min(w as u32), 5, Color::rgba(0, 150, 136, 220));
-    push_bar(list, x + 138, y + 397, stats.opentype_kern_hits.saturating_add(stats.cff_fallback_glyphs).saturating_mul(12).min(w as u32), 5, Color::rgba(255, 170, 80, 220));
-    push_text(list, x, y + 408, "V34 GRUN/TXT", Color::rgba(238, 250, 255, 210));
-    push_bar(list, x, y + 421, stats.vector_mask_rasters.saturating_mul(16).min(w as u32), 5, Color::rgba(82, 214, 232, 220));
+    push_text(
+        list,
+        x,
+        y + 336,
+        "V3 JPG/CFF/SH",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 349,
+        stats
+            .progressive_jpeg_decodes
+            .saturating_mul(18)
+            .min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
     push_bar(
         list,
         x + 46,
+        y + 349,
+        stats.cff_raster_glyphs.saturating_mul(18).min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
+    push_bar(
+        list,
+        x + 92,
+        y + 349,
+        stats.opentype_shaping_runs.saturating_mul(18).min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_bar(
+        list,
+        x + 138,
+        y + 349,
+        stats
+            .progressive_jpeg_scan_fallbacks
+            .saturating_mul(18)
+            .min(w as u32),
+        5,
+        Color::rgba(255, 96, 96, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 360,
+        "SVG C/M/F/G",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 373,
+        stats.svg_clip_paths.saturating_mul(16).min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 46,
+        y + 373,
+        stats.svg_masks.saturating_mul(16).min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
+    push_bar(
+        list,
+        x + 92,
+        y + 373,
+        stats.svg_filters.saturating_mul(16).min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_bar(
+        list,
+        x + 138,
+        y + 373,
+        stats.svg_gradients.saturating_mul(16).min(w as u32),
+        5,
+        Color::rgba(255, 170, 80, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 384,
+        "V31 SVG/TXT",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 397,
+        stats
+            .svg_real_clip_paths
+            .saturating_add(stats.svg_real_masks)
+            .saturating_mul(16)
+            .min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 46,
+        y + 397,
+        stats
+            .svg_filter_fallbacks
+            .saturating_add(stats.svg_gradient_fallbacks)
+            .saturating_mul(16)
+            .min(w as u32),
+        5,
+        Color::rgba(255, 96, 96, 220),
+    );
+    push_bar(
+        list,
+        x + 92,
+        y + 397,
+        stats
+            .opentype_gsub_hits
+            .saturating_add(stats.opentype_gpos_hits)
+            .saturating_mul(12)
+            .min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_bar(
+        list,
+        x + 138,
+        y + 397,
+        stats
+            .opentype_kern_hits
+            .saturating_add(stats.cff_fallback_glyphs)
+            .saturating_mul(12)
+            .min(w as u32),
+        5,
+        Color::rgba(255, 170, 80, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 408,
+        "V38 SVG/TXT",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 421,
+        stats
+            .svg_doc_cache_loads
+            .saturating_add(stats.svg_doc_cache_hits)
+            .saturating_mul(12)
+            .min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 46,
+        y + 421,
+        stats
+            .svg_doc_cache_misses
+            .saturating_add(stats.svg_doc_cache_fallbacks)
+            .saturating_mul(12)
+            .min(w as u32),
+        5,
+        Color::rgba(255, 170, 80, 220),
+    );
+    push_bar(
+        list,
+        x + 92,
         y + 421,
         stats
             .glyph_run_cache_hits
@@ -2570,24 +3112,12 @@ fn push_stats_commands(
     );
     push_bar(
         list,
-        x + 92,
-        y + 421,
-        stats
-            .glyph_run_cache_misses
-            .saturating_add(stats.glyph_run_cache_inserts)
-            .saturating_add(stats.codepoint_fallbacks)
-            .saturating_mul(12)
-            .min(w as u32),
-        5,
-        Color::rgba(0, 150, 136, 220),
-    );
-    push_bar(
-        list,
         x + 138,
         y + 421,
         stats
             .vector_mask_scratch_overflows
             .saturating_add(stats.svg_filter_budget_exceeded)
+            .saturating_add(stats.svg_doc_cache_fallbacks)
             .saturating_add(stats.glyph_run_cache_overflows)
             .saturating_add(stats.text_layout_overflows)
             .saturating_add(stats.text_shaping_fallbacks)
@@ -2596,6 +3126,60 @@ fn push_stats_commands(
             .min(w as u32),
         5,
         Color::rgba(255, 96, 96, 220),
+    );
+    push_text(
+        list,
+        x,
+        y + 432,
+        "V39 CHAIN/PIPE",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_text(
+        list,
+        x + 86,
+        y + 432,
+        top_chain_label(stats),
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 445,
+        stats.draw_chain_candidates.saturating_mul(6).min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 46,
+        y + 445,
+        stats.draw_chain_submitted.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_bar(
+        list,
+        x + 92,
+        y + 445,
+        stats
+            .draw_chain_fallbacks
+            .saturating_add(stats.draw_chain_overflows)
+            .saturating_mul(6)
+            .min(w as u32),
+        5,
+        Color::rgba(255, 96, 96, 220),
+    );
+    push_bar(
+        list,
+        x + 138,
+        y + 445,
+        stats
+            .codec_pipeline_candidates
+            .saturating_add(stats.codec_pipeline_fallbacks)
+            .saturating_mul(4)
+            .min(w as u32),
+        5,
+        Color::rgba(255, 170, 80, 220),
     );
 }
 
@@ -2645,7 +3229,34 @@ fn top_fallback_label(stats: RenderStats) -> &'static str {
     }
 }
 
-fn push_text<const N: usize>(list: &mut DrawList<N>, x: i32, y: i32, text: &'static str, color: Color) {
+fn top_chain_label(stats: RenderStats) -> &'static str {
+    match stats.top_chain_task().map(|(kind, _)| kind) {
+        Some(DrawTaskKind::Fill) => "TOP CH: FILL",
+        Some(DrawTaskKind::Border) => "TOP CH: BORDER",
+        Some(DrawTaskKind::BoxShadow) => "TOP CH: SHADOW",
+        Some(DrawTaskKind::Letter) => "TOP CH: LETTER",
+        Some(DrawTaskKind::Label) => "TOP CH: LABEL",
+        Some(DrawTaskKind::Image) => "TOP CH: IMAGE",
+        Some(DrawTaskKind::Layer) => "TOP CH: LAYER",
+        Some(DrawTaskKind::Line) => "TOP CH: LINE",
+        Some(DrawTaskKind::Arc) => "TOP CH: ARC",
+        Some(DrawTaskKind::Triangle) => "TOP CH: TRI",
+        Some(DrawTaskKind::MaskRect) => "TOP CH: MASK",
+        Some(DrawTaskKind::MaskBitmap) => "TOP CH: BMASK",
+        Some(DrawTaskKind::Blur) => "TOP CH: BLUR",
+        Some(DrawTaskKind::Vector) => "TOP CH: VECTOR",
+        Some(DrawTaskKind::ThreeD) => "TOP CH: 3D",
+        None => "TOP CH: NONE",
+    }
+}
+
+fn push_text<const N: usize>(
+    list: &mut DrawList<N>,
+    x: i32,
+    y: i32,
+    text: &'static str,
+    color: Color,
+) {
     list.push(DrawCommand::DrawText {
         pos: Point::new(x, y),
         depth: fixed_from_i32(40),

@@ -6,6 +6,6 @@
 #
 
 menu "Logging Utilities"
-source "/home/uan-gpd/codes/FeatherOS/apps/logging/embedlog/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/logging/nxscope/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/logging/embedlog/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/logging/nxscope/Kconfig"
 endmenu # Logging Utilities

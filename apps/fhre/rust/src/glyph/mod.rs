@@ -400,7 +400,11 @@ impl<const GLYPHS: usize, const BYTES: usize> GlyphCache<GLYPHS, BYTES> {
             return Some(bitmap);
         }
         let len = width as usize * height as usize;
-        if len == 0 || data.len() < len || self.len >= GLYPHS || self.next_byte.saturating_add(len) > BYTES {
+        if len == 0
+            || data.len() < len
+            || self.len >= GLYPHS
+            || self.next_byte.saturating_add(len) > BYTES
+        {
             self.overflowed = true;
             return None;
         }

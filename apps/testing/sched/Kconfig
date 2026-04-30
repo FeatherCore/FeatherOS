@@ -6,7 +6,7 @@
 #
 
 menu "sched"
-source "/home/uan-gpd/codes/FeatherOS/apps/testing/sched/getprime/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/testing/sched/smp/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/testing/sched/timerjitter/Kconfig"
+source "$APPSDIR/testing/sched/getprime/Kconfig"
+source "$APPSDIR/testing/sched/smp/Kconfig"
+source "$APPSDIR/testing/sched/timerjitter/Kconfig"
 endmenu # sched

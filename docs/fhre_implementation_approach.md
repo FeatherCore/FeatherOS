@@ -44,6 +44,73 @@ Wing 游戏应用 = 基于 FHRE 的 game loop、输入、scene 和渲染能力�
 - `fhre_build.sh` 必须能独立构建 `fhre_demo`。
 - `wing_build.sh` 必须也能编入 `fhre_demo`，用于 Wing 调试时确认 FHRE 正常。
 
+## V3.9 硬件可插手绘制/资源管线
+
+V3.9 继续 FHRE-first，但不直接绑定 DMA2D、PXP、VG-Lite、OpenGL ES 或某个具体芯片。目标是先把 draw 与 codec 拆成硬件更容易接管的固定容量 descriptor/stage 边界：软件 `Surface` 渲染结果保持不变，真实硬件后端未来只需要覆写提交入口。
+
+本轮新增和稳定的内容：
+
+- Draw chain descriptor：
+  - 新增固定容量 `DrawChain<const OPS>`、`DrawChainOp`、`DrawChainStats`、`DrawChainCapabilities` 和 `DrawChainSubmitResult`。
+  - `DrawChainOpKind` 只表达硬件容易接管的最小操作：`SolidFill`、`AlphaFill`、`ImageBlit`、`ImageBlend`、`Clip`、`MaskEnter/MaskExit`、`LayerEnter/LayerExit` 和 `FallbackRange`。
+  - `DrawList` 在 full draw 或 dirty pass 中先按当前 dirty clip 编译 chain candidate，再调用 `RenderBackend::submit_draw_chain()`；默认软件 backend 返回 `Unsupported`，随后仍执行原有软件绘制路径，因此不会改变当前画面。
+  - `BackendCapabilities` 新增 `draw_chain`、`max_chain_ops`、`chain_draw_features`，用于后续硬件 backend 声明可链化任务边界。
+  - `RenderStats` 新增 draw chain candidate/op/submitted/fallback/unsupported/overflow 和 top chain task 统计；`fhre_demo` HUD 新增 V3.9 行，可直接看到当前帧哪些命令已经能被编译为链、哪些仍会回落软件。
+- Codec pipeline stage skeleton：
+  - 新增 `CodecStageKind`、`CodecStagePlan`、`CodecPipelinePlan<const STAGES>`、`CodecAcceleratorCapabilities`、`CodecPipelineStats`。
+  - PNG/JPEG/FRAW/TTF/SVG 都提供轻量 `plan_pipeline()` / `plan_pipeline_with_caps()` 入口，只描述阶段，不改变现有自研 decode 结果。
+  - 统一 stage 口径为 read、inspect、header、entropy/parse、transform/raster、color/pack、cache insert、fallback。当前默认 accelerator capability 为 `NONE`，所以硬件候选 stage 会记录 unsupported/fallback，但 decode 仍由软件路径完成。
+  - `ImageCache::prewarm_result()` 在资源读取后记录 PNG/FRAW/JPEG pipeline stats；`fhre_demo` 的 TTF/SVG fixture prewarm 也会记录 pipeline stats。draw 热路径仍只查 resolver/cache，不做 decode。
+- Demo 与文档：
+  - `fhre_demo` HUD 增加 `V39 CHAIN/PIPE` 行，显示 draw chain candidate/submitted/fallback、top chain task 和 codec pipeline candidate/fallback。
+  - Wing 不新增页面，不拥有硬件路径，只继续作为 FHRE draw/resource/cache/stats 的消费方。
+  - ROMFS manifest/budget 和 stale ROMFS 清理继续保留，防止大资源绕过构建期检查进入默认镜像。
+
+## V3.8 绘制/资源管线硬化
+
+V3.8 继续 FHRE-first：不扩 Wing 页面，不引入 LVGL、FreeType、libjpeg、librsvg 或外部 Rust crate，把 V3.7 的绘制、codec、cache、dirty 和 stats 从“可用基线”推进到可复用、可观测、可被 Wing 稳定消费的运行时边界。
+
+本轮新增和稳定的内容：
+
+- V3.7 修复保留为基线：
+  - `parse_svg_document_into()` 保持为 stack-safe SVG document 解析入口，demo 不再把大 `SvgDocument` 临时压到 NuttX task 栈。
+  - NuttX sim framebuffer `FBIOPAN_DISPLAY` 失败时保留 copy-present fallback，避免 demo 主循环存活但窗口黑屏。
+  - `fhre_demo` / `wing_demo` Kconfig 继续使用 `$APPSDIR`，sim ROMFS 资源继续按 config 安装，避免 stale absolute path 和缺资源构建失败。
+- SVG document cache：
+  - 新增固定容量 `SvgDocumentCache<const DOCS, const PATHS, const CMDS>` 和 `SvgDocumentCacheStats`，提供 `prewarm_result()`、`view()`、`stats()`；复杂 SVG decode 只发生在 `ResourceLoader -> cache prewarm` 路径，绘制 resolver 只查 cache。
+  - `fhre_demo` 已从私有 SVG 静态数组迁移到 `SvgDocumentCache`，SVG cache miss、load failure、decode failure、overflow 都返回 fallback 并写入 codec/cache/render stats，不阻塞帧提交。
+- RenderStats / HUD：
+  - `RenderStats::mark_svg_document_cache()` 将 SVG document cache hit/miss/load/fallback/slot 汇入帧统计，`fhre_demo` HUD 的 V3.8 行可观察 SVG document cache 与 glyph/text fast path。
+  - `RenderStats` 继续以 `DrawTaskKind` / `DrawBackendDispatch` / dirty clip / present 为统一口径；新增字段只服务 HUD 和 runtime 验收，不扩无用计数。
+- Draw 热路径：
+  - RGB565 alpha blend 内部提成共享 raw helper，image 与 text 不再各自维护一份整数混合逻辑。
+  - `GlyphView` 的 A8 glyph 在 RGB565 framebuffer 上新增 mask-aware raw blend 路径，裁剪后直接按 glyph bitmap 写入目标像素，避免每个 glyph 像素都构造 `Color` 并重复进入 `put_pixel()`。
+  - `DrawImage` / `DrawImageStyled` 的 RGB565 normal-blend 快路径扩展到 mask/rounded clip 场景；无 mask 时仍保留 row-copy / nearest scale，带 mask 时在同一快路径内合并 image alpha 与 mask alpha 后直接写 RGB565。
+- 资源边界：
+  - `ImageCache::prewarm_result()` 继续作为 PNG/FRAW/JPEG 统一入口；字体与 glyph run 仍通过 `GlyphCache` / `GlyphRunCache` 预热；SVG document 与 path-level `SvgCache` 并存，不互相替代。
+  - cache miss、decode 失败、容量超限、scratch 超预算都只显示 fallback 并进入 `CodecStats` / `RenderStats`。
+  - NuttX sim ROMFS 不再整目录复制资源，而是使用 `apps/fhre/resource/romfs_manifest.txt` + `apps/tools/check_resource_budget.sh` 做构建期 allowlist 和 byte budget 检查；清单内资源超预算会让 `fhre_build.sh` 直接失败并打印具体文件。
+  - `fhre_build.sh` / `wing_build.sh` 在 sim profile 切换时会清理旧的 `boards/sim/sim/sim/src/etc/{fhre,wing}` 和 `etctmp.*`，避免上一次构建残留的大资源绕过 manifest 进入本次 ROMFS。
+  - 过大的参考 SVG 不进入默认 ROMFS。`lvgl_tiger.svg` 保留在源码树中作为参考素材，不再作为默认 demo fixture；SVG overflow 仍通过小型 `svg/overflow.svg` 覆盖，避免为了测试 fallback 而引入不轻量资源。
+  - 过大的通用字体不进入默认 ROMFS。`dejavu_sans.ttf` 保留为源码参考，`fhre_demo` 默认只安装小型 TTF/OTF fixture，避免 NuttX `etctmp.c` 因嵌入大资源而占用过高主机内存。
+
+## V3.7 LVGL draw 层与自研 codec 基线继续收敛
+
+V3.7 的主线继续放在 FHRE core：参考 LVGL draw 层的任务口径和热路径组织方式，但不引用 LVGL、FreeType、libjpeg、librsvg 或任何外部 Rust crate。目标是让 `fhre_demo` 的 parity suite 同时覆盖绘制性能、codec/prewarm/cache 和 fallback 统计，而 Wing 只作为消费 FHRE 能力的 Shell 压力场景。
+
+本轮新增和稳定的内容：
+
+- Draw 热路径：
+  - `DrawImage` / `DrawImageFit` 的 RGB565 software backend 增加 normal-blend 快路径边界：无 mask、无 tint、`BlendMode::Normal` 时，RGB565/RGB888/RGBA8888/A8 image view 可直接进入 RGB565 row-copy、nearest scale 或 alpha blend 路径，避免每像素走完整 `Color` sample + `put_pixel()` 分派。
+  - `RenderStats::mark_command_kind()` 将普通 image 命令和满足 fast-path 条件的 `DrawImageStyled` 纳入 `fast_path_hits` 观察范围，继续通过 `DrawTaskKind::Image` / `DrawBackendDispatch` 记录 software/fallback 任务口径。
+- Resource / codec 边界：
+  - `ImageCache::{get_or_load_result,prewarm_result}` 返回 `Result<ImageView, CodecErrorKind>`，保留旧 `Option` API；demo fixture 不再需要从 stats delta 反推 image decode 失败类型。
+  - 新增统一 resource image inspect/decode 入口：`inspect_resource_image(_result)`、`decode_resource_image(_result)`、`ImageResourceKind`、`ImageResourceInfo`。FRAW/PNG/JPEG 仍由各自自研 decoder 负责，统一入口只做格式识别、metadata 汇总和错误归类。
+  - `ImageDecodeErrorKind::as_codec_error()` 稳定 image decode failure 到 `CodecErrorKind` 的映射，保持 missing/invalid/truncated/unsupported/overflow 可观测。
+- Demo 验收：
+  - `fhre_demo` image fixture prewarm 改用 `ImageCache::prewarm_result()`，PNG/FRAW/JPEG 正向和负向 fixture 的错误分类直接来自 cache/codec 边界。
+  - Wing 不新增页面，不私有解析资源，不绕过 FHRE draw/resource API。
+
 ## V3.6 LVGL draw 层性能与真实热路径收敛
 
 V3.6 继续不扩 Wing 页面，也不增加新的复杂格式名。目标是把 V3.5 已经接通的 glyph-id 文本、SVG mask/filter、codec/cache 和 dispatch stats 变成可长期比较的性能基线：每个 parity 模式都能看到当前压力类型、top dispatch task、top fallback task、draw/present/dirty/copy/cache 成本。
@@ -105,7 +172,7 @@ V3.4 不继续增加 Wing 页面，也不引入 LVGL、libjpeg、FreeType、libr
   - linear/radial gradient 支持 `spread=pad`、stop opacity 和基础 transform；repeat/reflect/pattern/mesh gradient 明确 fallback。
 - Codec/Resource V3.4：
   - PNG/JPEG/TTF/OTF/SVG decode 仍只能通过 `ResourceLoader -> Cache::prewarm()` 发生；draw 热路径只查 `ImageCache/GlyphCache/SvgCache/GlyphRunCache` 或 resolver。
-  - fixture manifest 覆盖 Adam7/tRNS/16-bit PNG、baseline/progressive/CMYK/EXIF JPEG、DejaVu/GPOS/OTF-CFF 字体、SVG clip/mask/filter/gradient，以及 missing/invalid/truncated/unsupported/overflow 负向用例。
+  - fixture manifest 覆盖 Adam7/tRNS/16-bit PNG、baseline/progressive/CMYK/EXIF JPEG、小型 GPOS TTF/OTF-CFF 字体、SVG clip/mask/filter/gradient，以及 missing/invalid/truncated/unsupported/overflow 负向用例。
   - 资源失败、cache 超限、scratch 超预算统一显示 fallback，并写入 `CodecStats` / `RenderStats`。
 
 ## V3.3 LVGL draw 层真实可用度收敛
@@ -156,7 +223,7 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
 本轮新增和稳定的内容：
 
 - 真实 fixture 已导入 `apps/fhre/resource`：
-  - LVGL test assets: `lvgl_16bit_rgba.png`、`lvgl_palette.png`、`lvgl_cmyk.jpg`、`lvgl_exif_90/180/270.jpg`、`test_gpos_one.ttf`、`lvgl_tiger.svg`。
+  - LVGL test assets: `lvgl_16bit_rgba.png`、`lvgl_palette.png`、`lvgl_cmyk.jpg`、`lvgl_exif_90/180/270.jpg`、`test_gpos_one.ttf`。`lvgl_tiger.svg` 仅作为源码参考，不进入默认 ROMFS。
   - Progressive JPEG fixture: `lvgl_progressive.jpg`，V2.9 已升级为正向验收 fixture；progressive+CMYK 仍保留为后续 fallback 边界。
   - Bootstrap Icons fixture: `bootstrap_bezier2.svg`、`bootstrap_cloud_rain.svg`、`bootstrap_star_fill.svg`，并保留 `resource/licenses/bootstrap_icons_LICENSE`。
   - `test_kern_one_otf.c` 已用 Python 标准库提取为 `fonts/test_kern_one.otf`；运行时不解析 C 文件。
@@ -179,11 +246,11 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
   - `DefaultSvgDocument` 扩为 `12 paths / 256 commands`。
   - parser 新增 `rect/circle/ellipse/line/polyline/polygon/use` 转 path。
   - 支持 inline `style="..."`、简单 `.class { fill/stroke/stroke-width/opacity/fill-rule }`、nested transform、group opacity、`url(#linearGradient/radialGradient)` 的轻量渐变填充。
-  - `test_img_svg_tiger.svg` 已导入，但默认固定容量下作为 `Overflow` fixture 验收；V2.9 对简单 clipPath/filter blur/drop-shadow 有可见近似，复杂 CSS/mask/filter/SVG gradient spread/pattern 仍 fallback。
+  - 大型 tiger SVG 不再作为默认 ROMFS fixture；V3.8 后使用小型 synthetic overflow SVG 验证 `Overflow` 统计。V2.9 对简单 clipPath/filter blur/drop-shadow 有可见近似，复杂 CSS/mask/filter/SVG gradient spread/pattern 仍 fallback。
 
 ## 当前实现进度
 
-截至 2026-04-30，新的 FHRE Rust 原型已经具备这些最小能力：
+截至 2026-05-01，新的 FHRE Rust 原型已经具备这些最小能力：
 
 - `no_std` crate 可独立 `cargo check`。
 - `Surface` 可包装 NuttX framebuffer。
@@ -194,7 +261,7 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
 - `fill_round_rect()` 已改为中心矩形、左右边条和四角 mask 的分区绘制，圆角控件的大面积部分可以复用矩形 fast path。
 - line、wide line、circle、round rect、vertical gradient、5x7 debug text。
 - `ImageFormat` / `ImageView` / `builtin_image()` 已具备第一版内存图片视图，`DrawCommand::DrawImage` 已接入真实 blit 路径；当前支持内存中的 RGB565/RGB888/RGBA8888/A8，`ImageView` 已从纯 `'static` 切片扩展为可引用 cache 中 decoded image 的只读视图。
-- `ResourceLoader` / `PngInfo` / `PngDecoder` / `PngError` / `DecodedImage` / `ImageCache` 已接入。PNG 解码器来自旧 `wing_old2` 的无外部 crate zlib/PNG 实现并收敛到 FHRE：支持非 interlace、8-bit/16-bit RGB、RGBA、grayscale、grayscale-alpha、indexed palette、`tRNS` gray/RGB/palette alpha 和 PNG filter 0-4；16-bit sample 会轻量降采样到 8-bit，RGB 类资源优先输出 RGB565，带 alpha 的资源输出 RGBA8888。V2.7 的 codec 统计把 image、TTF、SVG 的 missing-resource、invalid、truncated、unsupported、overflow 统一汇入 `CodecStats` / `RenderStats`，同时保留 image cache 自身的 decode 分类；`fhre_demo` 已有 demo-side codec fixture manifest，统一预热 FRAW、RGBA PNG、palette+tRNS PNG、grayscale+tRNS PNG、16-bit gray-alpha PNG、baseline JPEG、DejaVuSans TTF 和 SVG document fixture，并增加 missing/invalid/truncated/unsupported/overflow 负向 fixture 与 expected/actual mismatch HUD。
+- `ResourceLoader` / `PngInfo` / `PngDecoder` / `PngError` / `DecodedImage` / `ImageCache` 已接入。PNG 解码器来自旧 `wing_old2` 的无外部 crate zlib/PNG 实现并收敛到 FHRE：支持非 interlace、8-bit/16-bit RGB、RGBA、grayscale、grayscale-alpha、indexed palette、`tRNS` gray/RGB/palette alpha 和 PNG filter 0-4；16-bit sample 会轻量降采样到 8-bit，RGB 类资源优先输出 RGB565，带 alpha 的资源输出 RGBA8888。V2.7 的 codec 统计把 image、TTF、SVG 的 missing-resource、invalid、truncated、unsupported、overflow 统一汇入 `CodecStats` / `RenderStats`，同时保留 image cache 自身的 decode 分类；`fhre_demo` 已有 demo-side codec fixture manifest，统一预热 FRAW、RGBA PNG、palette+tRNS PNG、grayscale+tRNS PNG、16-bit gray-alpha PNG、baseline JPEG、小型 TTF/OTF 和 SVG document fixture，并增加 missing/invalid/truncated/unsupported/overflow 负向 fixture 与 expected/actual mismatch HUD。
 - `JpegInfo` / `JpegDecodeOptions` / `JpegDecoder` 已接入 JPEG 子集：支持 SOF0/SOF2、DQT、DHT、SOS、DRI restart interval、8-bit、1/3/4 分量、常见 4:4:4/4:2:2/4:2:0/4:1:1 采样、baseline CMYK/YCCK、APP14 transform、EXIF orientation 1-8 和 RGB565 输出；progressive SOF2 子集覆盖 DC/AC scan、successive refinement、EOB run，并在 V3.x 增加 scan 顺序和系数缓冲预算检查。`fhre_demo` 已通过真实 LVGL JPEG fixture 验证 runtime decode/cache/display。progressive+CMYK、ICC/gamma 精确色彩、arithmetic coding 和 12-bit JPEG 会让 `ImageCache` 走 fallback。
 - `ImageCache` 使用 `alloc` 存储 decoded bytes，但以有界 slot 和总 decoded bytes 控制资源占用；默认 demo 路径使用 8 个 slot / 2MiB 上限，cache miss 或解码失败时仍可回退到 fallback image/icon。
 - `FRAW` raw 图片资源格式已接入：文件签名为 `FHREIMG1`，header 记录 width/height/format/stride/data_len，运行时只需读取 header + 像素数据即可得到 `DecodedImage`。它用于从 LVGL `native-with-alpha` C 数组预提取出来的轻量图标，避免 Wing 运行时解析 LVGL C 文件。
@@ -204,9 +271,9 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
 - Demo runtime 已抽出共享 NuttX glue：`NuttxFramebuffer`、`NuttxInput`、`NuttxResourceLoader`、`now_us()`、`sleep_remaining()` 由 `fhre_demo` / `wing_demo` 共同使用；NuttX FFI 仍停留在 demo/platform 层，不进入 FHRE 上层 API 或 Wing 页面。
 - `DrawCommand::DrawImageFit` 和 `DrawCommand::DrawImageTint` 已接入 `ImageFit::{Stretch, Contain, Cover}`，`Surface` 侧支持图片 contain/cover/stretch 缩放和简单 tint 合成，可服务壁纸、live tile、W10M 图标 accent recolor。
 - RGB565 软件热路径继续加强：半透明 rect 已有专用 RGB565 alpha blend；circle/triangle 改为按水平 scanline 填充；无缩放 RGB565 image blit 可走逐行 copy。Draw V2/V2.1 样式化命令已接入 `FillStyle`、`GradientStyle`、`BorderStyle`、`ShadowStyle`、`LineStyle`、`ArcStyle`、`MaskSpec`、`LayerSpec`、`ImageDrawStyle`、`TextStyle`、`TriangleStyle` 和 `BlendMode`，用于对齐 LVGL draw 层的 fill/border/shadow/line/arc/mask/layer/text/image/triangle 语义；`BorderStyle` 已有 inside/center/outside 对齐，`LineStyle` 已有 cap/join 字段，`DrawGradientTriangle` 支持顶点色三角形。
-- `ImageDrawStyle::clip_radius` 已从“画边框提示”改为真实 rounded mask 裁剪：图片 tile/stretch/contain/cover/tint 仍走统一 `DrawImageStyled`，当圆角裁剪生效时自动进入 mask-aware blend，避免 Shell 或页面层私有裁剪图片。`ImageDrawStyle::blend` 也已经接入真实采样像素合成，`Normal` 仍保留 RGB565 row-copy/nearest fast path，`Multiply/Add/Subtract/Difference` 进入可统计的 blend path。
-- `GlyphA8` / `GlyphBitmap` / `GlyphView` / `GlyphResolver` / `KerningResolver` / `GlyphCache<GLYPHS, BYTES>` 已具备固定容量接口，当前 5x7 debug font 已改为 A8 glyph path；`GlyphCache::insert_a8_metrics()` 可接收 TTF raster 得到的 A8 glyph，并通过 `Surface::set_glyph_resolver()` 让 `DrawText` 优先走 cached glyph。`DrawText` 的 newline 已按原始 x 坐标换行推进，`DrawLabel` 的 selection foreground 已按字符区间绘制，不再把相交 selection 的整行文字一起染色；V2.3 新增 `TextStyle::kerning`，打开后由 `Surface::set_kerning_resolver()` 提供 pair adjust，默认关闭。
-- `TtfDecoder` / `FontFace` 已接入 TrueType glyf 子集 parser 和 OTF/CFF 识别：支持 sfnt table directory、`cmap` format 4/12、`head/hhea/hmtx/maxp/loca/glyf/kern`、simple glyph 轮廓、基础 composite glyph 平移/缩放、legacy `kern`、GSUB SingleSubst/LigatureSubst、GPOS PairPos format 1/2 和 CFF Type2 最小 raster；`FontFace::kerning()` 可读取 legacy `kern` format 0 pair，并可通过 `KerningResolver` 接入 `DrawLabel`。`fhre_demo` 已通过 DejaVuSans、LVGL GPOS TTF 和提取出的 OTF fixture 验收。不做 hinting、完整 CFF/CFF2、WOFF/WOFF2、复杂脚本 shaping 和 bidi 排版。
+- `ImageDrawStyle::clip_radius` 已从“画边框提示”改为真实 rounded mask 裁剪：图片 tile/stretch/contain/cover/tint 仍走统一 `DrawImageStyled`，当圆角裁剪生效时自动进入 mask-aware blend，避免 Shell 或页面层私有裁剪图片。`ImageDrawStyle::blend` 也已经接入真实采样像素合成，`Normal` 保留 RGB565 row-copy/nearest fast path，并在带 mask/rounded clip 时继续走 RGB565 raw alpha blend；`Multiply/Add/Subtract/Difference` 进入可统计的 blend path。
+- `GlyphA8` / `GlyphBitmap` / `GlyphView` / `GlyphResolver` / `KerningResolver` / `GlyphCache<GLYPHS, BYTES>` 已具备固定容量接口，当前 5x7 debug font 已改为 A8 glyph path；`GlyphCache::insert_a8_metrics()` 可接收 TTF raster 得到的 A8 glyph，并通过 `Surface::set_glyph_resolver()` 让 `DrawText` 优先走 cached glyph。`GlyphView` 在 RGB565 framebuffer 上已有 A8 raw blend 快路径，支持 clip 和 mask alpha，不再把每个 glyph 像素都退回 `put_pixel()`；`DrawText` 的 newline 已按原始 x 坐标换行推进，`DrawLabel` 的 selection foreground 已按字符区间绘制，不再把相交 selection 的整行文字一起染色；V2.3 新增 `TextStyle::kerning`，打开后由 `Surface::set_kerning_resolver()` 提供 pair adjust，默认关闭。
+- `TtfDecoder` / `FontFace` 已接入 TrueType glyf 子集 parser 和 OTF/CFF 识别：支持 sfnt table directory、`cmap` format 4/12、`head/hhea/hmtx/maxp/loca/glyf/kern`、simple glyph 轮廓、基础 composite glyph 平移/缩放、legacy `kern`、GSUB SingleSubst/LigatureSubst、GPOS PairPos format 1/2 和 CFF Type2 最小 raster；`FontFace::kerning()` 可读取 legacy `kern` format 0 pair，并可通过 `KerningResolver` 接入 `DrawLabel`。`fhre_demo` 默认 ROMFS 已改用小型 GPOS TTF 和提取出的 OTF fixture 验收，大型 DejaVuSans 仅保留为源码参考。不做 hinting、完整 CFF/CFF2、WOFF/WOFF2、复杂脚本 shaping 和 bidi 排版。
 - `Vec3`、`Transform3D`、`Rotation`、`Projection`、`Camera`。
 - `Camera::screen_canvas()` 默认 orthographic 1:1 映射。
 - `RenderNode` 可通过 Camera 投影到 Screen Canvas。
@@ -216,6 +283,7 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
 - `DrawCommand::clipped_bounds()` 已具备基础命令包围盒与 clip rect 求交能力。
 - `DrawCommand::DrawSvgIcon` 已接入 `Surface::draw_svg_icon()`，当前可按 `SvgId` 取内置 SVG path data，经过 `parse_svg_path()` 和 `draw_svg_path()` 光栅化为线段图标；旧的 vector placeholder 只作为未知 icon 的兜底。
 - `SvgPathCommand` / `SvgPath<N>` / `SvgCache<ICONS, CMDS>` / `parse_svg_path()` 已具备轻量 SVG path 接口，支持 Bootstrap Icons 常见 `M/L/H/V/C/Q/A/S/T/Z` 的最小解析；`SvgDocument<PATHS, CMDS>` 已扩展为固定容量多 path document，可解析 `viewBox`、多 `path d`、`rect/circle/ellipse/line/polyline/polygon/use`、`fill`、`stroke`、`stroke-width`、`stroke-linecap`、`stroke-linejoin`、inline/class style、linear/radial gradient paint、`opacity`、`fill-rule`、group opacity 和简单 nested `translate/scale/matrix` transform。`SvgResolver` / `SvgDocumentView` / `DrawSvgDocument` 能让真实 SVG 文件解析结果通过 draw command 进入 dirty clip 和 `RenderStats` 管线；closed path 已支持 even-odd 与 nonzero scanline fill，stroke round cap/join 已有可见实现，简单 `clipPath` 映射为路径 bounds clip，小区域 `feGaussianBlur/feDropShadow` 映射为 FHRE blur/shadow 近似；复杂 CSS/mask/filter/pattern/gradient spread 仍 fallback。
+- `parse_svg_document_into()` / `SvgDocument::EMPTY` / `SvgDocument::reset()` 已作为 stack-safe SVG document 解析和复用入口稳定下来；`SvgDocumentCache<DOCS, PATHS, CMDS>` 提供固定容量 document-level cache，`prewarm_result()` 只在资源预热阶段读取/解析 SVG，`view()` 供绘制 resolver 查询，`SvgDocumentCacheStats` 暴露 hit/miss/load/fallback/slot 统计。
 - `DrawSvgIcon` 已新增 settings gear `SvgId(7)` 的 SVG path，验证 Wing 新页面可以继续通过 `IconNode -> SvgId -> DrawCommand -> FHRE SVG path` 使用统一图标管线，而不是在 Shell 中私有绘制图标。
 - `DrawList` 已支持每条绘制命令携带 `Option<Rect>` clip，排序时 clip 与命令一起移动，dirty 过滤时使用 clipped bounds。
 - `RenderStats` 已接入 `DrawList::execute_tracked_on()` 和 `execute_dirty_tracked_on()`，可记录 commands seen/drawn、dirty rect 数、clip changes、clipped commands、overflow 和粗略像素成本。
@@ -242,6 +310,8 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
 - `GestureRecognizer` / `GestureEvent` 已具备固定成本 tap、swipe、drag primitive，可供 Wing shell 和后续游戏应用复用。
 - `RenderBackend` trait 已存在，当前由 `Surface` 实现。
 - `RenderBackend` 已新增 `BackendCapabilities`，当前软件 framebuffer `Surface` 会上报 pixel format、clip、alpha blend、gradient、mask/layer/blur、vector icon、text layout、image transform、triangle/3D 支持，并以 LVGL draw task 口径声明 `draw_fill/draw_border/draw_box_shadow/draw_letter/draw_label/draw_image/draw_layer/draw_line/draw_arc/draw_triangle/draw_mask_rect/draw_mask_bitmap/draw_blur/draw_vector/draw_3d`。V2.7 在 `DrawTaskKind` / `DrawFeatureFlags` / `DrawBackendDispatch` / `DrawPathKind` 之上继续稳定 `RenderBackend::draw_dispatched_command()` 和 `draw_dispatched_layer_commands()` 默认入口，顶层 draw pass 和 layer 内部 draw pass 都通过这个入口提交命令；默认软件 backend 行为不变，后续 NuttX DMA2D/PXP/VG-Lite、Linux framebuffer/DRM/SDL/OpenGL ES backend 可按任务覆写单项能力。
+- `DrawChain<const OPS>` / `DrawChainOp` / `DrawChainStats` 已作为 V3.9 compile-only descriptor 边界接入 `DrawList`：dirty clip 后会生成 chain candidate 并调用 `RenderBackend::submit_draw_chain()`。当前 `Surface` 不提交真实硬件链，只返回 unsupported 并保留软件渲染结果；统计可观察 candidate、submitted、fallback、unsupported、overflow 和 top chain task。
+- `CodecPipelinePlan<const STAGES>` / `CodecStagePlan` / `CodecPipelineStats` 已作为 V3.9 codec stage skeleton 接入 PNG/JPEG/FRAW/TTF/SVG。当前只描述 read/inspect/header/entropy-or-parse/transform-or-raster/color-or-pack/cache-insert/fallback 阶段，并在默认无 accelerator capability 时记录 unsupported/fallback；真实硬件 decoder 还没有接入。
 - `FramebufferBackend` / `InputSource` 平台抽象 trait 已建立，`Surface` 实现 `FramebufferBackend`；NuttX `/dev/fb0`、`/dev/input0`、`/dev/kbd` 的 FFI 仍保留在 demo/platform glue，不进入上层 UI 页面。
 - `fhre_demo` 的 NuttX framebuffer glue 已改为优先使用 `yres_virtual >= yres * 2` 的双 framebuffer page pan：绘制发生在不可见页，帧末通过 `FBIOPAN_DISPLAY` 翻页；没有双 framebuffer 时才 fallback 到 `640x480/480x640x32` 静态离屏 backbuffer copy，避免 X11 sim 中直接写可见 framebuffer 导致清屏/重绘中间态可见而闪烁。
 - `fhre_demo` 已开始通过 `GameRuntime + Schedule + EntityWorld + ComponentStorage<Transform3D>` 驱动动态对象，并通过 `Transform3D + Camera + DrawList` 绘制主要元素。
@@ -270,11 +340,13 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
 - 完整 SVG style/css、filter、mask 和渐变；当前已有轻量 multi-path document/path/cache、shape-to-path、inline/class style、linear/radial gradient、nested transform、group opacity、简单 clipPath/filter 映射、even-odd/nonzero closed path fill、stroke cap/join、内置 SVG path 图标和 stroke-line raster，复杂 CSS selector、复杂 mask/filter、pattern/mesh gradient 仍 fallback。
 - 完整 libjpeg 级 JPEG；当前支持 baseline sequential grayscale/YCbCr/CMYK/YCCK、常见采样、DRI restart interval、EXIF orientation 和 progressive grayscale/YCbCr 子集，仍不支持 progressive+CMYK、arithmetic coding、12-bit JPEG 以及 ICC/gamma 精确色彩管理。
 - FRAW 目前只作为轻量运行时格式使用，生成工具已沉淀为 `apps/wing/resource/windows10_mobile/extract_fraw.py`，运行时已补 signature/format/flags/stride/data_len 校验和 `FrawError` 结果接口；还没有接入自动构建步骤。
+- 资源预算已经前移到 ROMFS manifest 构建期检查，但还没有完整的生产 profile、自动 downscale/quantize/atlas 工具和“源码参考资源 -> 目标轻量资源”的转换流水线。
 - 可复用的 Linux/SDL backend 到 `InputEvent` 的完整平台桥接模块；当前已有共享 NuttX demo glue 和 `FramebufferBackend` / `InputSource` trait。
+- 真实 DMA2D/PXP/VG-Lite/OpenGL ES draw chain backend 和真实 PNG/JPEG/TTF/SVG 硬件 decoder 还没有实现；V3.9 只提供可接管 descriptor/stage 边界和统计。
 - 输入状态聚合、完整 gesture state 和多 stage schedule dispatch。
 - 更通用的 query API、parent/child scene graph、滚动容器 mask、flex/flow layout 和 archetype/稠密批处理优化。
 - 真实 mesh asset loader、triangle z-buffer、材质系统、光照和 perspective-correct textured triangle；当前只有固定切片 mesh、painter sort、flat/wireframe 和 affine nearest textured triangle。
-- 更细粒度的绘制管线优化，例如 draw command 分批、mask/alpha map 复用、blur/shadow SIMD/DMA2D 化、glyph cache、image blit/cache、triangle depth 和 backend capability dispatch；当前已完成 `surface` 侧的基础拆分、Draw V2.1 能力矩阵和有界 layer/mask/blur compositor，下一步应继续做热路径优化和 backend capability dispatch，而不是为了文件数量继续拆碎。
+- 更细粒度的绘制管线优化，例如 draw command 分批、mask/alpha map 复用、blur/shadow SIMD/DMA2D 化、跨命令 image/glyph 批处理、triangle depth 和 backend capability dispatch；当前已完成 `surface` 侧的基础拆分、RGB565 rect/image/glyph 热路径、有界 layer/mask/blur compositor 和 Draw V2.1 能力矩阵，下一步应继续做真实 workload 驱动的热路径优化和 backend capability dispatch，而不是为了文件数量继续拆碎。
 
 ## 当前新增 API 边界
 
@@ -284,8 +356,8 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
   - `FILL`：solid、rounded、vertical/horizontal/linear/radial/conical gradient，受 clip/mask/blend 约束。
   - `BORDER`：full 和 sides，inside/center/outside 对齐，rounded outline 第一版可用。
   - `BOX_SHADOW`：A8 rounded rect mask + separable box blur + tint composite，超预算 fallback。
-  - `LETTER/LABEL`：UTF-8 fast path、按 glyph id 绘制的 shaped `GlyphRun`、`GlyphRunItem::char_start/char_len` 源文本范围、固定容量 `GlyphRunCache`、wrap、align、letter/line spacing、legacy kern/Latin GSUB/GPOS 最小闭环、underline/strikethrough、selection background、selection foreground、missing glyph 占位符；复杂脚本 shaping fallback。
-  - `IMAGE`：PNG/FRAW/JPEG cache view、stretch/contain/cover、tile、tint、opacity、rounded clip radius、style blend mode、RGB565 row copy/nearest scale fast path。
+  - `LETTER/LABEL`：UTF-8 fast path、按 glyph id 绘制的 shaped `GlyphRun`、`GlyphRunItem::char_start/char_len` 源文本范围、固定容量 `GlyphRunCache`、RGB565 A8 glyph raw blend、wrap、align、letter/line spacing、legacy kern/Latin GSUB/GPOS 最小闭环、underline/strikethrough、selection background、selection foreground、missing glyph 占位符；复杂脚本 shaping fallback。
+  - `IMAGE`：PNG/FRAW/JPEG cache view、stretch/contain/cover、tile、tint、opacity、rounded clip radius、style blend mode、RGB565 row copy/nearest scale fast path 和 mask-aware normal blend。
   - `LAYER`：bounded RGBA8888 scratch、opacity/recolor/blur/mask composite，超预算进入 stats fallback。
   - `LINE/ARC`：宽线、dash、round/square/butt cap 字段、arc rounded cap。
   - `TRIANGLE`：flat color、vertex color gradient、textured affine nearest triangle。
@@ -293,8 +365,9 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
   - `BLUR`：separable box blur，半径 clamp，scratch budget 控制。
   - `VECTOR`：固定容量 SVG document/path，fill/stroke、evenodd/nonzero、shape-to-path、inline/class style、use、linear/radial gradient、简单 clipPath/filter 映射和 transform；复杂 CSS/mask/pattern/gradient spread fallback。
   - `3D`：纯 3D 语义下的 orthographic/perspective projection、painter sort、flat/wire/textured triangle；暂不做 z-buffer/material/light。
-- `RenderStats`：由 `DrawList::execute_tracked_on()` / `execute_dirty_tracked_on()` 填充，应用和 demo 可观测渲染成本；当前已包含 blend/mask/layer/blur/vector/text/image/3D 命令数、fallback 次数、codec missing/invalid/truncated/unsupported/overflow、progressive JPEG decode/scan fallback、CFF raster/fallback、OpenType shaping/GSUB/GPOS/KERN、GlyphRunCache hit/miss/insert/evict/overflow、glyph-id draw/codepoint fallback/selection fallback、SVG clip/mask/filter/gradient success/fallback、scratch/mask/layer bytes、scratch peak、layer alloc failure、mask stack overflow、blur/shadow pixels 和 per-task dispatch counters。V3.6 新增 `benchmark_summary()` / top dispatch / top fallback helper，用于 `fhre_demo` 直接定位每个 draw parity 模式的主要成本来源。
+- `RenderStats`：由 `DrawList::execute_tracked_on()` / `execute_dirty_tracked_on()` 填充，应用和 demo 可观测渲染成本；当前已包含 blend/mask/layer/blur/vector/text/image/3D 命令数、fallback 次数、codec missing/invalid/truncated/unsupported/overflow、progressive JPEG decode/scan fallback、CFF raster/fallback、OpenType shaping/GSUB/GPOS/KERN、GlyphRunCache hit/miss/insert/evict/overflow、SvgDocumentCache hit/miss/load/fallback/slot、glyph-id draw/codepoint fallback/selection fallback、SVG clip/mask/filter/gradient success/fallback、scratch/mask/layer bytes、scratch peak、layer alloc failure、mask stack overflow、blur/shadow pixels、per-task dispatch counters、V3.9 draw chain counters 和 codec pipeline counters。V3.6 新增 `benchmark_summary()` / top dispatch / top fallback helper，V3.8 新增 `mark_svg_document_cache()`，V3.9 新增 top chain task helper，用于 `fhre_demo` 直接定位每个 draw parity 模式、资源预热和硬件可接管边界的主要成本来源。
 - `DrawTaskKind` / `DrawTaskCounters` / `DrawFeatureFlags` / `DrawBackendDispatch` / `DrawPathKind`：以 LVGL draw task 口径声明软件/硬件绘制能力，`BackendCapabilities::supports_draw_task()` 可查询 fill/image/label/vector/layer/mask/blur/3D 等能力是否由当前 backend 支持，dispatch path counters 可区分软件路径、未来加速路径和 fallback 路径；V2.7 后 `DrawList` 和 layer 内部绘制都通过 `RenderBackend::draw_dispatched_command()` / `draw_dispatched_layer_commands()` 提交命令，后端可覆写该入口接管某类任务。
+- `DrawChain` / `DrawChainOp` / `DrawChainCapabilities` / `DrawChainStats`：V3.9 硬件可插手 draw descriptor API。当前由 `DrawList::compile_draw_chain()` 在 dirty clip 后生成候选链，并通过 `RenderBackend::submit_draw_chain()` 提交；默认软件 backend 返回 unsupported，未来 DMA2D/GPU backend 只需覆写这个入口。
 - Draw V2.7 样式 API：`FillStyle`、`GradientStyle`、`BorderStyle`、`BorderAlign`、`ShadowStyle`、`LineStyle`、`LineCap`、`LineJoin`、`ArcStyle`、`TextStyle`、`ImageDrawStyle`、`TriangleStyle`、`MaskSpec`、`LayerSpec`、`BlendMode`，用于对齐 LVGL draw task 层，不包含 LVGL widget/object/style cascade。`DrawLabel` 已切到 glyph advance line breaker，优先空格换行；`DrawImageStyled::clip_radius` 只做图片裁剪，不再私自附加边框。
 - Layer/Mask API：`BeginLayer` / `EndLayer`、`PushMask` / `PopMask`、`PushBitmapMask`、`LayerScratch`、`LayerBudget`、`MaskKind`、`MaskStack<N>`。这些 API 是 FHRE draw 层能力，不引入 LVGL object/widget/style cascade。
 - `ImageFormat` / `ImageView`：内存图片视图，服务 RGB565/RGB888/RGBA8888/A8 blit；runtime PNG decode 和 `ImageCache` 输出同一视图，不要求 Wing 页面知道图片来源。
@@ -304,6 +377,7 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
 - `JpegInfo` / `JpegDecodeOptions` / `JpegDecoder`：无外部 crate 的 JPEG inspect/decode API，当前覆盖 baseline grayscale/YCbCr/CMYK/YCCK、progressive grayscale/YCbCr 第一版、常见采样、restart interval、APP14 和 EXIF orientation，输出统一 `DecodedImage`，由 `ImageCache` 自动识别；progressive+CMYK、arithmetic coding 和 12-bit 仍明确 fallback。
 - `FrawInfo` / `FrawDecoder` / `decode_fraw()`：轻量 raw 图片 decode API，当前覆盖 RGB565/RGB888/RGBA8888/A8，主要承载从 W10M LVGL C 数组提取出的图标资源。
 - `ImageCache` / `ImageCacheStats` / `ImageDecodeErrorKind` / `CodecErrorKind` / `CodecStats`：有界 decoded image cache 和统一 codec 统计入口，允许 `alloc` 只存在于资源读取、PNG/FRAW/JPEG decode、TTF/SVG prewarm 和 cache 路径，ECS/UI/draw command 主体仍固定容量优先；统计中区分 hit/miss/load/evict/load failure/decode failure，并把 decode failure 细分为 invalid/truncated/unsupported/overflow，同时把 TTF/SVG missing/invalid/unsupported/overflow 汇总到 codec stats。
+- `CodecStageKind` / `CodecStagePlan` / `CodecPipelinePlan` / `CodecAcceleratorCapabilities` / `CodecPipelineStats`：V3.9 硬件可插手 codec stage API。PNG/JPEG/FRAW/TTF/SVG 都可先输出 stage plan，当前不改变软件 decode，只把 hardware candidate、unsupported、fallback 和 overflow 汇入 stats。
 - `CodecFixture` / demo-side fixture manifest：`fhre_demo` 私有的验收清单，记录资源路径、目标 `ImageId` / `SvgId`、是否 pinned、预期成功/失败类型以及 fallback 策略；它不是 FHRE core API，但固定了 V2.7 的资源验收入口。`CodecFixtureStats` 只存在于 demo，用于 HUD 展示 fixture pass/mismatch。
 - `FramePolicy` / `FrameClock` / `FrameStats` / `PresentStats`：帧节奏和 present 统计公共入口，demo/platform glue 负责提供真实时间和 sleep，FHRE 负责目标帧时长、late/dropped frame 统计和 sleep budget。
 - `DirtyTracker<N>`：previous/current bounds dirty helper，适合动画对象、UI 滚动和小块资源更新；overflow 或首帧回退 full redraw。
@@ -311,7 +385,7 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
 - `GlyphCache<GLYPHS, BYTES>` / `GlyphView` / `GlyphResolver` / `KerningResolver`：固定容量 glyph bitmap cache，当前接 5x7 A8 debug font，也可接收 TTF 子集 raster 出来的 A8 glyph，并通过 resolver 接入 `DrawText` / `DrawLabel`。
 - `GlyphIdResolver` / `GlyphRunResolver` / `GlyphRunCache<RUNS>` / `GlyphRunCacheStats`：V3.5 稳定的 shaped text run 入口和固定容量短文本 cache。`DrawLabel` 先按 glyph id 绘制 shaped `GlyphRun`，再生成 `TextLayout<N>`；cache hit/miss/insert/evict/overflow、glyph-id draw、codepoint fallback 会汇入 `RenderStats`，字体文件解析仍不进入 draw 热路径。
 - `TtfDecoder` / `FontFace` / `FontFaceKind` / `OpenTypeLayout` / `ShapeOptions` / `GlyphRun<N>` / `GlyphRasterOptions` / `RasterGlyph`：TrueType glyf 与 OTF/CFF 识别入口，支持 cmap format 4/12、legacy kern format 0 查询、GSUB SingleSubst/LigatureSubst、GPOS PairPos format 1/2 和 CFF Type2 最小 raster，输出 A8 glyph 后可进入 `GlyphCache::insert_a8_metrics()`。
-- `SvgDocument<PATHS, CMDS>` / `SvgDocumentView` / `SvgResolver` / `SvgRasterOptions` / `SvgPath<N>` / `SvgCache<ICONS, CMDS>` / `SvgId` / `SvgFillRule` / `SvgStrokeCap` / `SvgStrokeJoin`：固定容量 path/icon cache，当前 parser 能吃 Bootstrap Icons path 子集、多 path document、shape elements、`use href=#id`、inline/class style、fill-rule、group opacity、stroke cap/join、linear/radial gradient、简单 clipPath/mask path、filter 映射和 nested transform，`DrawSvgIcon` / `DrawSvgDocument` 已可从真实 SVG 文件走到 FHRE dirty/stats/raster 管线。
+- `SvgDocument<PATHS, CMDS>` / `SvgDocumentView` / `SvgDocumentCache<DOCS, PATHS, CMDS>` / `SvgDocumentCacheStats` / `SvgResolver` / `SvgRasterOptions` / `SvgPath<N>` / `SvgCache<ICONS, CMDS>` / `SvgId` / `SvgFillRule` / `SvgStrokeCap` / `SvgStrokeJoin`：固定容量 path/icon/document cache，当前 parser 能吃 Bootstrap Icons path 子集、多 path document、shape elements、`use href=#id`、inline/class style、fill-rule、group opacity、stroke cap/join、linear/radial gradient、简单 clipPath/mask path、filter 映射和 nested transform，`DrawSvgIcon` / `DrawSvgDocument` 已可从真实 SVG 文件走到 FHRE dirty/stats/raster 管线。document-level cache 只负责预热后的 SVG document 复用，不替代 path-level `SvgCache`。
 - `Vertex3D` / `MeshRef` / `MeshDrawOptions` / `TexturedVertex3D` / `TexturedMeshRef` / `TexCoord`：FHRE 3D mesh primitive 的第一版公开模型，当前通过 orthographic/perspective 投影发出 flat triangle、wireframe 和 textured triangle。
 - `FramebufferBackend` / `InputSource`：平台抽象边界，NuttX/Linux/SDL 后续只实现 trait 和 glue，不污染 Wing page。
 
@@ -320,8 +394,9 @@ V2.8 的目标是让 FHRE 能面对更多真实资源，但仍保持嵌入式边
 - `cargo check --manifest-path apps/fhre/rust/Cargo.toml` 必须通过。
 - `cargo check --manifest-path apps/examples/fhre_demo/rust/Cargo.toml` 必须通过。
 - `nuttx/wing_build.sh` 必须能把 `fhre_demo` 和 `wing_demo` 同时编入 NuttX sim。
-- NSH 中运行 `fhre_demo` 应能持续运行，看到 gradient、round rect、border、真实 blurred shadow、arc、push/pop mask、bitmap mask、真实 bounded layer opacity/recolor/blur composite、A8 debug text、PNG/FRAW/JPEG/PNG-fixture image path、SVG path icon、真实 SVG document command、flat/vertex-color/textured triangle、mesh wireframe、动态 ECS bubbles 和 dirty/cache/frame/present/Draw V3.6 benchmark bars；FRAW、RGBA PNG、palette+tRNS PNG、gray+tRNS PNG、16-bit gray-alpha PNG、Adam7 PNG、baseline/CMYK/EXIF/progressive JPEG、progressive+CMYK fallback、DejaVuSans TTF glyph、LVGL GPOS TTF、OTF/CFF Type2 glyph、GlyphIdResolver glyph-id draw、GlyphRunCache hit/miss/overflow、Bootstrap/grouped/style/use/gradient/clip/mask/filter SVG fixture 以及 missing/invalid/truncated/unsupported/overflow 负向 fixture 启动前 prewarm，绘制热路径只查 cache/resolver，可用 `1..0/Q/W` 或方向键切换 draw parity 压力模式。
-- `wing_demo` 的 NuttX glue 会通过 `ResourceLoader + ImageCache` 从 `/etc/wing/resource/windows10_mobile/assets/*.png` 和 `/etc/wing/resource/windows10_mobile/raw/*.fraw` 读取 Windows 10 Mobile 资源并转换为 FHRE `DrawImage*` 命令。
+- `fhre_build.sh` / `wing_build.sh` 必须在 ROMFS 安装阶段执行 resource manifest budget 检查；未列入 manifest 的大资源不会进入镜像，列入 manifest 但超过 `max-bytes` 会直接构建失败。
+- NSH 中运行 `fhre_demo` 应能持续运行且不黑屏，看到 gradient、round rect、border、真实 blurred shadow、arc、push/pop mask、bitmap mask、真实 bounded layer opacity/recolor/blur composite、A8 debug text、PNG/FRAW/JPEG/PNG-fixture image path、SVG path icon、真实 SVG document command、flat/vertex-color/textured triangle、mesh wireframe、动态 ECS bubbles 和 dirty/cache/frame/present/Draw V3.9 benchmark bars；FRAW、RGBA PNG、palette+tRNS PNG、gray+tRNS PNG、16-bit gray-alpha PNG、Adam7 PNG、baseline/CMYK/EXIF/progressive JPEG、progressive+CMYK fallback、小型 GPOS TTF、OTF/CFF Type2 glyph、GlyphIdResolver glyph-id draw、GlyphRunCache hit/miss/overflow、SvgDocumentCache hit/miss/load/fallback、draw chain candidate/fallback、codec pipeline candidate/fallback、Bootstrap/grouped/style/use/gradient/clip/mask/filter SVG fixture 以及 missing/invalid/truncated/unsupported/overflow 负向 fixture 启动前 prewarm，绘制热路径只查 cache/resolver，可用 `1..0/Q/W` 或方向键切换 draw parity 压力模式。
+- `wing_demo` 的 NuttX glue 会通过 `ResourceLoader + ImageCache` 从 manifest 允许的 `/etc/wing/resource/windows10_mobile/assets/*.png` 和 `/etc/wing/resource/windows10_mobile/raw/*.fraw` 读取 Windows 10 Mobile 资源并转换为 FHRE `DrawImage*` 命令；未安装的大图只显示 fallback 并进入 cache stats。
 
 ## alloc 边界
 

@@ -6,7 +6,7 @@
 #
 
 menu "Games"
-source "/home/uan-gpd/codes/FeatherOS/apps/games/brickmatch/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/games/match4/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/games/snake/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/games/brickmatch/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/games/match4/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/games/snake/Kconfig"
 endmenu # Games

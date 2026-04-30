@@ -61,6 +61,20 @@ echo mkkconfig in $PWD
 
 KCONFIG_LIST=`ls -1 $PWD/*/Kconfig 2>/dev/null`
 
+app_relative_source()
+{
+  if [ -n "${APPSDIR}" ]; then
+    case "$1" in
+      "${APPSDIR}"/* )
+        printf '$APPSDIR/%s' "${1#"${APPSDIR}/"}"
+        return
+        ;;
+    esac
+  fi
+
+  printf '%s' "$1"
+}
+
 echo "#" > ${KCONFIG}
 echo "# For a description of the syntax of this configuration file," >> ${KCONFIG}
 echo "# see the file kconfig-language.txt in the NuttX tools repository." >> ${KCONFIG}
@@ -74,7 +88,8 @@ if [ ! -z "${MENU}" ]; then
 fi
 
 for FILE in ${KCONFIG_LIST}; do
-  echo "source \"${FILE}\"" >> ${KCONFIG}
+  SOURCE_FILE=`app_relative_source "${FILE}"`
+  echo "source \"${SOURCE_FILE}\"" >> ${KCONFIG}
 done
 
 if [ ! -z "${MENU}" ]; then

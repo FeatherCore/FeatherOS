@@ -1,7 +1,16 @@
-use crate::{jpeg::{JpegDecoder, JpegError}, png::{PngDecoder, PngError}, Color, ImageId};
+use crate::{
+    backend::{
+        CodecAcceleratorCapabilities, CodecPipelinePlan, CodecPipelineStats, CodecStageKind,
+        CodecStagePlan, DEFAULT_CODEC_PIPELINE_STAGES,
+    },
+    jpeg::{JpegDecoder, JpegError},
+    png::{PngDecoder, PngError},
+    CodecErrorKind, Color, ImageId,
+};
 use alloc::vec::Vec;
 
 const FRAW_SIGNATURE: &[u8; 8] = b"FHREIMG1";
+const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 const FRAW_FORMAT_RGB565: u8 = 1;
 const FRAW_FORMAT_RGB888: u8 = 2;
 const FRAW_FORMAT_RGBA8888: u8 = 3;
@@ -163,6 +172,23 @@ impl FrawDecoder {
     pub fn decode_result(bytes: &[u8]) -> Result<crate::png::DecodedImage, FrawError> {
         decode_fraw_result(bytes)
     }
+
+    pub fn plan_pipeline<const STAGES: usize>() -> CodecPipelinePlan<STAGES> {
+        Self::plan_pipeline_with_caps(CodecAcceleratorCapabilities::NONE)
+    }
+
+    pub fn plan_pipeline_with_caps<const STAGES: usize>(
+        caps: CodecAcceleratorCapabilities,
+    ) -> CodecPipelinePlan<STAGES> {
+        let supported = caps.fraw && caps.max_stages >= 5;
+        let mut plan = CodecPipelinePlan::new();
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Read, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Inspect, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Header, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Pack, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::CacheInsert, false, true));
+        plan
+    }
 }
 
 pub fn decode_fraw(bytes: &[u8]) -> Option<crate::png::DecodedImage> {
@@ -206,6 +232,37 @@ pub enum ImageDecodeErrorKind {
     Truncated,
     Unsupported,
     Overflow,
+}
+
+impl ImageDecodeErrorKind {
+    pub const fn as_codec_error(self) -> CodecErrorKind {
+        match self {
+            Self::Invalid => CodecErrorKind::Invalid,
+            Self::Truncated => CodecErrorKind::Truncated,
+            Self::Unsupported => CodecErrorKind::Unsupported,
+            Self::Overflow => CodecErrorKind::Overflow,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImageResourceKind {
+    Fraw,
+    Png,
+    Jpeg,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageResourceInfo {
+    pub kind: ImageResourceKind,
+    pub width: u16,
+    pub height: u16,
+    pub stride: usize,
+    pub format: ImageFormat,
+    pub data_len: usize,
+    pub has_alpha: bool,
+    pub interlaced: bool,
+    pub progressive: bool,
 }
 
 fn parse_fraw_header_result(bytes: &[u8]) -> Result<(FrawInfo, usize), FrawError> {
@@ -292,6 +349,12 @@ pub struct ImageCacheStats {
     pub decode_truncated: u32,
     pub decode_unsupported: u32,
     pub decode_overflow: u32,
+    pub pipeline_candidates: u32,
+    pub pipeline_stages: u32,
+    pub pipeline_hardware_candidates: u32,
+    pub pipeline_fallbacks: u32,
+    pub pipeline_unsupported: u32,
+    pub pipeline_overflows: u32,
     pub pinned: usize,
 }
 
@@ -310,8 +373,27 @@ impl ImageCacheStats {
             decode_truncated: 0,
             decode_unsupported: 0,
             decode_overflow: 0,
+            pipeline_candidates: 0,
+            pipeline_stages: 0,
+            pipeline_hardware_candidates: 0,
+            pipeline_fallbacks: 0,
+            pipeline_unsupported: 0,
+            pipeline_overflows: 0,
             pinned: 0,
         }
+    }
+
+    pub fn record_pipeline(&mut self, stats: CodecPipelineStats) {
+        self.pipeline_candidates = self.pipeline_candidates.saturating_add(stats.candidates);
+        self.pipeline_stages = self.pipeline_stages.saturating_add(stats.stages);
+        self.pipeline_hardware_candidates = self
+            .pipeline_hardware_candidates
+            .saturating_add(stats.hardware_candidates);
+        self.pipeline_fallbacks = self.pipeline_fallbacks.saturating_add(stats.fallbacks);
+        self.pipeline_unsupported = self
+            .pipeline_unsupported
+            .saturating_add(stats.unsupported);
+        self.pipeline_overflows = self.pipeline_overflows.saturating_add(stats.overflows);
     }
 }
 
@@ -377,7 +459,16 @@ impl ImageCache {
         path: &[u8],
         loader: &mut L,
     ) -> Option<ImageView> {
-        self.load_internal(id, path, loader, false)
+        self.load_internal_result(id, path, loader, false).ok()
+    }
+
+    pub fn get_or_load_result<L: ResourceLoader>(
+        &mut self,
+        id: ImageId,
+        path: &[u8],
+        loader: &mut L,
+    ) -> Result<ImageView, CodecErrorKind> {
+        self.load_internal_result(id, path, loader, false)
     }
 
     pub fn prewarm<L: ResourceLoader>(
@@ -387,50 +478,63 @@ impl ImageCache {
         loader: &mut L,
         pinned: bool,
     ) -> bool {
-        self.load_internal(id, path, loader, pinned).is_some()
+        self.load_internal_result(id, path, loader, pinned).is_ok()
     }
 
-    fn load_internal<L: ResourceLoader>(
+    pub fn prewarm_result<L: ResourceLoader>(
         &mut self,
         id: ImageId,
         path: &[u8],
         loader: &mut L,
         pinned: bool,
-    ) -> Option<ImageView> {
+    ) -> Result<ImageView, CodecErrorKind> {
+        self.load_internal_result(id, path, loader, pinned)
+    }
+
+    fn load_internal_result<L: ResourceLoader>(
+        &mut self,
+        id: ImageId,
+        path: &[u8],
+        loader: &mut L,
+        pinned: bool,
+    ) -> Result<ImageView, CodecErrorKind> {
         if let Some(view) = self.view(id) {
             if pinned {
                 if let Some(index) = self.find_index(id) {
                     self.slots[index].pinned = true;
                 }
             }
-            return Some(view);
+            return Ok(view);
         }
 
         let mut bytes = Vec::new();
         if !loader.load(path, &mut bytes) {
             self.stats.load_failures = self.stats.load_failures.saturating_add(1);
-            return None;
+            return Err(CodecErrorKind::MissingResource);
         }
+
+        let plan = plan_resource_image_pipeline::<DEFAULT_CODEC_PIPELINE_STAGES>(bytes.as_slice());
+        self.stats.record_pipeline(plan.stats());
 
         let image = match decode_resource_image_result(bytes.as_slice()) {
             Ok(image) => image,
             Err(kind) => {
                 self.record_decode_error(kind);
-                return None;
+                return Err(kind.as_codec_error());
             }
         };
 
         let image_bytes = image.byte_len();
         if image_bytes > self.max_bytes || self.max_slots == 0 {
             self.record_decode_error(ImageDecodeErrorKind::Overflow);
-            return None;
+            return Err(CodecErrorKind::Overflow);
         }
 
         self.evict_until(image_bytes);
         if self.slots.len() >= self.max_slots {
             if !self.evict_one() {
                 self.record_decode_error(ImageDecodeErrorKind::Overflow);
-                return None;
+                return Err(CodecErrorKind::Overflow);
             }
         }
 
@@ -442,7 +546,7 @@ impl ImageCache {
             pinned,
         });
         self.stats.loads = self.stats.loads.saturating_add(1);
-        self.view(id)
+        self.view(id).ok_or(CodecErrorKind::Overflow)
     }
 
     fn record_decode_error(&mut self, kind: ImageDecodeErrorKind) {
@@ -497,8 +601,7 @@ impl ImageCache {
     }
 
     fn evict_until(&mut self, incoming: usize) {
-        while !self.slots.is_empty()
-            && self.bytes_used().saturating_add(incoming) > self.max_bytes
+        while !self.slots.is_empty() && self.bytes_used().saturating_add(incoming) > self.max_bytes
         {
             if !self.evict_one() {
                 break;
@@ -532,7 +635,106 @@ impl ImageCache {
     }
 }
 
-fn decode_resource_image_result(bytes: &[u8]) -> Result<crate::png::DecodedImage, ImageDecodeErrorKind> {
+pub fn inspect_resource_image(bytes: &[u8]) -> Option<ImageResourceInfo> {
+    inspect_resource_image_result(bytes).ok()
+}
+
+pub fn inspect_resource_image_result(
+    bytes: &[u8],
+) -> Result<ImageResourceInfo, ImageDecodeErrorKind> {
+    if bytes.get(..FRAW_SIGNATURE.len()) == Some(FRAW_SIGNATURE) {
+        let info = FrawDecoder::inspect_result(bytes).map_err(map_fraw_error)?;
+        Ok(ImageResourceInfo {
+            kind: ImageResourceKind::Fraw,
+            width: info.width,
+            height: info.height,
+            stride: info.stride,
+            format: info.format,
+            data_len: info.data_len,
+            has_alpha: matches!(info.format, ImageFormat::Rgba8888 | ImageFormat::A8),
+            interlaced: false,
+            progressive: false,
+        })
+    } else if bytes.get(..2) == Some(b"\xff\xd8") {
+        let info = JpegDecoder::inspect_result(bytes).map_err(map_jpeg_error)?;
+        let (stride, data_len) = image_resource_size(info.width, info.height, 2)?;
+        Ok(ImageResourceInfo {
+            kind: ImageResourceKind::Jpeg,
+            width: info.width,
+            height: info.height,
+            stride,
+            format: ImageFormat::Rgb565,
+            data_len,
+            has_alpha: false,
+            interlaced: false,
+            progressive: info.progressive,
+        })
+    } else if bytes.get(..PNG_SIGNATURE.len()) == Some(PNG_SIGNATURE) {
+        let info = PngDecoder::inspect_result(bytes).map_err(map_png_error)?;
+        let format = if info.has_alpha {
+            ImageFormat::Rgba8888
+        } else {
+            ImageFormat::Rgb565
+        };
+        let bytes_per_pixel = if info.has_alpha { 4 } else { 2 };
+        let (stride, data_len) = image_resource_size(info.width, info.height, bytes_per_pixel)?;
+        Ok(ImageResourceInfo {
+            kind: ImageResourceKind::Png,
+            width: info.width,
+            height: info.height,
+            stride,
+            format,
+            data_len,
+            has_alpha: info.has_alpha,
+            interlaced: info.interlaced,
+            progressive: false,
+        })
+    } else if bytes.is_empty() {
+        Err(ImageDecodeErrorKind::Truncated)
+    } else {
+        Err(ImageDecodeErrorKind::Unsupported)
+    }
+}
+
+pub fn plan_resource_image_pipeline<const STAGES: usize>(
+    bytes: &[u8],
+) -> CodecPipelinePlan<STAGES> {
+    if bytes.get(..FRAW_SIGNATURE.len()) == Some(FRAW_SIGNATURE) {
+        FrawDecoder::plan_pipeline()
+    } else if bytes.get(..2) == Some(b"\xff\xd8") {
+        JpegDecoder::plan_pipeline()
+    } else if bytes.get(..PNG_SIGNATURE.len()) == Some(PNG_SIGNATURE) {
+        PngDecoder::plan_pipeline()
+    } else {
+        let mut plan = CodecPipelinePlan::new();
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Read, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Inspect, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Fallback, false, true));
+        plan
+    }
+}
+
+fn image_resource_size(
+    width: u16,
+    height: u16,
+    bytes_per_pixel: usize,
+) -> Result<(usize, usize), ImageDecodeErrorKind> {
+    let stride = (width as usize)
+        .checked_mul(bytes_per_pixel)
+        .ok_or(ImageDecodeErrorKind::Overflow)?;
+    let data_len = stride
+        .checked_mul(height as usize)
+        .ok_or(ImageDecodeErrorKind::Overflow)?;
+    Ok((stride, data_len))
+}
+
+pub fn decode_resource_image(bytes: &[u8]) -> Option<crate::png::DecodedImage> {
+    decode_resource_image_result(bytes).ok()
+}
+
+pub fn decode_resource_image_result(
+    bytes: &[u8],
+) -> Result<crate::png::DecodedImage, ImageDecodeErrorKind> {
     if bytes.get(..FRAW_SIGNATURE.len()) == Some(FRAW_SIGNATURE) {
         FrawDecoder::decode_result(bytes).map_err(map_fraw_error)
     } else if bytes.get(..2) == Some(b"\xff\xd8") {
@@ -545,7 +747,9 @@ fn decode_resource_image_result(bytes: &[u8]) -> Result<crate::png::DecodedImage
 fn map_fraw_error(error: FrawError) -> ImageDecodeErrorKind {
     match error {
         FrawError::Truncated => ImageDecodeErrorKind::Truncated,
-        FrawError::UnsupportedFormat | FrawError::UnsupportedFlags => ImageDecodeErrorKind::Unsupported,
+        FrawError::UnsupportedFormat | FrawError::UnsupportedFlags => {
+            ImageDecodeErrorKind::Unsupported
+        }
         FrawError::BadSignature | FrawError::InvalidDimensions | FrawError::InvalidStride => {
             ImageDecodeErrorKind::Invalid
         }
@@ -580,9 +784,7 @@ fn map_jpeg_error(error: JpegError) -> ImageDecodeErrorKind {
         JpegError::BadSignature
         | JpegError::UnexpectedRestartMarker
         | JpegError::InvalidTable
-        | JpegError::Decode => {
-            ImageDecodeErrorKind::Invalid
-        }
+        | JpegError::Decode => ImageDecodeErrorKind::Invalid,
     }
 }
 
@@ -603,19 +805,12 @@ fn read_le_u32(bytes: &[u8], offset: usize) -> Option<u32> {
 }
 
 const SWATCH_RGB565: [u8; 32] = [
-    0x1f, 0x04, 0xff, 0x07, 0xff, 0x5f, 0x1f, 0xf8,
-    0xff, 0x07, 0x9f, 0x4f, 0x1f, 0xf8, 0xff, 0xff,
-    0xff, 0x5f, 0x1f, 0xf8, 0xff, 0xff, 0xff, 0x07,
-    0x1f, 0xf8, 0xff, 0xff, 0xff, 0x07, 0x1f, 0x04,
+    0x1f, 0x04, 0xff, 0x07, 0xff, 0x5f, 0x1f, 0xf8, 0xff, 0x07, 0x9f, 0x4f, 0x1f, 0xf8, 0xff, 0xff,
+    0xff, 0x5f, 0x1f, 0xf8, 0xff, 0xff, 0xff, 0x07, 0x1f, 0xf8, 0xff, 0xff, 0xff, 0x07, 0x1f, 0x04,
 ];
 
 const MASK_DOT_A8: [u8; 64] = [
-    0, 0, 18, 80, 80, 18, 0, 0,
-    0, 42, 160, 228, 228, 160, 42, 0,
-    18, 160, 255, 255, 255, 255, 160, 18,
-    80, 228, 255, 255, 255, 255, 228, 80,
-    80, 228, 255, 255, 255, 255, 228, 80,
-    18, 160, 255, 255, 255, 255, 160, 18,
-    0, 42, 160, 228, 228, 160, 42, 0,
-    0, 0, 18, 80, 80, 18, 0, 0,
+    0, 0, 18, 80, 80, 18, 0, 0, 0, 42, 160, 228, 228, 160, 42, 0, 18, 160, 255, 255, 255, 255, 160,
+    18, 80, 228, 255, 255, 255, 255, 228, 80, 80, 228, 255, 255, 255, 255, 228, 80, 18, 160, 255,
+    255, 255, 255, 160, 18, 0, 42, 160, 228, 228, 160, 42, 0, 0, 0, 18, 80, 80, 18, 0, 0,
 ];

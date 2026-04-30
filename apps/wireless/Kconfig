@@ -6,9 +6,9 @@
 #
 
 menu "Wireless Libraries and NSH Add-Ons"
-source "/home/uan-gpd/codes/FeatherOS/apps/wireless/bluetooth/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/wireless/gs2200m/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/wireless/ieee802154/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/wireless/iwpan/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/wireless/wapi/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/wireless/bluetooth/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/wireless/gs2200m/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/wireless/ieee802154/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/wireless/iwpan/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/wireless/wapi/Kconfig"
 endmenu # Wireless Libraries and NSH Add-Ons

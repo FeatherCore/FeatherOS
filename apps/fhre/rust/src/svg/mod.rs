@@ -1,4 +1,12 @@
+use crate::{
+    backend::{
+        CodecAcceleratorCapabilities, CodecErrorKind, CodecPipelinePlan, CodecStageKind,
+        CodecStagePlan,
+    },
+    image::ResourceLoader,
+};
 use crate::{Color, Point, Rect, SvgId};
+use alloc::vec::Vec;
 
 pub const SVG_DOCUMENT_PATHS: usize = 12;
 pub const SVG_DOCUMENT_COMMANDS: usize = 256;
@@ -53,7 +61,12 @@ pub enum SvgUnsupportedFeature {
 pub enum SvgFilterEffect {
     None,
     Blur(u16),
-    DropShadow { dx: i16, dy: i16, radius: u16, color: Color },
+    DropShadow {
+        dx: i16,
+        dy: i16,
+        radius: u16,
+        color: Color,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -167,14 +180,22 @@ impl SvgGroupState {
     fn inherit(self, data: &str, tag: &str) -> Self {
         Self {
             fill: parse_document_paint(data, tag_value(data, tag, "fill")).unwrap_or(self.fill),
-            stroke: parse_document_paint(data, tag_value(data, tag, "stroke")).unwrap_or(self.stroke),
-            opacity: mul_opacity(self.opacity, tag_value(data, tag, "opacity").and_then(parse_opacity).unwrap_or(255)),
+            stroke: parse_document_paint(data, tag_value(data, tag, "stroke"))
+                .unwrap_or(self.stroke),
+            opacity: mul_opacity(
+                self.opacity,
+                tag_value(data, tag, "opacity")
+                    .and_then(parse_opacity)
+                    .unwrap_or(255),
+            ),
             fill_rule: parse_fill_rule(tag_value(data, tag, "fill-rule")).unwrap_or(self.fill_rule),
-            stroke_cap: parse_stroke_cap(tag_value(data, tag, "stroke-linecap")).unwrap_or(self.stroke_cap),
-            stroke_join: parse_stroke_join(tag_value(data, tag, "stroke-linejoin")).unwrap_or(self.stroke_join),
-            transform: self
-                .transform
-                .then(parse_transform(parse_attr(tag, "transform")).unwrap_or(SvgTransform::IDENTITY)),
+            stroke_cap: parse_stroke_cap(tag_value(data, tag, "stroke-linecap"))
+                .unwrap_or(self.stroke_cap),
+            stroke_join: parse_stroke_join(tag_value(data, tag, "stroke-linejoin"))
+                .unwrap_or(self.stroke_join),
+            transform: self.transform.then(
+                parse_transform(parse_attr(tag, "transform")).unwrap_or(SvgTransform::IDENTITY),
+            ),
         }
     }
 }
@@ -191,8 +212,10 @@ impl SvgTransform {
 
     pub fn apply(self, point: Point) -> Point {
         Point::new(
-            ((self.a as i64 * point.x as i64 + self.c as i64 * point.y as i64) / 1024) as i32 + self.e,
-            ((self.b as i64 * point.x as i64 + self.d as i64 * point.y as i64) / 1024) as i32 + self.f,
+            ((self.a as i64 * point.x as i64 + self.c as i64 * point.y as i64) / 1024) as i32
+                + self.e,
+            ((self.b as i64 * point.x as i64 + self.d as i64 * point.y as i64) / 1024) as i32
+                + self.f,
         )
     }
 
@@ -202,8 +225,10 @@ impl SvgTransform {
             b: ((next.b as i64 * self.a as i64 + next.d as i64 * self.b as i64) / 1024) as i32,
             c: ((next.a as i64 * self.c as i64 + next.c as i64 * self.d as i64) / 1024) as i32,
             d: ((next.b as i64 * self.c as i64 + next.d as i64 * self.d as i64) / 1024) as i32,
-            e: ((next.a as i64 * self.e as i64 + next.c as i64 * self.f as i64) / 1024) as i32 + next.e,
-            f: ((next.b as i64 * self.e as i64 + next.d as i64 * self.f as i64) / 1024) as i32 + next.f,
+            e: ((next.a as i64 * self.e as i64 + next.c as i64 * self.f as i64) / 1024) as i32
+                + next.e,
+            f: ((next.b as i64 * self.e as i64 + next.d as i64 * self.f as i64) / 1024) as i32
+                + next.f,
         }
     }
 }
@@ -256,6 +281,42 @@ pub struct SvgDocument<const PATHS: usize, const CMDS: usize> {
     pub unsupported_features: u32,
 }
 
+impl<const PATHS: usize, const CMDS: usize> SvgDocument<PATHS, CMDS> {
+    pub const EMPTY: Self = Self {
+        view_box: Rect::EMPTY,
+        paths: [SvgPathNode::EMPTY; PATHS],
+        len: 0,
+        overflowed: false,
+        unsupported_features: 0,
+    };
+
+    pub fn reset(&mut self, view_box: Rect, unsupported_features: u32) {
+        self.view_box = view_box;
+        self.len = 0;
+        self.overflowed = false;
+        self.unsupported_features = unsupported_features;
+    }
+
+    pub fn plan_pipeline<const STAGES: usize>() -> CodecPipelinePlan<STAGES> {
+        Self::plan_pipeline_with_caps(CodecAcceleratorCapabilities::NONE)
+    }
+
+    pub fn plan_pipeline_with_caps<const STAGES: usize>(
+        caps: CodecAcceleratorCapabilities,
+    ) -> CodecPipelinePlan<STAGES> {
+        let supported = caps.svg && caps.max_stages >= 7;
+        let mut plan = CodecPipelinePlan::new();
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Read, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Inspect, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Header, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Parse, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Transform, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Raster, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::CacheInsert, false, true));
+        plan
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SvgDocumentView {
     pub document: *const DefaultSvgDocument,
@@ -281,32 +342,203 @@ impl SvgDocumentView {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SvgDocumentCacheStats {
+    pub slots: usize,
+    pub capacity: usize,
+    pub hits: u32,
+    pub misses: u32,
+    pub loads: u32,
+    pub load_failures: u32,
+    pub decode_failures: u32,
+    pub overflows: u32,
+}
+
+impl SvgDocumentCacheStats {
+    pub const fn new() -> Self {
+        Self {
+            slots: 0,
+            capacity: 0,
+            hits: 0,
+            misses: 0,
+            loads: 0,
+            load_failures: 0,
+            decode_failures: 0,
+            overflows: 0,
+        }
+    }
+
+    pub const fn fallbacks(self) -> u32 {
+        self.load_failures
+            .saturating_add(self.decode_failures)
+            .saturating_add(self.overflows)
+    }
+}
+
+pub struct SvgDocumentCache<const DOCS: usize, const PATHS: usize, const CMDS: usize> {
+    ids: [SvgId; DOCS],
+    documents: [SvgDocument<PATHS, CMDS>; DOCS],
+    used: [bool; DOCS],
+    len: usize,
+    stats: SvgDocumentCacheStats,
+}
+
+impl<const DOCS: usize, const PATHS: usize, const CMDS: usize> SvgDocumentCache<DOCS, PATHS, CMDS> {
+    pub const fn new() -> Self {
+        Self {
+            ids: [SvgId(0); DOCS],
+            documents: [SvgDocument::EMPTY; DOCS],
+            used: [false; DOCS],
+            len: 0,
+            stats: SvgDocumentCacheStats::new(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        let mut index = 0usize;
+        while index < DOCS {
+            self.ids[index] = SvgId(0);
+            self.documents[index] = SvgDocument::EMPTY;
+            self.used[index] = false;
+            index += 1;
+        }
+        self.len = 0;
+        self.stats = SvgDocumentCacheStats::new();
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn capacity(&self) -> usize {
+        DOCS
+    }
+
+    pub fn stats(&self) -> SvgDocumentCacheStats {
+        let mut stats = self.stats;
+        stats.slots = self.len;
+        stats.capacity = DOCS;
+        stats
+    }
+
+    fn find_index(&self, id: SvgId) -> Option<usize> {
+        let mut index = 0usize;
+        while index < self.len {
+            if self.used[index] && self.ids[index] == id {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+}
+
+impl<const DOCS: usize> SvgDocumentCache<DOCS, SVG_DOCUMENT_PATHS, SVG_DOCUMENT_COMMANDS> {
+    pub fn view(&mut self, id: SvgId) -> Option<SvgDocumentView> {
+        if let Some(index) = self.find_index(id) {
+            self.stats.hits = self.stats.hits.saturating_add(1);
+            Some(SvgDocumentView::from_ref(&self.documents[index]))
+        } else {
+            self.stats.misses = self.stats.misses.saturating_add(1);
+            None
+        }
+    }
+
+    pub fn prewarm<L: ResourceLoader>(
+        &mut self,
+        id: SvgId,
+        path: &[u8],
+        loader: &mut L,
+        fallback_view_box: Rect,
+    ) -> bool {
+        self.prewarm_result(id, path, loader, fallback_view_box)
+            .is_ok()
+    }
+
+    pub fn prewarm_result<L: ResourceLoader>(
+        &mut self,
+        id: SvgId,
+        path: &[u8],
+        loader: &mut L,
+        fallback_view_box: Rect,
+    ) -> Result<SvgDocumentView, CodecErrorKind> {
+        if let Some(view) = self.view(id) {
+            return Ok(view);
+        }
+
+        if self.len >= DOCS {
+            self.stats.overflows = self.stats.overflows.saturating_add(1);
+            return Err(CodecErrorKind::Overflow);
+        }
+
+        let mut bytes = Vec::new();
+        if !loader.load(path, &mut bytes) {
+            self.stats.load_failures = self.stats.load_failures.saturating_add(1);
+            return Err(CodecErrorKind::MissingResource);
+        }
+
+        let Ok(data) = core::str::from_utf8(&bytes) else {
+            self.stats.decode_failures = self.stats.decode_failures.saturating_add(1);
+            return Err(CodecErrorKind::Invalid);
+        };
+
+        let slot = self.len;
+        if !parse_svg_document_into(data, fallback_view_box, &mut self.documents[slot]) {
+            self.documents[slot] = SvgDocument::EMPTY;
+            self.stats.decode_failures = self.stats.decode_failures.saturating_add(1);
+            return Err(CodecErrorKind::Invalid);
+        }
+        if self.documents[slot].overflowed {
+            self.documents[slot] = SvgDocument::EMPTY;
+            self.stats.decode_failures = self.stats.decode_failures.saturating_add(1);
+            self.stats.overflows = self.stats.overflows.saturating_add(1);
+            return Err(CodecErrorKind::Overflow);
+        }
+
+        self.ids[slot] = id;
+        self.used[slot] = true;
+        self.len += 1;
+        self.stats.loads = self.stats.loads.saturating_add(1);
+        Ok(SvgDocumentView::from_ref(&self.documents[slot]))
+    }
+}
+
 pub fn parse_svg_document<const PATHS: usize, const CMDS: usize>(
     data: &str,
     fallback_view_box: Rect,
 ) -> Option<SvgDocument<PATHS, CMDS>> {
+    let mut document = SvgDocument::EMPTY;
+    if parse_svg_document_into(data, fallback_view_box, &mut document) {
+        Some(document)
+    } else {
+        None
+    }
+}
+
+pub fn parse_svg_document_into<const PATHS: usize, const CMDS: usize>(
+    data: &str,
+    fallback_view_box: Rect,
+    document: &mut SvgDocument<PATHS, CMDS>,
+) -> bool {
     let view_box = parse_view_box(data).unwrap_or(fallback_view_box);
     let root_tag = first_tag(data, "<svg").unwrap_or(data);
     let root_state = SvgGroupState::root().inherit(data, root_tag);
-    let mut document = SvgDocument {
-        view_box,
-        paths: [SvgPathNode::EMPTY; PATHS],
-        len: 0,
-        overflowed: false,
-        unsupported_features: detect_svg_unsupported_features(data),
-    };
+    document.reset(view_box, detect_svg_unsupported_features(data));
 
     let mut search = 0usize;
-    while let Some(path_pos) = data.get(search..)?.find("<path") {
+    while let Some(path_pos) = data.get(search..).and_then(|text| text.find("<path")) {
         let start = search + path_pos;
-        let end = match data.get(start..)?.find('>') {
+        let end = match data.get(start..).and_then(|text| text.find('>')) {
             Some(end) => start + end + 1,
             None => break,
         };
-        let tag = data.get(start..end)?;
+        let Some(tag) = data.get(start..end) else {
+            break;
+        };
         if let Some(path_data) = parse_attr(tag, "d") {
             let group_state = inherited_group_state(data, start, root_state);
-            let path_transform = parse_transform(parse_attr(tag, "transform")).unwrap_or(SvgTransform::IDENTITY);
+            let path_transform =
+                parse_transform(parse_attr(tag, "transform")).unwrap_or(SvgTransform::IDENTITY);
             let transform = group_state.transform.then(path_transform);
             let mut path = parse_svg_path(view_box, path_data, 1);
             transform_path(&mut path, transform);
@@ -317,13 +549,20 @@ pub fn parse_svg_document<const PATHS: usize, const CMDS: usize>(
             let mask_path = parse_mask_path(data, tag, view_box);
             let node = SvgPathNode {
                 path,
-                fill: parse_document_paint(data, tag_value(data, tag, "fill")).unwrap_or(group_state.fill),
-                stroke: parse_document_paint(data, tag_value(data, tag, "stroke")).unwrap_or(group_state.stroke),
-                stroke_width: tag_value(data, tag, "stroke-width").and_then(parse_u16).unwrap_or(1),
-                stroke_cap: parse_stroke_cap(tag_value(data, tag, "stroke-linecap")).unwrap_or(group_state.stroke_cap),
-                stroke_join: parse_stroke_join(tag_value(data, tag, "stroke-linejoin")).unwrap_or(group_state.stroke_join),
+                fill: parse_document_paint(data, tag_value(data, tag, "fill"))
+                    .unwrap_or(group_state.fill),
+                stroke: parse_document_paint(data, tag_value(data, tag, "stroke"))
+                    .unwrap_or(group_state.stroke),
+                stroke_width: tag_value(data, tag, "stroke-width")
+                    .and_then(parse_u16)
+                    .unwrap_or(1),
+                stroke_cap: parse_stroke_cap(tag_value(data, tag, "stroke-linecap"))
+                    .unwrap_or(group_state.stroke_cap),
+                stroke_join: parse_stroke_join(tag_value(data, tag, "stroke-linejoin"))
+                    .unwrap_or(group_state.stroke_join),
                 opacity: mul_opacity(group_state.opacity, node_opacity),
-                fill_rule: parse_fill_rule(tag_value(data, tag, "fill-rule")).unwrap_or(group_state.fill_rule),
+                fill_rule: parse_fill_rule(tag_value(data, tag, "fill-rule"))
+                    .unwrap_or(group_state.fill_rule),
                 clip: clip_path.as_ref().and_then(path_bounds),
                 clip_path: clip_path.unwrap_or_else(|| SvgPath::new(view_box)),
                 has_clip_path: clip_path.is_some(),
@@ -332,24 +571,14 @@ pub fn parse_svg_document<const PATHS: usize, const CMDS: usize>(
                 has_mask_path: mask_path.is_some(),
                 filter: parse_filter_effect(data, tag),
             };
-            if document.len >= PATHS {
-                document.overflowed = true;
-            } else {
-                document.overflowed |= node.path.overflowed;
-                document.paths[document.len] = node;
-                document.len += 1;
-            }
+            push_document_node(document, node);
         }
         search = end;
     }
 
-    append_shape_nodes(&mut document, data, view_box, root_state);
+    append_shape_nodes(document, data, view_box, root_state);
 
-    if document.len == 0 {
-        None
-    } else {
-        Some(document)
-    }
+    document.len != 0
 }
 
 fn append_shape_nodes<const PATHS: usize, const CMDS: usize>(
@@ -388,9 +617,9 @@ fn append_shape_nodes<const PATHS: usize, const CMDS: usize>(
 
         if let Some(mut path) = path {
             let group_state = inherited_group_state(data, start, root_state);
-            let transform = group_state
-                .transform
-                .then(parse_transform(parse_attr(tag, "transform")).unwrap_or(SvgTransform::IDENTITY));
+            let transform = group_state.transform.then(
+                parse_transform(parse_attr(tag, "transform")).unwrap_or(SvgTransform::IDENTITY),
+            );
             transform_path(&mut path, transform);
             let node_opacity = tag_value(data, tag, "opacity")
                 .and_then(parse_opacity)
@@ -399,13 +628,20 @@ fn append_shape_nodes<const PATHS: usize, const CMDS: usize>(
             let mask_path = parse_mask_path(data, tag, view_box);
             let node = SvgPathNode {
                 path,
-                fill: parse_document_paint(data, tag_value(data, tag, "fill")).unwrap_or(group_state.fill),
-                stroke: parse_document_paint(data, tag_value(data, tag, "stroke")).unwrap_or(group_state.stroke),
-                stroke_width: tag_value(data, tag, "stroke-width").and_then(parse_u16).unwrap_or(1),
-                stroke_cap: parse_stroke_cap(tag_value(data, tag, "stroke-linecap")).unwrap_or(group_state.stroke_cap),
-                stroke_join: parse_stroke_join(tag_value(data, tag, "stroke-linejoin")).unwrap_or(group_state.stroke_join),
+                fill: parse_document_paint(data, tag_value(data, tag, "fill"))
+                    .unwrap_or(group_state.fill),
+                stroke: parse_document_paint(data, tag_value(data, tag, "stroke"))
+                    .unwrap_or(group_state.stroke),
+                stroke_width: tag_value(data, tag, "stroke-width")
+                    .and_then(parse_u16)
+                    .unwrap_or(1),
+                stroke_cap: parse_stroke_cap(tag_value(data, tag, "stroke-linecap"))
+                    .unwrap_or(group_state.stroke_cap),
+                stroke_join: parse_stroke_join(tag_value(data, tag, "stroke-linejoin"))
+                    .unwrap_or(group_state.stroke_join),
                 opacity: mul_opacity(group_state.opacity, node_opacity),
-                fill_rule: parse_fill_rule(tag_value(data, tag, "fill-rule")).unwrap_or(group_state.fill_rule),
+                fill_rule: parse_fill_rule(tag_value(data, tag, "fill-rule"))
+                    .unwrap_or(group_state.fill_rule),
                 clip: clip_path.as_ref().and_then(path_bounds),
                 clip_path: clip_path.unwrap_or_else(|| SvgPath::new(view_box)),
                 has_clip_path: clip_path.is_some(),
@@ -461,15 +697,30 @@ fn circle_to_path<const N: usize>(view_box: Rect, tag: &str, ellipse: bool) -> O
         rx
     };
     const CIRCLE: [(i32, i32); 16] = [
-        (1024, 0), (946, 392), (724, 724), (392, 946),
-        (0, 1024), (-392, 946), (-724, 724), (-946, 392),
-        (-1024, 0), (-946, -392), (-724, -724), (-392, -946),
-        (0, -1024), (392, -946), (724, -724), (946, -392),
+        (1024, 0),
+        (946, 392),
+        (724, 724),
+        (392, 946),
+        (0, 1024),
+        (-392, 946),
+        (-724, 724),
+        (-946, 392),
+        (-1024, 0),
+        (-946, -392),
+        (-724, -724),
+        (-392, -946),
+        (0, -1024),
+        (392, -946),
+        (724, -724),
+        (946, -392),
     ];
     let mut path = SvgPath::new(view_box);
     let mut i = 0usize;
     while i < CIRCLE.len() {
-        let point = Point::new(cx + (CIRCLE[i].0 * rx) / 1024, cy + (CIRCLE[i].1 * ry) / 1024);
+        let point = Point::new(
+            cx + (CIRCLE[i].0 * rx) / 1024,
+            cy + (CIRCLE[i].1 * ry) / 1024,
+        );
         if i == 0 {
             path.push(SvgPathCommand::MoveTo(point));
         } else {
@@ -540,11 +791,17 @@ fn use_to_path<const N: usize>(view_box: Rect, data: &str, tag: &str) -> Option<
     } else {
         return None;
     };
-    let mut transform = parse_transform(parse_attr(tag, "transform")).unwrap_or(SvgTransform::IDENTITY);
+    let mut transform =
+        parse_transform(parse_attr(tag, "transform")).unwrap_or(SvgTransform::IDENTITY);
     let x = attr_number(tag, "x").unwrap_or(0);
     let y = attr_number(tag, "y").unwrap_or(0);
     if x != 0 || y != 0 {
-        transform = SvgTransform { e: x, f: y, ..SvgTransform::IDENTITY }.then(transform);
+        transform = SvgTransform {
+            e: x,
+            f: y,
+            ..SvgTransform::IDENTITY
+        }
+        .then(transform);
     }
     transform_path(&mut path, transform);
     Some(path)
@@ -813,7 +1070,12 @@ fn parse_view_box(data: &str) -> Option<Rect> {
     let y = parse_number(bytes, &mut index, 1)?;
     let w = parse_number(bytes, &mut index, 1)?;
     let h = parse_number(bytes, &mut index, 1)?;
-    Some(Rect::new(x, y, w.max(0).min(u16::MAX as i32) as u16, h.max(0).min(u16::MAX as i32) as u16))
+    Some(Rect::new(
+        x,
+        y,
+        w.max(0).min(u16::MAX as i32) as u16,
+        h.max(0).min(u16::MAX as i32) as u16,
+    ))
 }
 
 fn parse_attr<'a>(data: &'a str, attr: &str) -> Option<&'a str> {
@@ -908,7 +1170,10 @@ fn class_decl_value<'a>(document: &'a str, tag: &'a str, name: &str) -> Option<&
 
 fn parse_document_paint(document: &str, value: Option<&str>) -> Option<SvgPaint> {
     let value = value?.trim();
-    if let Some(id) = value.strip_prefix("url(#").and_then(|rest| rest.split(')').next()) {
+    if let Some(id) = value
+        .strip_prefix("url(#")
+        .and_then(|rest| rest.split(')').next())
+    {
         return parse_gradient_paint(document, id);
     }
     parse_paint(Some(value))
@@ -939,7 +1204,11 @@ fn parse_gradient_paint(document: &str, id: &str) -> Option<SvgPaint> {
             return None;
         }
     }
-    let tag_end = document.get(id_pos..)?.find("</").map(|end| id_pos + end).unwrap_or(document.len());
+    let tag_end = document
+        .get(id_pos..)?
+        .find("</")
+        .map(|end| id_pos + end)
+        .unwrap_or(document.len());
     let region = document.get(tag_start..tag_end)?;
     let mut first = None;
     let mut last = None;
@@ -975,7 +1244,9 @@ fn parse_gradient_paint(document: &str, id: &str) -> Option<SvgPaint> {
 
 fn detect_svg_unsupported_features(data: &str) -> u32 {
     let mut flags = 0u32;
-    if data.contains("<clipPath") && !has_simple_clip_or_mask_shape(data, "<clipPath", "</clipPath>") {
+    if data.contains("<clipPath")
+        && !has_simple_clip_or_mask_shape(data, "<clipPath", "</clipPath>")
+    {
         flags |= 1 << (SvgUnsupportedFeature::ClipPathComplex as u32);
     }
     if data.contains("<mask") && !has_simple_clip_or_mask_shape(data, "<mask", "</mask>") {
@@ -1021,7 +1292,11 @@ fn parse_clip_path<const N: usize>(data: &str, tag: &str, view_box: Rect) -> Opt
         .next()?;
     let pos = data.find(id)?;
     let start = data.get(..pos)?.rfind("<clipPath")?;
-    let end = data.get(pos..)?.find("</clipPath>").map(|end| pos + end).unwrap_or(data.len());
+    let end = data
+        .get(pos..)?
+        .find("</clipPath>")
+        .map(|end| pos + end)
+        .unwrap_or(data.len());
     let region = data.get(start..end)?;
     first_shape_path(view_box, region)
 }
@@ -1034,7 +1309,11 @@ fn parse_mask_path<const N: usize>(data: &str, tag: &str, view_box: Rect) -> Opt
         .next()?;
     let pos = data.find(id)?;
     let start = data.get(..pos)?.rfind("<mask")?;
-    let end = data.get(pos..)?.find("</mask>").map(|end| pos + end).unwrap_or(data.len());
+    let end = data
+        .get(pos..)?
+        .find("</mask>")
+        .map(|end| pos + end)
+        .unwrap_or(data.len());
     let region = data.get(start..end)?;
     first_shape_path(view_box, region)
 }
@@ -1068,16 +1347,30 @@ fn parse_filter_effect(data: &str, tag: &str) -> SvgFilterEffect {
     let Some(start) = data.get(..pos).and_then(|text| text.rfind("<filter")) else {
         return SvgFilterEffect::None;
     };
-    let end = data.get(pos..).and_then(|text| text.find("</filter>").map(|end| pos + end)).unwrap_or(data.len());
+    let end = data
+        .get(pos..)
+        .and_then(|text| text.find("</filter>").map(|end| pos + end))
+        .unwrap_or(data.len());
     let Some(region) = data.get(start..end) else {
         return SvgFilterEffect::None;
     };
     if let Some(drop) = region.find("<feDropShadow") {
-        let tag_end = region.get(drop..).and_then(|text| text.find('>')).map(|end| drop + end + 1).unwrap_or(region.len());
+        let tag_end = region
+            .get(drop..)
+            .and_then(|text| text.find('>'))
+            .map(|end| drop + end + 1)
+            .unwrap_or(region.len());
         let shadow = region.get(drop..tag_end).unwrap_or("");
-        let dx = attr_number(shadow, "dx").unwrap_or(2).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-        let dy = attr_number(shadow, "dy").unwrap_or(2).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-        let radius = attr_number(shadow, "stdDeviation").unwrap_or(2).max(0).min(32) as u16;
+        let dx = attr_number(shadow, "dx")
+            .unwrap_or(2)
+            .clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        let dy = attr_number(shadow, "dy")
+            .unwrap_or(2)
+            .clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        let radius = attr_number(shadow, "stdDeviation")
+            .unwrap_or(2)
+            .max(0)
+            .min(32) as u16;
         let color = tag_value(data, shadow, "flood-color")
             .and_then(|value| parse_paint(Some(value)))
             .and_then(|paint| match paint {
@@ -1085,12 +1378,24 @@ fn parse_filter_effect(data: &str, tag: &str) -> SvgFilterEffect {
                 _ => None,
             })
             .unwrap_or(Color::rgba(0, 0, 0, 160));
-        return SvgFilterEffect::DropShadow { dx, dy, radius, color };
+        return SvgFilterEffect::DropShadow {
+            dx,
+            dy,
+            radius,
+            color,
+        };
     }
     if let Some(blur) = region.find("<feGaussianBlur") {
-        let tag_end = region.get(blur..).and_then(|text| text.find('>')).map(|end| blur + end + 1).unwrap_or(region.len());
+        let tag_end = region
+            .get(blur..)
+            .and_then(|text| text.find('>'))
+            .map(|end| blur + end + 1)
+            .unwrap_or(region.len());
         let blur_tag = region.get(blur..tag_end).unwrap_or("");
-        let radius = attr_number(blur_tag, "stdDeviation").unwrap_or(2).max(0).min(32) as u16;
+        let radius = attr_number(blur_tag, "stdDeviation")
+            .unwrap_or(2)
+            .max(0)
+            .min(32) as u16;
         return SvgFilterEffect::Blur(radius);
     }
     SvgFilterEffect::None
@@ -1205,7 +1510,10 @@ fn is_group_start_tag(tag: &str) -> bool {
     if bytes.len() < 2 || bytes[0] != b'<' || bytes[1] != b'g' {
         return false;
     }
-    matches!(bytes.get(2).copied(), Some(b' ' | b'\n' | b'\r' | b'\t' | b'>' | b'/'))
+    matches!(
+        bytes.get(2).copied(),
+        Some(b' ' | b'\n' | b'\r' | b'\t' | b'>' | b'/')
+    )
 }
 
 fn parse_hex_color(hex: &str) -> Option<Color> {
@@ -1245,7 +1553,11 @@ fn parse_u16(value: &str) -> Option<u16> {
             break;
         }
     }
-    if seen { Some(out) } else { None }
+    if seen {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 fn parse_opacity(value: &str) -> Option<u8> {
@@ -1255,7 +1567,9 @@ fn parse_opacity(value: &str) -> Option<u8> {
         let mut denom = 1u16;
         let mut i = 2usize;
         while i < bytes.len() && bytes[i].is_ascii_digit() && denom < 1000 {
-            v = v.saturating_mul(10).saturating_add((bytes[i] - b'0') as u16);
+            v = v
+                .saturating_mul(10)
+                .saturating_add((bytes[i] - b'0') as u16);
             denom = denom.saturating_mul(10);
             i += 1;
         }
@@ -1277,22 +1591,29 @@ fn is_command(byte: u8) -> bool {
     matches!(
         byte,
         b'M' | b'm'
-            | b'L' | b'l'
-            | b'H' | b'h'
-            | b'V' | b'v'
-            | b'C' | b'c'
-            | b'Q' | b'q'
-            | b'A' | b'a'
-            | b'S' | b's'
-            | b'T' | b't'
-            | b'Z' | b'z'
+            | b'L'
+            | b'l'
+            | b'H'
+            | b'h'
+            | b'V'
+            | b'v'
+            | b'C'
+            | b'c'
+            | b'Q'
+            | b'q'
+            | b'A'
+            | b'a'
+            | b'S'
+            | b's'
+            | b'T'
+            | b't'
+            | b'Z'
+            | b'z'
     )
 }
 
 fn skip_separators(bytes: &[u8], index: &mut usize) {
-    while *index < bytes.len()
-        && matches!(bytes[*index], b' ' | b'\n' | b'\r' | b'\t' | b',')
-    {
+    while *index < bytes.len() && matches!(bytes[*index], b' ' | b'\n' | b'\r' | b'\t' | b',') {
         *index += 1;
     }
 }
@@ -1400,9 +1721,7 @@ fn parse_number(bytes: &[u8], index: &mut usize, scale: i32) -> Option<i32> {
     if seen {
         let scale = scale.max(1);
         let scaled_frac = if denom > 1 {
-            frac.saturating_mul(scale)
-                .saturating_add(denom / 2)
-                / denom
+            frac.saturating_mul(scale).saturating_add(denom / 2) / denom
         } else {
             0
         };

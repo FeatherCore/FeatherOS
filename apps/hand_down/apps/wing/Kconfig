@@ -3,5 +3,5 @@
 #
 
 menu "Wing Clean Shell"
-source "/home/uan-gpd/codes/FeatherOS/apps/wing/rust/Kconfig"
+source "$APPSDIR/wing/rust/Kconfig"
 endmenu

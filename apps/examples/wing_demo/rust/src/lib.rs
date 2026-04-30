@@ -88,10 +88,8 @@ fn prewarm_wing_image_cache() {
 }
 
 fn prewarm_route_assets(mode: wing::ShellMode) {
-    const HOME: [wing::WingAssetId; 8] = [
-        wing::WingAssetId(17),
+    const HOME: [wing::WingAssetId; 6] = [
         wing::WingAssetId(23),
-        wing::WingAssetId(27),
         wing::WingAssetId(28),
         wing::WingAssetId(29),
         wing::WingAssetId(30),
@@ -118,11 +116,8 @@ fn prewarm_route_assets(mode: wing::ShellMode) {
         wing::WingAssetId(54),
         wing::WingAssetId(56),
     ];
-    const LOCK: [wing::WingAssetId; 2] = [wing::WingAssetId(14), wing::WingAssetId(46)];
-    const APPS: [wing::WingAssetId; 5] = [
-        wing::WingAssetId(26),
-        wing::WingAssetId(27),
-        wing::WingAssetId(34),
+    const LOCK: [wing::WingAssetId; 1] = [wing::WingAssetId(46)];
+    const APPS: [wing::WingAssetId; 2] = [
         wing::WingAssetId(37),
         wing::WingAssetId(48),
     ];

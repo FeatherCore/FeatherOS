@@ -64,6 +64,8 @@ arch/*/src/chip
 compile_commands.json
 .aider*
 .clang-format
+**/target/
+**/target/**/*
 
 # Common cache files
 .cache/
@@ -161,4 +163,8 @@ nuttx/SAVEconfig
 nuttx/.aider*
 nuttx/imx9-norimage.img
 nuttx/config.txt
+nuttx/boards/sim/sim/sim/src/etctmp/
+nuttx/boards/sim/sim/sim/src/etctmp.c
+nuttx/boards/sim/sim/sim/src/etc/fhre/resource/
+nuttx/boards/sim/sim/sim/src/etc/wing/resource/
 nuttx/boards/sim/sim/sim/src/etc/wing/wing_*.bin

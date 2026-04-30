@@ -6,7 +6,7 @@
 #
 
 menu "Bootloader Utilities"
-source "/home/uan-gpd/codes/FeatherOS/apps/boot/mcuboot/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/boot/miniboot/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/boot/nxboot/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/boot/mcuboot/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/boot/miniboot/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/boot/nxboot/Kconfig"
 endmenu # Bootloader Utilities

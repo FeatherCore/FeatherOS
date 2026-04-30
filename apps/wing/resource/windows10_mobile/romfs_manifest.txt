@@ -1,0 +1,51 @@
+# class relative-path max-bytes
+#
+# This manifest is the ROMFS allowlist for the lightweight Wing demo profile.
+# Large W10M photos/wallpapers stay in the source tree as references only until
+# they are converted to a target-appropriate format or given an explicit budget.
+
+license LICENSE 2048
+
+runtime assets/airplane_ic.png 4096
+runtime assets/battery_ic.png 4096
+runtime assets/bluetooth_ic.png 4096
+runtime assets/brightness_ic.png 4096
+runtime assets/camera_ic.png 4096
+runtime assets/cellular_ic.png 4096
+runtime assets/edge_ic.png 4096
+runtime assets/file_ic.png 4096
+runtime assets/groove_ic.png 4096
+runtime assets/hotspot_ic.png 4096
+runtime assets/location_ic.png 4096
+runtime assets/message_ic.png 4096
+runtime assets/microsoft_ic.png 4096
+runtime assets/news_ic.png 4096
+runtime assets/outlook_ic.png 4096
+runtime assets/people_ic.png 4096
+runtime assets/phone_ic.png 4096
+runtime assets/photos_ic.png 4096
+runtime assets/settings_ic.png 4096
+runtime assets/tips_ic.png 4096
+runtime assets/vpn_ic.png 4096
+runtime assets/weather_ic.png 4096
+runtime assets/wifi_ic.png 4096
+runtime assets/windows_logo.png 4096
+runtime assets/wp_back.png 4096
+runtime assets/wp_logo.png 4096
+runtime assets/wp_next.png 4096
+runtime assets/wp_search.png 4096
+runtime assets/wp_settings.png 4096
+runtime assets/wp_system.png 4096
+
+runtime raw/padlock.fraw 8192
+runtime raw/settings_back.fraw 8192
+runtime raw/stars_ic.fraw 8192
+runtime raw/wifi_icon.fraw 8192
+runtime raw/wp_about.fraw 8192
+runtime raw/wp_account.fraw 8192
+runtime raw/wp_apps.fraw 8192
+runtime raw/wp_devices.fraw 8192
+runtime raw/wp_network.fraw 8192
+runtime raw/wp_personalization.fraw 8192
+runtime raw/wp_privacy.fraw 8192
+runtime raw/wp_time.fraw 8192

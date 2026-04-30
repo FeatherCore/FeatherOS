@@ -21,7 +21,12 @@ pub struct PointerEvent {
 }
 
 impl PointerEvent {
-    pub const fn new(id: PointerId, phase: PointerPhase, position: Point, timestamp_us: u64) -> Self {
+    pub const fn new(
+        id: PointerId,
+        phase: PointerPhase,
+        position: Point,
+        timestamp_us: u64,
+    ) -> Self {
         Self {
             id,
             phase,
@@ -230,7 +235,12 @@ fn point_delta(start: Point, current: Point) -> Point {
     )
 }
 
-fn classify_gesture(delta: Point, duration_us: u64, dragging: bool, config: GestureConfig) -> GestureKind {
+fn classify_gesture(
+    delta: Point,
+    duration_us: u64,
+    dragging: bool,
+    config: GestureConfig,
+) -> GestureKind {
     let ax = abs_i32(delta.x);
     let ay = abs_i32(delta.y);
     let max_axis = ax.max(ay);

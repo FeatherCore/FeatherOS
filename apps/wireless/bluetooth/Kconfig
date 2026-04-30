@@ -6,6 +6,6 @@
 #
 
 menu "Bluetooth applications"
-source "/home/uan-gpd/codes/FeatherOS/apps/wireless/bluetooth/btsak/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/wireless/bluetooth/nimble/Kconfig"
+source "$APPSDIR/wireless/bluetooth/btsak/Kconfig"
+source "$APPSDIR/wireless/bluetooth/nimble/Kconfig"
 endmenu # Bluetooth applications

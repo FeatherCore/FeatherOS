@@ -6,12 +6,12 @@
 #
 
 menu "Cryptography Library Support"
-source "/home/uan-gpd/codes/FeatherOS/apps/crypto/controlse/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/crypto/libsodium/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/crypto/libtomcrypt/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/crypto/mbedtls/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/crypto/openssl_mbedtls_wrapper/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/crypto/tinycrypt/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/crypto/tinydtls/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/crypto/wolfssl/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/crypto/controlse/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/crypto/libsodium/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/crypto/libtomcrypt/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/crypto/mbedtls/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/crypto/openssl_mbedtls_wrapper/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/crypto/tinycrypt/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/crypto/tinydtls/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/crypto/wolfssl/Kconfig"
 endmenu # Cryptography Library Support

@@ -1,9 +1,9 @@
-use alloc::vec::Vec;
 use crate::{
     parse_svg_path, Color, MaskRasterOptions, Point, Rect, Surface, SvgDocument, SvgFillRule,
-    SvgId, SvgPaint, SvgFilterEffect, SvgPath, SvgPathCommand, SvgStrokeCap, SvgStrokeJoin,
+    SvgFilterEffect, SvgId, SvgPaint, SvgPath, SvgPathCommand, SvgStrokeCap, SvgStrokeJoin,
     VectorMaskScratch,
 };
+use alloc::vec::Vec;
 
 struct SvgA8Mask {
     rect: Rect,
@@ -102,29 +102,56 @@ impl Surface {
                 });
             }
             match node.filter {
-                SvgFilterEffect::DropShadow { dx, dy, radius, color: shadow } => {
-                    let shadow_rect = Rect::new(
-                        rect.x + dx as i32,
-                        rect.y + dy as i32,
-                        rect.w,
-                        rect.h,
+                SvgFilterEffect::DropShadow {
+                    dx,
+                    dy,
+                    radius,
+                    color: shadow,
+                } => {
+                    let shadow_rect =
+                        Rect::new(rect.x + dx as i32, rect.y + dy as i32, rect.w, rect.h);
+                    let shadow_color = Color::rgba(
+                        shadow.r,
+                        shadow.g,
+                        shadow.b,
+                        shadow.a.saturating_sub((radius.min(24) * 3) as u8),
                     );
-                    let shadow_color = Color::rgba(shadow.r, shadow.g, shadow.b, shadow.a.saturating_sub((radius.min(24) * 3) as u8));
                     self.fill_svg_path_rule(shadow_rect, &node.path, shadow_color, node.fill_rule);
                 }
                 SvgFilterEffect::Blur(radius) => {
                     if radius > 0 {
                         let blur_color = Color::rgba(color.r, color.g, color.b, node.opacity / 3);
-                        self.fill_svg_path_rule(expand_rect(rect, radius as i32), &node.path, blur_color, node.fill_rule);
+                        self.fill_svg_path_rule(
+                            expand_rect(rect, radius as i32),
+                            &node.path,
+                            blur_color,
+                            node.fill_rule,
+                        );
                     }
                 }
                 SvgFilterEffect::None => {}
             }
-            let clip_path = if node.has_clip_path { Some(&node.clip_path) } else { None };
-            let mask_path = if node.has_mask_path { Some(&node.mask_path) } else { None };
+            let clip_path = if node.has_clip_path {
+                Some(&node.clip_path)
+            } else {
+                None
+            };
+            let mask_path = if node.has_mask_path {
+                Some(&node.mask_path)
+            } else {
+                None
+            };
             let mask_scratch = self.build_svg_a8_mask(rect, clip_path, mask_path);
             if let Some(fill) = resolve_svg_fill(node.fill, color, node.opacity) {
-                self.fill_svg_path_paint_masked(rect, &node.path, fill, node.fill_rule, clip_path, mask_path, mask_scratch.as_ref());
+                self.fill_svg_path_paint_masked(
+                    rect,
+                    &node.path,
+                    fill,
+                    node.fill_rule,
+                    clip_path,
+                    mask_path,
+                    mask_scratch.as_ref(),
+                );
             }
             if let Some(stroke) = resolve_svg_paint(node.stroke, color, node.opacity) {
                 self.draw_svg_path_styled_masked(
@@ -185,21 +212,31 @@ impl Surface {
                     sub_start = current;
                     have_current = true;
                     if cap == SvgStrokeCap::Round {
-                        self.fill_masked_svg_circle(rect, current.x, current.y, radius, color, clip_path, mask_path, a8_mask);
+                        self.fill_masked_svg_circle(
+                            rect, current.x, current.y, radius, color, clip_path, mask_path,
+                            a8_mask,
+                        );
                     }
                 }
                 SvgPathCommand::LineTo(point) => {
                     let next = map_svg_point(rect, path.view_box, point);
                     if have_current {
-                        self.draw_masked_svg_line(rect, current, next, stroke, color, clip_path, mask_path, a8_mask);
+                        self.draw_masked_svg_line(
+                            rect, current, next, stroke, color, clip_path, mask_path, a8_mask,
+                        );
                         match join {
                             SvgStrokeJoin::Round => {
-                                self.fill_masked_svg_circle(rect, current.x, current.y, radius, color, clip_path, mask_path, a8_mask);
+                                self.fill_masked_svg_circle(
+                                    rect, current.x, current.y, radius, color, clip_path,
+                                    mask_path, a8_mask,
+                                );
                             }
                             SvgStrokeJoin::Bevel | SvgStrokeJoin::Miter => {}
                         }
                         if cap == SvgStrokeCap::Round {
-                            self.fill_masked_svg_circle(rect, next.x, next.y, radius, color, clip_path, mask_path, a8_mask);
+                            self.fill_masked_svg_circle(
+                                rect, next.x, next.y, radius, color, clip_path, mask_path, a8_mask,
+                            );
                         } else if cap == SvgStrokeCap::Square {
                             self.fill_masked_svg_rect(
                                 rect,
@@ -216,9 +253,20 @@ impl Surface {
                 }
                 SvgPathCommand::Close => {
                     if have_current {
-                        self.draw_masked_svg_line(rect, current, sub_start, stroke, color, clip_path, mask_path, a8_mask);
+                        self.draw_masked_svg_line(
+                            rect, current, sub_start, stroke, color, clip_path, mask_path, a8_mask,
+                        );
                         if join == SvgStrokeJoin::Round {
-                            self.fill_masked_svg_circle(rect, sub_start.x, sub_start.y, radius, color, clip_path, mask_path, a8_mask);
+                            self.fill_masked_svg_circle(
+                                rect,
+                                sub_start.x,
+                                sub_start.y,
+                                radius,
+                                color,
+                                clip_path,
+                                mask_path,
+                                a8_mask,
+                            );
                         }
                         current = sub_start;
                     }
@@ -270,10 +318,23 @@ impl Surface {
         a8_mask: Option<&SvgA8Mask>,
     ) {
         match paint {
-            SvgPaint::Color(color) => self.fill_svg_path_rule_masked(rect, path, color, rule, clip_path, mask_path, a8_mask),
-            SvgPaint::CurrentColor => self.fill_svg_path_rule_masked(rect, path, Color::rgba(255, 255, 255, 255), rule, clip_path, mask_path, a8_mask),
-            SvgPaint::LinearGradient(start, end) => self.fill_svg_path_gradient_masked(rect, path, start, end, false, rule, clip_path, mask_path, a8_mask),
-            SvgPaint::RadialGradient(start, end) => self.fill_svg_path_gradient_masked(rect, path, start, end, true, rule, clip_path, mask_path, a8_mask),
+            SvgPaint::Color(color) => self
+                .fill_svg_path_rule_masked(rect, path, color, rule, clip_path, mask_path, a8_mask),
+            SvgPaint::CurrentColor => self.fill_svg_path_rule_masked(
+                rect,
+                path,
+                Color::rgba(255, 255, 255, 255),
+                rule,
+                clip_path,
+                mask_path,
+                a8_mask,
+            ),
+            SvgPaint::LinearGradient(start, end) => self.fill_svg_path_gradient_masked(
+                rect, path, start, end, false, rule, clip_path, mask_path, a8_mask,
+            ),
+            SvgPaint::RadialGradient(start, end) => self.fill_svg_path_gradient_masked(
+                rect, path, start, end, true, rule, clip_path, mask_path, a8_mask,
+            ),
             SvgPaint::None => {}
         }
     }
@@ -325,7 +386,9 @@ impl Surface {
                         let x0 = xs[i].max(clipped.x);
                         let x1 = xs[i + 1].min(clipped.right());
                         if x0 < x1 {
-                            self.fill_masked_svg_span(rect, y, x0, x1, color, clip_path, mask_path, a8_mask);
+                            self.fill_masked_svg_span(
+                                rect, y, x0, x1, color, clip_path, mask_path, a8_mask,
+                            );
                         }
                         i += 2;
                     }
@@ -343,7 +406,9 @@ impl Surface {
                             let x0 = start_x.max(clipped.x);
                             let x1 = xs[i].min(clipped.right());
                             if x0 < x1 {
-                                self.fill_masked_svg_span(rect, y, x0, x1, color, clip_path, mask_path, a8_mask);
+                                self.fill_masked_svg_span(
+                                    rect, y, x0, x1, color, clip_path, mask_path, a8_mask,
+                                );
                             }
                         }
                         i += 1;
@@ -398,7 +463,9 @@ impl Surface {
                         let x0 = xs[i].max(clipped.x);
                         let x1 = xs[i + 1].min(clipped.right());
                         if x0 < x1 {
-                            self.fill_masked_svg_span(rect, y, x0, x1, color, clip_path, mask_path, a8_mask);
+                            self.fill_masked_svg_span(
+                                rect, y, x0, x1, color, clip_path, mask_path, a8_mask,
+                            );
                         }
                         i += 2;
                     }
@@ -416,7 +483,9 @@ impl Surface {
                             let x0 = start_x.max(clipped.x);
                             let x1 = xs[i].min(clipped.right());
                             if x0 < x1 {
-                                self.fill_masked_svg_span(rect, y, x0, x1, color, clip_path, mask_path, a8_mask);
+                                self.fill_masked_svg_span(
+                                    rect, y, x0, x1, color, clip_path, mask_path, a8_mask,
+                                );
                             }
                         }
                         i += 1;
@@ -534,7 +603,16 @@ impl Surface {
         };
         let mut y = clipped.y;
         while y < clipped.bottom() {
-            self.fill_masked_svg_span(svg_rect, y, clipped.x, clipped.right(), color, clip_path, mask_path, a8_mask);
+            self.fill_masked_svg_span(
+                svg_rect,
+                y,
+                clipped.x,
+                clipped.right(),
+                color,
+                clip_path,
+                mask_path,
+                a8_mask,
+            );
             y += 1;
         }
     }
@@ -640,8 +718,18 @@ impl Surface {
             1 => {
                 self.fill_circle(cx, cy, r, color);
                 let cut = Color::rgba(0, 0, 0, 120);
-                self.draw_wide_line(Point::new(cx - r / 2, cy), Point::new(cx + r / 2, cy), stroke, cut);
-                self.draw_wide_line(Point::new(cx, cy - r / 2), Point::new(cx, cy + r / 2), stroke, cut);
+                self.draw_wide_line(
+                    Point::new(cx - r / 2, cy),
+                    Point::new(cx + r / 2, cy),
+                    stroke,
+                    cut,
+                );
+                self.draw_wide_line(
+                    Point::new(cx, cy - r / 2),
+                    Point::new(cx, cy + r / 2),
+                    stroke,
+                    cut,
+                );
             }
             2 => {
                 self.fill_round_rect(rect, (r / 3) as u16, color);
@@ -664,34 +752,104 @@ impl Surface {
                 let cut = Color::rgba(0, 0, 0, 120);
                 self.fill_circle(cx - r / 3, cy - r / 5, (r / 5).max(1), cut);
                 self.fill_circle(cx + r / 3, cy - r / 5, (r / 5).max(1), cut);
-                self.draw_wide_line(Point::new(cx - r / 3, cy + r / 3), Point::new(cx + r / 4, cy + r / 3), stroke, cut);
+                self.draw_wide_line(
+                    Point::new(cx - r / 3, cy + r / 3),
+                    Point::new(cx + r / 4, cy + r / 3),
+                    stroke,
+                    cut,
+                );
             }
             4 => {
-                self.draw_wide_line(Point::new(cx - r / 2, cy + r / 2), Point::new(cx, cy - r / 2), stroke, color);
-                self.draw_wide_line(Point::new(cx, cy - r / 2), Point::new(cx + r / 2, cy + r / 2), stroke, color);
-                self.draw_wide_line(Point::new(cx - r / 4, cy + r / 8), Point::new(cx + r / 4, cy + r / 8), stroke, color);
+                self.draw_wide_line(
+                    Point::new(cx - r / 2, cy + r / 2),
+                    Point::new(cx, cy - r / 2),
+                    stroke,
+                    color,
+                );
+                self.draw_wide_line(
+                    Point::new(cx, cy - r / 2),
+                    Point::new(cx + r / 2, cy + r / 2),
+                    stroke,
+                    color,
+                );
+                self.draw_wide_line(
+                    Point::new(cx - r / 4, cy + r / 8),
+                    Point::new(cx + r / 4, cy + r / 8),
+                    stroke,
+                    color,
+                );
             }
             5 => self.draw_vector_placeholder(rect, color),
             6 => {
                 self.fill_circle(cx - r / 2, cy - r / 3, (r / 4).max(1), color);
                 self.fill_circle(cx + r / 2, cy - r / 3, (r / 4).max(1), color);
                 self.fill_circle(cx, cy + r / 2, (r / 4).max(1), color);
-                self.draw_wide_line(Point::new(cx - r / 2, cy - r / 3), Point::new(cx, cy + r / 2), stroke, color);
-                self.draw_wide_line(Point::new(cx + r / 2, cy - r / 3), Point::new(cx, cy + r / 2), stroke, color);
+                self.draw_wide_line(
+                    Point::new(cx - r / 2, cy - r / 3),
+                    Point::new(cx, cy + r / 2),
+                    stroke,
+                    color,
+                );
+                self.draw_wide_line(
+                    Point::new(cx + r / 2, cy - r / 3),
+                    Point::new(cx, cy + r / 2),
+                    stroke,
+                    color,
+                );
             }
             7 => {
                 self.fill_circle(cx, cy, r, color);
                 let cut = Color::rgba(0, 0, 0, 150);
                 self.fill_circle(cx, cy, (r / 2).max(1), cut);
                 let spoke = stroke.max(2);
-                self.draw_wide_line(Point::new(cx - r, cy), Point::new(cx - r / 2, cy), spoke, color);
-                self.draw_wide_line(Point::new(cx + r / 2, cy), Point::new(cx + r, cy), spoke, color);
-                self.draw_wide_line(Point::new(cx, cy - r), Point::new(cx, cy - r / 2), spoke, color);
-                self.draw_wide_line(Point::new(cx, cy + r / 2), Point::new(cx, cy + r), spoke, color);
-                self.draw_wide_line(Point::new(cx - r / 2, cy - r / 2), Point::new(cx - r / 4, cy - r / 4), spoke, color);
-                self.draw_wide_line(Point::new(cx + r / 4, cy + r / 4), Point::new(cx + r / 2, cy + r / 2), spoke, color);
-                self.draw_wide_line(Point::new(cx + r / 2, cy - r / 2), Point::new(cx + r / 4, cy - r / 4), spoke, color);
-                self.draw_wide_line(Point::new(cx - r / 4, cy + r / 4), Point::new(cx - r / 2, cy + r / 2), spoke, color);
+                self.draw_wide_line(
+                    Point::new(cx - r, cy),
+                    Point::new(cx - r / 2, cy),
+                    spoke,
+                    color,
+                );
+                self.draw_wide_line(
+                    Point::new(cx + r / 2, cy),
+                    Point::new(cx + r, cy),
+                    spoke,
+                    color,
+                );
+                self.draw_wide_line(
+                    Point::new(cx, cy - r),
+                    Point::new(cx, cy - r / 2),
+                    spoke,
+                    color,
+                );
+                self.draw_wide_line(
+                    Point::new(cx, cy + r / 2),
+                    Point::new(cx, cy + r),
+                    spoke,
+                    color,
+                );
+                self.draw_wide_line(
+                    Point::new(cx - r / 2, cy - r / 2),
+                    Point::new(cx - r / 4, cy - r / 4),
+                    spoke,
+                    color,
+                );
+                self.draw_wide_line(
+                    Point::new(cx + r / 4, cy + r / 4),
+                    Point::new(cx + r / 2, cy + r / 2),
+                    spoke,
+                    color,
+                );
+                self.draw_wide_line(
+                    Point::new(cx + r / 2, cy - r / 2),
+                    Point::new(cx + r / 4, cy - r / 4),
+                    spoke,
+                    color,
+                );
+                self.draw_wide_line(
+                    Point::new(cx - r / 4, cy + r / 4),
+                    Point::new(cx - r / 2, cy + r / 2),
+                    spoke,
+                    color,
+                );
             }
             _ => self.draw_vector_placeholder(rect, color),
         }
@@ -720,7 +878,12 @@ fn map_svg_point(rect: Rect, view_box: Rect, point: Point) -> Point {
 fn map_svg_rect(rect: Rect, view_box: Rect, local: Rect) -> Rect {
     let p0 = map_svg_point(rect, view_box, Point::new(local.x, local.y));
     let p1 = map_svg_point(rect, view_box, Point::new(local.right(), local.bottom()));
-    Rect::from_edges(p0.x.min(p1.x), p0.y.min(p1.y), p0.x.max(p1.x), p0.y.max(p1.y))
+    Rect::from_edges(
+        p0.x.min(p1.x),
+        p0.y.min(p1.y),
+        p0.x.max(p1.x),
+        p0.y.max(p1.y),
+    )
 }
 
 fn svg_path_screen_bounds<const N: usize>(rect: Rect, path: &SvgPath<N>) -> Option<Rect> {
@@ -748,7 +911,12 @@ fn svg_path_screen_bounds<const N: usize>(rect: Rect, path: &SvgPath<N>) -> Opti
         i += 1;
     }
     if seen {
-        Some(Rect::from_edges(min_x, min_y, max_x.saturating_add(1), max_y.saturating_add(1)))
+        Some(Rect::from_edges(
+            min_x,
+            min_y,
+            max_x.saturating_add(1),
+            max_y.saturating_add(1),
+        ))
     } else {
         None
     }
@@ -777,16 +945,38 @@ fn resolve_svg_fill(paint: SvgPaint, current: Color, opacity: u8) -> Option<SvgP
             if alpha == 0 {
                 None
             } else {
-                Some(SvgPaint::Color(Color::rgba(color.r, color.g, color.b, alpha)))
+                Some(SvgPaint::Color(Color::rgba(
+                    color.r, color.g, color.b, alpha,
+                )))
             }
         }
         SvgPaint::LinearGradient(start, end) => Some(SvgPaint::LinearGradient(
-            Color::rgba(start.r, start.g, start.b, alpha_mul(alpha_mul(start.a, opacity), current.a)),
-            Color::rgba(end.r, end.g, end.b, alpha_mul(alpha_mul(end.a, opacity), current.a)),
+            Color::rgba(
+                start.r,
+                start.g,
+                start.b,
+                alpha_mul(alpha_mul(start.a, opacity), current.a),
+            ),
+            Color::rgba(
+                end.r,
+                end.g,
+                end.b,
+                alpha_mul(alpha_mul(end.a, opacity), current.a),
+            ),
         )),
         SvgPaint::RadialGradient(start, end) => Some(SvgPaint::RadialGradient(
-            Color::rgba(start.r, start.g, start.b, alpha_mul(alpha_mul(start.a, opacity), current.a)),
-            Color::rgba(end.r, end.g, end.b, alpha_mul(alpha_mul(end.a, opacity), current.a)),
+            Color::rgba(
+                start.r,
+                start.g,
+                start.b,
+                alpha_mul(alpha_mul(start.a, opacity), current.a),
+            ),
+            Color::rgba(
+                end.r,
+                end.g,
+                end.b,
+                alpha_mul(alpha_mul(end.a, opacity), current.a),
+            ),
         )),
     }
 }
@@ -795,14 +985,10 @@ fn resolve_svg_paint(paint: SvgPaint, current: Color, opacity: u8) -> Option<Col
     let (base, alpha) = match paint {
         SvgPaint::None => return None,
         SvgPaint::CurrentColor => (current, alpha_mul(current.a, opacity)),
-        SvgPaint::Color(color) => (
-            color,
-            alpha_mul(alpha_mul(color.a, opacity), current.a),
-        ),
-        SvgPaint::LinearGradient(start, _) | SvgPaint::RadialGradient(start, _) => (
-            start,
-            alpha_mul(alpha_mul(start.a, opacity), current.a),
-        ),
+        SvgPaint::Color(color) => (color, alpha_mul(alpha_mul(color.a, opacity), current.a)),
+        SvgPaint::LinearGradient(start, _) | SvgPaint::RadialGradient(start, _) => {
+            (start, alpha_mul(alpha_mul(start.a, opacity), current.a))
+        }
     };
     if alpha == 0 {
         None
@@ -892,8 +1078,12 @@ fn svg_mask_allows<const N: usize>(
     x: i32,
     y: i32,
 ) -> bool {
-    let in_clip = clip_path.map(|path| svg_path_contains(rect, path, x, y)).unwrap_or(true);
-    let in_mask = mask_path.map(|path| svg_path_contains(rect, path, x, y)).unwrap_or(true);
+    let in_clip = clip_path
+        .map(|path| svg_path_contains(rect, path, x, y))
+        .unwrap_or(true);
+    let in_mask = mask_path
+        .map(|path| svg_path_contains(rect, path, x, y))
+        .unwrap_or(true);
     in_clip && in_mask
 }
 

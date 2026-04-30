@@ -157,7 +157,9 @@ impl NuttxFramebuffer {
             };
             let (pixels, software_buffered) = if has_pan_buffer {
                 (
-                    pinfo.fbmem.add(draw_yoffset as usize * pinfo.stride as usize),
+                    pinfo
+                        .fbmem
+                        .add(draw_yoffset as usize * pinfo.stride as usize),
                     false,
                 )
             } else if frame_len <= BACKBUFFER_BYTES {
@@ -214,18 +216,8 @@ impl NuttxFramebuffer {
 
     pub fn present(&mut self) -> PresentStats {
         if self.pan_enabled {
-            if !self.can_pan() {
-                return PresentStats::skipped();
-            }
-
             self.plane.yoffset = self.draw_yoffset;
-            let ret = unsafe {
-                ioctl(
-                    self.fd,
-                    FBIOPAN_DISPLAY,
-                    &mut self.plane as *mut PlaneInfo,
-                )
-            };
+            let ret = unsafe { ioctl(self.fd, FBIOPAN_DISPLAY, &mut self.plane as *mut PlaneInfo) };
             if ret >= 0 {
                 self.draw_yoffset = if self.draw_yoffset == 0 {
                     self.height as u32
@@ -235,7 +227,8 @@ impl NuttxFramebuffer {
                 self.reset_draw_surface();
                 return PresentStats::pan();
             }
-            return PresentStats::skipped();
+
+            return self.copy_draw_page_to_visible();
         }
 
         if !self.software_buffered || self.fbmem.is_null() || self.frame_len == 0 {
@@ -251,6 +244,24 @@ impl NuttxFramebuffer {
             );
         }
         PresentStats::copied(bytes)
+    }
+
+    fn copy_draw_page_to_visible(&mut self) -> PresentStats {
+        if self.fbmem.is_null() || self.frame_len == 0 {
+            return PresentStats::skipped();
+        }
+
+        let visible_yoffset = self.visible_yoffset();
+        unsafe {
+            let src = self
+                .fbmem
+                .add(self.draw_yoffset as usize * self.plane.stride as usize);
+            let dst = self
+                .fbmem
+                .add(visible_yoffset as usize * self.plane.stride as usize);
+            core::ptr::copy_nonoverlapping(src, dst, self.frame_len);
+        }
+        PresentStats::copied(self.frame_len)
     }
 
     fn copy_visible_to_draw_page(&mut self) -> u32 {
@@ -334,7 +345,11 @@ impl NuttxInput {
         self.pump_touch(queue, timestamp_us) + self.pump_keyboard(queue, timestamp_us)
     }
 
-    fn pump_touch<const N: usize>(&mut self, queue: &mut InputQueue<N>, timestamp_us: u64) -> usize {
+    fn pump_touch<const N: usize>(
+        &mut self,
+        queue: &mut InputQueue<N>,
+        timestamp_us: u64,
+    ) -> usize {
         if self.touch_fd < 0 {
             return 0;
         }
@@ -393,7 +408,11 @@ impl NuttxInput {
         pushed
     }
 
-    fn pump_keyboard<const N: usize>(&mut self, queue: &mut InputQueue<N>, timestamp_us: u64) -> usize {
+    fn pump_keyboard<const N: usize>(
+        &mut self,
+        queue: &mut InputQueue<N>,
+        timestamp_us: u64,
+    ) -> usize {
         if self.key_fd < 0 {
             return 0;
         }

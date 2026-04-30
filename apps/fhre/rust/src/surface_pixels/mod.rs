@@ -1,4 +1,7 @@
-use crate::{raster::rgb565, BlendMode, Color, ImageFormat, ImageId, MaskKind, MaskSpec, PixelFormat, Point, Surface};
+use crate::{
+    raster::rgb565, BlendMode, Color, ImageFormat, ImageId, MaskKind, MaskSpec, PixelFormat, Point,
+    Surface,
+};
 
 impl Surface {
     pub(crate) fn put_pixel_blend(&mut self, x: i32, y: i32, color: Color, blend: BlendMode) {
@@ -90,21 +93,20 @@ impl Surface {
         if view.width == 0 || view.height == 0 {
             return 255;
         }
-        let sx = ((point.x - rect.x)
-            .max(0)
-            .saturating_mul(view.width as i32)
+        let sx = ((point.x - rect.x).max(0).saturating_mul(view.width as i32)
             / rect.w.max(1) as i32)
             .min(view.width as i32 - 1) as u16;
-        let sy = ((point.y - rect.y)
-            .max(0)
-            .saturating_mul(view.height as i32)
+        let sy = ((point.y - rect.y).max(0).saturating_mul(view.height as i32)
             / rect.h.max(1) as i32)
             .min(view.height as i32 - 1) as u16;
         match view.format {
-            ImageFormat::A8 | ImageFormat::Rgba8888 => view.sample(sx, sy, 255).map(|c| c.a).unwrap_or(255),
-            ImageFormat::Rgb565 | ImageFormat::Rgb888 => view.sample(sx, sy, 255).map(|c| {
-                ((c.r as u16 + c.g as u16 + c.b as u16) / 3) as u8
-            }).unwrap_or(255),
+            ImageFormat::A8 | ImageFormat::Rgba8888 => {
+                view.sample(sx, sy, 255).map(|c| c.a).unwrap_or(255)
+            }
+            ImageFormat::Rgb565 | ImageFormat::Rgb888 => view
+                .sample(sx, sy, 255)
+                .map(|c| ((c.r as u16 + c.g as u16 + c.b as u16) / 3) as u8)
+                .unwrap_or(255),
         }
     }
 
@@ -146,13 +148,21 @@ impl Surface {
         }
     }
 
-    pub(crate) fn fill_rect_opaque_fast(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Color) -> bool {
+    pub(crate) fn fill_rect_opaque_fast(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        color: Color,
+    ) -> bool {
         match self.format {
             PixelFormat::Rgb565 => {
                 let raw = rgb565(color);
                 for y in y0..y1 {
                     unsafe {
-                        let mut ptr = self.pixels.add(y as usize * self.stride + x0 as usize * 2) as *mut u16;
+                        let mut ptr =
+                            self.pixels.add(y as usize * self.stride + x0 as usize * 2) as *mut u16;
                         for _ in x0..x1 {
                             core::ptr::write_unaligned(ptr, raw);
                             ptr = ptr.add(1);
@@ -193,7 +203,14 @@ impl Surface {
         }
     }
 
-    pub(crate) fn fill_rect_alpha_fast(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Color) -> bool {
+    pub(crate) fn fill_rect_alpha_fast(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        color: Color,
+    ) -> bool {
         if color.a == 0 {
             return true;
         }
@@ -207,7 +224,8 @@ impl Surface {
                 let inv_alpha = 255u32.saturating_sub(alpha);
                 for y in y0..y1 {
                     unsafe {
-                        let mut ptr = self.pixels.add(y as usize * self.stride + x0 as usize * 2) as *mut u16;
+                        let mut ptr =
+                            self.pixels.add(y as usize * self.stride + x0 as usize * 2) as *mut u16;
                         for _ in x0..x1 {
                             let raw = core::ptr::read_unaligned(ptr);
                             let dst_r = (((raw >> 11) & 0x1f) as u32 * 255) / 31;
@@ -233,7 +251,9 @@ impl Surface {
                 }
                 for y in y0..y1 {
                     unsafe {
-                        let mut ptr = self.pixels.add(y as usize * self.stride + x0 as usize * step);
+                        let mut ptr = self
+                            .pixels
+                            .add(y as usize * self.stride + x0 as usize * step);
                         for _ in x0..x1 {
                             let out = color.over(self.read_pixel_ptr(ptr));
                             self.write_pixel_ptr(ptr, out);
@@ -251,7 +271,9 @@ fn rounded_rect_mask_alpha(rect: crate::Rect, radius: u16, point: Point) -> u8 {
     if radius == 0 {
         return 255;
     }
-    let radius = (radius as i32).min(rect.w as i32 / 2).min(rect.h as i32 / 2);
+    let radius = (radius as i32)
+        .min(rect.w as i32 / 2)
+        .min(rect.h as i32 / 2);
     if radius <= 0 {
         return 255;
     }
@@ -266,8 +288,16 @@ fn rounded_rect_mask_alpha(rect: crate::Rect, radius: u16, point: Point) -> u8 {
     if !(in_left || in_right) || !(in_top || in_bottom) {
         return 255;
     }
-    let dx = if in_left { left_center - point.x } else { point.x - right_center };
-    let dy = if in_top { top_center - point.y } else { point.y - bottom_center };
+    let dx = if in_left {
+        left_center - point.x
+    } else {
+        point.x - right_center
+    };
+    let dy = if in_top {
+        top_center - point.y
+    } else {
+        point.y - bottom_center
+    };
     if dx.saturating_mul(dx) + dy.saturating_mul(dy) <= radius.saturating_mul(radius) {
         255
     } else {
@@ -293,4 +323,18 @@ fn blend_channel(src: u8, dst: u8, mode: BlendMode) -> u8 {
         BlendMode::Multiply => ((src as u16 * dst as u16) / 255) as u8,
         BlendMode::Difference => src.abs_diff(dst),
     }
+}
+
+pub(crate) fn blend_rgb565_raw(dst: u16, src_r: u32, src_g: u32, src_b: u32, alpha: u32) -> u16 {
+    let alpha = alpha.min(255);
+    let inv_alpha = 255u32.saturating_sub(alpha);
+    let dst_r = (((dst >> 11) & 0x1f) as u32 * 255) / 31;
+    let dst_g = (((dst >> 5) & 0x3f) as u32 * 255) / 63;
+    let dst_b = ((dst & 0x1f) as u32 * 255) / 31;
+    let r = (src_r.min(255) * alpha + dst_r * inv_alpha) / 255;
+    let g = (src_g.min(255) * alpha + dst_g * inv_alpha) / 255;
+    let b = (src_b.min(255) * alpha + dst_b * inv_alpha) / 255;
+    (((r as u16 >> 3) & 0x1f) << 11)
+        | (((g as u16 >> 2) & 0x3f) << 5)
+        | ((b as u16 >> 3) & 0x1f)
 }

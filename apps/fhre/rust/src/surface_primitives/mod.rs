@@ -133,8 +133,16 @@ impl Surface {
                     let in_top = y < top_center;
                     let in_bottom = y > bottom_center;
                     if (in_left || in_right) && (in_top || in_bottom) {
-                        let dx = if in_left { left_center - x } else { x - right_center };
-                        let dy = if in_top { top_center - y } else { y - bottom_center };
+                        let dx = if in_left {
+                            left_center - x
+                        } else {
+                            x - right_center
+                        };
+                        let dy = if in_top {
+                            top_center - y
+                        } else {
+                            y - bottom_center
+                        };
                         if dx.saturating_mul(dx) + dy.saturating_mul(dy) > r2 {
                             x += 1;
                             continue;
@@ -166,7 +174,10 @@ impl Surface {
                 x -= 1;
             }
             if x >= 0 {
-                self.fill_rect(Rect::new(cx - x, cy + y, (x.saturating_mul(2) + 1) as u16, 1), color);
+                self.fill_rect(
+                    Rect::new(cx - x, cy + y, (x.saturating_mul(2) + 1) as u16, 1),
+                    color,
+                );
             }
         }
     }
@@ -176,7 +187,9 @@ impl Surface {
             return;
         }
 
-        let radius = (radius as i32).min(rect.w as i32 / 2).min(rect.h as i32 / 2);
+        let radius = (radius as i32)
+            .min(rect.w as i32 / 2)
+            .min(rect.h as i32 / 2);
         if radius <= 0 {
             self.fill_rect(rect, color);
             return;
@@ -185,9 +198,17 @@ impl Surface {
         let inner_w = rect.w.saturating_sub((radius as u16).saturating_mul(2));
         let inner_h = rect.h.saturating_sub((radius as u16).saturating_mul(2));
         self.fill_rect(Rect::new(rect.x + radius, rect.y, inner_w, rect.h), color);
-        self.fill_rect(Rect::new(rect.x, rect.y + radius, radius as u16, inner_h), color);
         self.fill_rect(
-            Rect::new(rect.right() - radius, rect.y + radius, radius as u16, inner_h),
+            Rect::new(rect.x, rect.y + radius, radius as u16, inner_h),
+            color,
+        );
+        self.fill_rect(
+            Rect::new(
+                rect.right() - radius,
+                rect.y + radius,
+                radius as u16,
+                inner_h,
+            ),
             color,
         );
 
@@ -210,8 +231,16 @@ impl Surface {
                 if !(in_left || in_right) || !(in_top || in_bottom) {
                     continue;
                 }
-                let dx = if in_left { left_center - x } else { x - right_center };
-                let dy = if in_top { top_center - y } else { y - bottom_center };
+                let dx = if in_left {
+                    left_center - x
+                } else {
+                    x - right_center
+                };
+                let dy = if in_top {
+                    top_center - y
+                } else {
+                    y - bottom_center
+                };
 
                 if dx.saturating_mul(dx) + dy.saturating_mul(dy) <= r2 {
                     self.put_pixel(x, y, color);
@@ -221,7 +250,11 @@ impl Surface {
     }
 
     pub fn draw_border(&mut self, rect: Rect, style: BorderStyle) {
-        if rect.is_empty() || style.width == 0 || style.color.a == 0 || style.sides == BorderSides::NONE {
+        if rect.is_empty()
+            || style.width == 0
+            || style.color.a == 0
+            || style.sides == BorderSides::NONE
+        {
             return;
         }
 
@@ -260,7 +293,12 @@ impl Surface {
         }
         if style.sides.contains(BorderSides::BOTTOM) {
             self.fill_rect(
-                Rect::from_edges(outer.x, rect.bottom() - inset, outer.right(), rect.bottom() + outset),
+                Rect::from_edges(
+                    outer.x,
+                    rect.bottom() - inset,
+                    outer.right(),
+                    rect.bottom() + outset,
+                ),
                 style.color,
             );
         }
@@ -272,7 +310,12 @@ impl Surface {
         }
         if style.sides.contains(BorderSides::RIGHT) {
             self.fill_rect(
-                Rect::from_edges(rect.right() - inset, outer.y, rect.right() + outset, outer.bottom()),
+                Rect::from_edges(
+                    rect.right() - inset,
+                    outer.y,
+                    rect.right() + outset,
+                    outer.bottom(),
+                ),
                 style.color,
             );
         }
@@ -284,17 +327,43 @@ impl Surface {
         }
         if radius == 0 {
             self.draw_line(rect.x, rect.y, rect.right() - 1, rect.y, color);
-            self.draw_line(rect.x, rect.bottom() - 1, rect.right() - 1, rect.bottom() - 1, color);
+            self.draw_line(
+                rect.x,
+                rect.bottom() - 1,
+                rect.right() - 1,
+                rect.bottom() - 1,
+                color,
+            );
             self.draw_line(rect.x, rect.y, rect.x, rect.bottom() - 1, color);
-            self.draw_line(rect.right() - 1, rect.y, rect.right() - 1, rect.bottom() - 1, color);
+            self.draw_line(
+                rect.right() - 1,
+                rect.y,
+                rect.right() - 1,
+                rect.bottom() - 1,
+                color,
+            );
             return;
         }
 
-        let r = (radius as i32).min(rect.w as i32 / 2).min(rect.h as i32 / 2);
+        let r = (radius as i32)
+            .min(rect.w as i32 / 2)
+            .min(rect.h as i32 / 2);
         self.draw_line(rect.x + r, rect.y, rect.right() - r - 1, rect.y, color);
-        self.draw_line(rect.x + r, rect.bottom() - 1, rect.right() - r - 1, rect.bottom() - 1, color);
+        self.draw_line(
+            rect.x + r,
+            rect.bottom() - 1,
+            rect.right() - r - 1,
+            rect.bottom() - 1,
+            color,
+        );
         self.draw_line(rect.x, rect.y + r, rect.x, rect.bottom() - r - 1, color);
-        self.draw_line(rect.right() - 1, rect.y + r, rect.right() - 1, rect.bottom() - r - 1, color);
+        self.draw_line(
+            rect.right() - 1,
+            rect.y + r,
+            rect.right() - 1,
+            rect.bottom() - r - 1,
+            color,
+        );
 
         let cx0 = rect.x + r;
         let cx1 = rect.right() - r - 1;
@@ -337,7 +406,8 @@ impl Surface {
             let k = i as i32;
             let alpha = ((style.color.a as u16 * i as u16) / style.width.max(1) as u16 / 2) as u8;
             let color = Color::rgba(style.color.r, style.color.g, style.color.b, alpha);
-            let shadow = Rect::from_edges(base.x - k, base.y - k, base.right() + k, base.bottom() + k);
+            let shadow =
+                Rect::from_edges(base.x - k, base.y - k, base.right() + k, base.bottom() + k);
             self.fill_round_rect(shadow, style.radius.saturating_add(i), color);
             i -= 1;
         }
@@ -461,7 +531,13 @@ impl Surface {
         }
     }
 
-    pub fn fill_gradient_triangle(&mut self, p0: Point, p1: Point, p2: Point, style: TriangleStyle) {
+    pub fn fill_gradient_triangle(
+        &mut self,
+        p0: Point,
+        p1: Point,
+        p2: Point,
+        style: TriangleStyle,
+    ) {
         let min_x = clamp_i32(min3_i32(p0.x, p1.x, p2.x), 0, self.width as i32);
         let max_x = clamp_i32(max3_i32(p0.x, p1.x, p2.x), 0, self.width as i32 - 1);
         let min_y = clamp_i32(min3_i32(p0.y, p1.y, p2.y), 0, self.height as i32);
@@ -577,10 +653,16 @@ fn gradient_color(style: GradientStyle, fallback: Color, rect: Rect, point: Poin
         } => {
             let vx = end.x - start.x;
             let vy = end.y - start.y;
-            let len2 = vx.saturating_mul(vx).saturating_add(vy.saturating_mul(vy)).max(1);
+            let len2 = vx
+                .saturating_mul(vx)
+                .saturating_add(vy.saturating_mul(vy))
+                .max(1);
             let px = point.x - start.x;
             let py = point.y - start.y;
-            let dot = px.saturating_mul(vx).saturating_add(py.saturating_mul(vy)).clamp(0, len2);
+            let dot = px
+                .saturating_mul(vx)
+                .saturating_add(py.saturating_mul(vy))
+                .clamp(0, len2);
             start_color.mix(end_color, ((dot * 255) / len2) as u8)
         }
         GradientStyle::Radial {

@@ -6,7 +6,7 @@
 #
 
 menu "FHRE Demo"
-source "/home/uan-gpd/codes/FeatherOS/apps/examples/fhre_demo/base/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/examples/fhre_demo/clang/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/examples/fhre_demo/rust/Kconfig"
+source "$APPSDIR/examples/fhre_demo/base/Kconfig"
+source "$APPSDIR/examples/fhre_demo/clang/Kconfig"
+source "$APPSDIR/examples/fhre_demo/rust/Kconfig"
 endmenu # FHRE Demo

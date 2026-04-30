@@ -1,0 +1,42 @@
+# class relative-path max-bytes
+#
+# runtime: lightweight assets that may be used by normal demo/runtime paths.
+# fixture: codec parity assets that are intentionally loaded only during prewarm.
+# license: resource license text kept with the installed fixture set.
+
+runtime images/demo_icon.fraw 8192
+runtime images/demo_logo.png 1024
+runtime images/demo_photo.jpg 4096
+
+fixture images/fixture_filter_rgba.png 1024
+fixture images/fixture_palette_trns.png 1024
+fixture images/fixture_gray_alpha16.png 1024
+fixture images/fixture_gray_trns.png 1024
+fixture images/lvgl_16bit_rgba.png 1024
+fixture images/lvgl_palette.png 8192
+fixture images/fixture_adam7_rgba.png 1024
+fixture images/lvgl_cmyk.jpg 4096
+fixture images/lvgl_exif_90.jpg 4096
+fixture images/lvgl_exif_180.jpg 4096
+fixture images/lvgl_exif_270.jpg 4096
+fixture images/fixture_invalid.bin 1024
+fixture images/fixture_truncated.png 1024
+fixture images/lvgl_progressive.jpg 8192
+fixture images/fixture_progressive_cmyk.jpg 1024
+
+fixture fonts/test_gpos_one.ttf 16384
+fixture fonts/test_kern_one.otf 4096
+
+runtime svg/windows.svg 1024
+runtime svg/microsoft.svg 1024
+runtime svg/qr-code.svg 1024
+runtime svg/award.svg 1024
+runtime svg/grouped.svg 1024
+runtime svg/complex_style_gradient.svg 1024
+runtime svg/bootstrap_bezier2.svg 1024
+runtime svg/bootstrap_cloud_rain.svg 1024
+runtime svg/bootstrap_star_fill.svg 1024
+runtime svg/clip_mask_filter.svg 2048
+fixture svg/overflow.svg 1024
+
+license licenses/bootstrap_icons_LICENSE 2048

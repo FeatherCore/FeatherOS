@@ -1,6 +1,6 @@
 use crate::{
-    fixed_div, fixed_from_i32, fixed_mul, fixed_to_i32, Color, DepthSpan, DrawCommand, DrawList, Fixed16,
-    ImageId, Point, Rect, Size, TexCoord, FIXED_ONE,
+    fixed_div, fixed_from_i32, fixed_mul, fixed_to_i32, Color, DepthSpan, DrawCommand, DrawList,
+    Fixed16, ImageId, Point, Rect, Size, TexCoord, FIXED_ONE,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,7 +73,9 @@ impl Transform3D {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Projection {
-    Orthographic { scale: Fixed16 },
+    Orthographic {
+        scale: Fixed16,
+    },
     Perspective {
         fov_y: i16,
         near: Fixed16,
@@ -342,7 +344,11 @@ impl MeshRef {
 }
 
 impl TexturedMeshRef {
-    pub const fn new(vertices: &'static [TexturedVertex3D], indices: &'static [u16], image: ImageId) -> Self {
+    pub const fn new(
+        vertices: &'static [TexturedVertex3D],
+        indices: &'static [u16],
+        image: ImageId,
+    ) -> Self {
         Self {
             vertices,
             indices,

@@ -6,5 +6,5 @@
 #
 
 menu "Wing Desktop Environment"
-source "/home/uan-gpd/codes/FeatherOS/apps/wing_old/rust/Kconfig"
+source "$APPSDIR/wing_old/rust/Kconfig"
 endmenu # Wing Desktop Environment

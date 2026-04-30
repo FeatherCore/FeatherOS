@@ -6,6 +6,6 @@
 #
 
 menu "Feather Hybrid Render Engine (FHRE)"
-source "/home/uan-gpd/codes/FeatherOS/apps/fhre/clang/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/fhre/rust/Kconfig"
+source "$APPSDIR/fhre/clang/Kconfig"
+source "$APPSDIR/fhre/rust/Kconfig"
 endmenu # Feather Hybrid Render Engine (FHRE)

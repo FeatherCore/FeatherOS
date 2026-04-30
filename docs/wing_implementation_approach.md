@@ -11,6 +11,27 @@ FHRE = no_std Rust 纯 3D 轻量游戏/图形引擎核心 + 绘制后端抽象 +
 
 FHRE 的“纯 3D 世界模型”不是历史参考，而是底层主线：Wing 的 UI 节点也应该是 FHRE 3D 世界中位于默认 Screen Canvas 平面 `z=0` 的对象。Wing 第一版不需要做复杂 3D UI，但它不能绕过 `Transform3D + Camera + Screen Canvas` 这套模型。FHRE 本身仍然要具备游戏运行时能力，后续 Wing 内的游戏应用可以直接基于 FHRE 开发。
 
+## V3.9 对 FHRE 硬件可插手管线的适配边界
+
+V3.9 仍不扩 Wing route/page。Wing 只消费 FHRE 暴露的 draw/resource/cache/stats API，不拥有 DMA2D/GPU draw chain，也不拥有 PNG/JPEG/TTF/SVG 硬件 decoder stage。
+
+- Wing 页面层继续只允许 `UiBuilder -> UiTree -> FHRE DrawCommand`，不得直接 decode 图片/SVG/字体，不得私有 raster/mask/layer/framebuffer。
+- FHRE 新增的 `DrawChain` / `DrawChainOp` / `DrawChainStats` 只作为 backend 可接管边界和 HUD 观察入口。Wing 不生成私有 chain，不绕过 `DrawList`，也不按具体芯片分支页面绘制逻辑。
+- FHRE 新增的 `CodecPipelinePlan` / `CodecStagePlan` / `CodecPipelineStats` 只描述资源 prewarm/decode 的硬件候选阶段。Wing 资源仍通过 FHRE `ResourceLoader + ImageCache/GlyphCache/GlyphRunCache/SvgDocumentCache` 进入 cache；draw 热路径 cache miss 只显示 fallback。
+- `RenderStats` 中的 draw chain 和 codec pipeline counters 可用于 Shell 性能定位：如果后续接入真实 DMA2D/GPU/decoder backend，Wing 仍只看 FHRE stats 判断 submitted/fallback/unsupported，不在页面层复制策略。
+- `wing_demo` 本阶段继续验证 Home、All Apps、Settings、Notifications、App Switcher 和 FHRE Sample 可运行，并加载 manifest 允许的小 PNG/FRAW 资源；大图缺失仍走 FHRE fallback。
+
+## V3.8 对 FHRE 绘制/资源管线的适配边界
+
+V3.8 仍不扩 Wing route/page。Wing 只作为 FHRE draw/resource/dirty/cache/stats 的 Shell 压力场景，验证 Home、All Apps、Settings、Notifications、App Switcher 和 FHRE Sample 能稳定消费 FHRE API。
+
+- Wing 页面层继续只允许 `UiBuilder -> UiTree -> FHRE DrawCommand`，不得直接 decode PNG/JPEG/TTF/OTF/SVG，不得私有 raster/mask/layer/framebuffer。
+- Wing 资源继续通过 FHRE `ResourceLoader`、`ImageCache`、`GlyphCache`、`GlyphRunCache`、`SvgCache` 或 `SvgDocumentCache` 的 prewarm/cache 边界进入绘制；draw 热路径 cache miss 只显示 fallback。
+- FHRE V3.8 新增的 `SvgDocumentCache` / `SvgDocumentCacheStats` 和 `RenderStats::mark_svg_document_cache()` 是 Shell 调试时的共享观察入口。Wing 不复制 SVG document 解析逻辑，只消费 FHRE resolver/cache。
+- NuttX sim 下的 present copy fallback、Kconfig `$APPSDIR` 和 ROMFS 资源安装策略是 Wing 稳定启动的底线；`wing_build.sh` 继续同时验证 `wing_demo` 和 `fhre_demo`。
+- Wing ROMFS 资源改为 `apps/wing/resource/windows10_mobile/romfs_manifest.txt` allowlist + byte budget。默认轻量 profile 只安装小 PNG 图标、FRAW 图标和 license；W10M 大图、壁纸和照片只保留在源码树作参考，未显式列入 manifest 不会进入运行时镜像。
+- `fhre_build.sh` / `wing_build.sh` 会在 sim profile 切换时清理旧 `etc/fhre`、`etc/wing` 和 `etctmp.*`，避免 stale ROMFS 把历史 Wing 大图或字体重新打进 FHRE/Wing 镜像。
+
 ## V3.6 对 FHRE 性能基线的适配边界
 
 本轮 Wing 仍不扩 route/page，也不追像素级 W10M 复刻。Wing 只消费 FHRE V3.6 的 draw/cache/resolver 能力，并把 Shell 卡顿定位继续交给 FHRE HUD：
@@ -46,7 +67,7 @@ FHRE V3.5 对 Wing 的实际意义：
 
 ## 当前实现进度
 
-截至 2026-04-30，新的 Wing Rust 原型已经具备这些最小能力：
+截至 2026-05-01，新的 Wing Rust 原型已经具备这些最小能力：
 
 - `no_std` crate 可独立 `cargo check`。
 - `wing_demo` 可打开 NuttX framebuffer 并调用 Wing 绘制入口。
@@ -57,7 +78,7 @@ FHRE V3.5 对 Wing 的实际意义：
 - `apply_ui_frame()` 已可按稳定 `UiKey` 将本帧 `UiBuilder` spec 应用到 `UiTree`，并记录 created/updated/removed 和 dirty rect。
 - `ActionId` / `UiHit` 已具备最小 action 映射和 screen-space hit-test 能力。
 - `AppId` / `AppEntry` / `AppRegistry<N>` / `AppSurfaceState` 已具备固定容量 app 数据模型，Home tiles、All Apps、App Switcher 和 Sample App 开始接到同一组 app/action/id 语义上。
-- `WingAssetId` / `WingAssetManifest` 已建立 Windows 10 Mobile 资源 manifest。`/home/uan-gpd/codes/windows-10-mobile-lvgl/squareline/assets/*.png` 已导入到 `apps/wing/resource/windows10_mobile/assets`，并在 NuttX sim ROMFS 中安装为 `/etc/wing/resource/windows10_mobile/assets/*.png`；上游 MIT `LICENSE` 随资源保留。
+- `WingAssetId` / `WingAssetManifest` 已建立 Windows 10 Mobile 资源 id/path manifest。`/home/uan-gpd/codes/windows-10-mobile-lvgl/squareline/assets/*.png` 已导入到 `apps/wing/resource/windows10_mobile/assets`，但 NuttX sim ROMFS 只安装 `romfs_manifest.txt` 中通过 byte budget 的轻量资源；上游 MIT `LICENSE` 随资源保留。
 - 上游只存在于 LVGL `native-with-alpha` C 数组里的图标已预提取为 FHRE `.fraw` raw 图片资源，当前包括 `padlock`、`settings_back`、`stars_ic`、`wifi_icon`、`wp_about`、`wp_account`、`wp_apps`、`wp_devices`、`wp_network`、`wp_personalization`、`wp_privacy`、`wp_time`，仓库路径为 `apps/wing/resource/windows10_mobile/raw`，ROMFS 路径为 `/etc/wing/resource/windows10_mobile/raw/*.fraw`。
 - Wing 的 `UiKind::Image` / `ImageNode` 已接入 `UiBuilder -> UiTree -> FHRE DrawCommand::DrawImage*`，页面可以声明图片资源、fit 和 tint，而不直接读文件、不直接操作 framebuffer。
 - `ShellMode` / `ShellAction` / `ShellState` 已具备最小 shell 状态承载和 action 分发能力；当前 route 已扩展为 `Home`、`AllApps`、`LockScreen`、`Cortana`、`Settings(SettingsRoute)`、`App(AppId)`、`Notifications`、`AppSwitcher`，通用 tile detail 仍作为演示页保留。
@@ -91,16 +112,16 @@ FHRE V3.5 对 Wing 的实际意义：
 - `wing_demo` 的大块 UI 状态和 `UiBuilder` 缓冲已从 NuttX 任务栈迁入持久 `WingDemoState`，sim 配置中的 `CONFIG_EXAMPLES_WING_DEMO_RUST_STACKSIZE` 提升到 `32768`，避免 8KB 默认栈在启动阶段溢出。
 - Wing demo 已增加第一版 Lumia/Windows 10 Mobile 风格 token：`LumiaMetrics` 根据屏幕短边推导状态栏、底部导航栏、Start padding、gap、tile size 和 debug 字体缩放；`LumiaTheme` 承载深色背景、强调色、半透明 panel、tile、文字和 nav bar 颜色。
 - Home/Start 已从居中玻璃面板改为更接近 windows-10-mobile-lvgl 的全屏 Start panel：深色背景、透明内容层、三列磁贴比例、wide tile、小 tile、All apps row、live tile icon opacity 动画和稳定 `ActionId` hit-test。
-- Home/Start 已开始使用上游 Windows 10 Mobile PNG 资源：Start tiles 可显示 `phone_ic.png`、`people_ic.png`、`outlook_ic.png`、`message_ic.png`、`news_tile.png`、`photo_tile.png` 等图标/图片；壁纸层可通过 FHRE `ImageCache` 读取 `img5.png`。
+- Home/Start 已开始使用上游 Windows 10 Mobile PNG 资源：Start tiles 默认只预热并安装小图标，例如 `phone_ic.png`、`people_ic.png`、`outlook_ic.png`、`message_ic.png`、`photos_ic.png`；大 tile 图和壁纸不进默认 ROMFS，命中时走 FHRE fallback。
 - Wing demo 启动时会通过 FHRE `ImageCache::prewarm()` 预热并 pin 常用 W10M 图标，例如 status/nav/settings 资源；route 切换后会在 draw 前显式 prewarm 当前页面资源，绘制热路径的 image resolver 只查 `ImageCache::view()`，cache miss 显示 fallback，不在绘制中 decode。
-- 本轮 Wing 不扩页面范围，只跟随 FHRE 图形能力 V3.5 / LVGL draw task parity 适配：资源路径可继续通过 `ImageCache` 获得 PNG/FRAW/JPEG fallback 能力；真实 TTF glyph、OTF/CFF Type2 最小 raster、Latin-only `GlyphRun` shaping、`GlyphIdResolver`、固定容量 `GlyphRunCache` 和 `TextLayout`、可选 kerning、glyph advance label wrap、multi-path SVG document、linear/radial gradient、简单 clipPath/filter/mask 统计、真实有界 A8 vector mask scratch、group opacity/nested transform、stroke cap/join、textured mesh、dirty/present stats、`FillStyle`/`GradientStyle`/`BorderStyle`/`BorderAlign`/`ShadowStyle`/`LineStyle`/`ArcStyle`/`TextStyle`/`ImageDrawStyle`/`TriangleStyle`/`MaskSpec`/`LayerSpec` 等接口先在 `fhre_demo` 验收。`ImageDrawStyle::blend` 已进入 FHRE 真实像素合成，`DrawImageStyled::clip_radius` 只负责图片圆角裁剪，边框由单独 `DrawBorder` 声明；PNG/JPEG/TTF/SVG 子集继续由 FHRE 自研 codec/cache 承担。Wing 页面仍只声明 `UiBuilder -> UiTree -> FHRE DrawCommand`，不直接操作 framebuffer 或运行时 decode。FHRE HUD 现在显示上一帧 aggregate draw stats，并以 fill/border/line/arc/image/text/vector/triangle/layer/mask、codec missing/invalid/truncated/unsupported/overflow、progressive JPEG/CFF/OpenType/SVG feature counters、V3.5 vector mask/glyph-run/glyph-id/text layout counters、per-task dispatch、top fallback task、fixture pass/mismatch、draw-task fallback 和 software/accelerated/fallback path 等口径定位 Shell 卡顿来源；fixture manifest 让 FHRE 的 PNG/FRAW/JPEG/TTF/SVG 正向和负向预热、fallback 统计可重复验收。
+- 本轮 Wing 不扩页面范围，只跟随 FHRE 图形能力 V3.x / LVGL draw task parity 适配：资源路径可继续通过 `ImageCache` 获得 PNG/FRAW/JPEG fallback 能力；真实 TTF glyph、OTF/CFF Type2 最小 raster、Latin-only `GlyphRun` shaping、`GlyphIdResolver`、固定容量 `GlyphRunCache` 和 `TextLayout`、可选 kerning、glyph advance label wrap、multi-path SVG document、linear/radial gradient、简单 clipPath/filter/mask 统计、真实有界 A8 vector mask scratch、group opacity/nested transform、stroke cap/join、textured mesh、dirty/present stats、`FillStyle`/`GradientStyle`/`BorderStyle`/`BorderAlign`/`ShadowStyle`/`LineStyle`/`ArcStyle`/`TextStyle`/`ImageDrawStyle`/`TriangleStyle`/`MaskSpec`/`LayerSpec` 等接口先在 `fhre_demo` 验收。`ImageDrawStyle::blend` 已进入 FHRE 真实像素合成，`DrawImageStyled::clip_radius` 只负责图片圆角裁剪，边框由单独 `DrawBorder` 声明；PNG/JPEG/TTF/SVG 子集继续由 FHRE 自研 codec/cache 承担。Wing 页面仍只声明 `UiBuilder -> UiTree -> FHRE DrawCommand`，不直接操作 framebuffer 或运行时 decode。FHRE HUD 现在显示上一帧 aggregate draw stats，并以 fill/border/line/arc/image/text/vector/triangle/layer/mask、codec missing/invalid/truncated/unsupported/overflow、draw chain candidate/fallback、codec pipeline candidate/fallback、progressive JPEG/CFF/OpenType/SVG feature counters、vector mask/glyph-run/glyph-id/text layout counters、per-task dispatch、top fallback/top chain task、fixture pass/mismatch、draw-task fallback 和 software/accelerated/fallback path 等口径定位 Shell 卡顿来源；fixture manifest 让 FHRE 的 PNG/FRAW/JPEG/TTF/SVG 正向和负向预热、fallback 统计可重复验收。
 - FHRE 已新增真实 `BeginLayer/EndLayer`、`PushMask/PopMask`、`PushBitmapMask`、有界 `LayerScratch`、rounded/bitmap mask、blurred shadow、layer opacity/recolor/blur 合成、图片圆角 mask 裁剪、边框 inside/center/outside 语义、line cap/join 字段和顶点色 triangle；Wing 后续的 notification/settings/card 视觉应只消费这些 FHRE draw API，不在 Wing 页面层复制 LVGL widget/object/style cascade，也不直接触碰 framebuffer。
 - Home 底部 handle 已替换为 Windows Phone 风格三键 nav bar：Back、Windows logo、Search 使用上游 `wp_back.png`、`wp_logo.png`、`wp_search.png` 资源，点击 Search 进入 Cortana overlay。
 - Notification overlay 已改为全屏下拉式深色 panel：顶部标题与日期、两行三列 quick actions、通知卡片列表和底部 accent handle，布局仍通过固定容量 `GridLayout` / `StackLayout` / clip 管线生成。
 - Notification quick actions 已从手绘占位 icon 切换为上游 PNG 资源，例如 `wifi_ic.png`、`bluetooth_ic.png`、`airplane_ic.png`、`brightness_ic.png` 和 `settings_ic.png`。
 - Home 已新增 Settings 入口，`ACTION_SETTINGS` 会进入独立 `ShellMode::Settings`，不再落入通用 tile detail；左右滑或 Back/Home 键仍返回 Home。
 - Home 已新增 All Apps 入口，`ACTION_ALL_APPS` 会进入独立 `ShellMode::AllApps`；All Apps 页面使用 `AppRegistry` 固定列表绘制完整纵向 app row，内容区带 clip 和滚动 offset，点击 Settings/Lock/News/Stars/Thermal/Sample App/功能 demo 会回到同一 action router。
-- Lock Screen 页面已接入 `ShellMode::LockScreen`，使用 `img2.png` 壁纸、时间日期和 raw `padlock.fraw`；上滑返回 Home，资源缺失时仍保持 fallback 绘制。
+- Lock Screen 页面已接入 `ShellMode::LockScreen`，使用时间日期和 raw `padlock.fraw`；旧 `img2.png` 壁纸属于大图参考资源，默认 ROMFS 不安装，资源缺失时仍保持 fallback 绘制。
 - Cortana overlay 已接入 `ShellMode::Cortana`，由底部 Search nav action 打开，使用 Windows Phone 黑色搜索面板、搜索 glyph 和返回 Home 行为。
 - All Apps 已开始读取 `ShellState::app_surface_state(AppId)`，可把 app 的 stopped/running/focused/preview 最小生命周期语义显示为 row subtitle 和右侧 `RUN/FOCUS/CARD` 状态标记；这让 Home tiles、All Apps、App Switcher 和 Sample App 共享同一 app state，而不是各画各的假状态。
 - Settings 页面已作为第一版声明式 shell page 接入：全屏深色 panel、Windows Phone 风格标题区、设置列表 rows、亮度 slider 和底部 nav bar 都走 `UiBuilder -> UiTree -> FHRE DrawCommand`，设置主列表和子页面共享滚动状态，页面实现位于 `demo_settings/mod.rs`。
@@ -109,11 +130,12 @@ FHRE V3.5 对 Wing 的实际意义：
 - FHRE `DrawSvgIcon` 的轻量 fallback 已新增 `SvgId(7)` settings gear，用于 Settings tile 和 Settings 页面 header；后续 SVG parser/cache 可替换该 fallback，而不改变 Wing 的 `IconNode`/`SvgId` 接口。
 - Home 的 FHRE tile 已接入第一版全屏 `ShellMode::App(AppId)`：点击后进入 `APP_FHRE_SAMPLE` 的独立应用 surface，不再绘制 Home/状态栏背景；该页面用 FHRE `DrawList`、`DrawTriangle`、depth sort、line/grid/star primitive 绘制 pseudo-3D 图形演示，并叠加少量 Wing HUD，左右滑或 Back/Home 键返回 Home。
 - App Switcher 已开始感知 `running_app: Option<AppId>`：当 FHRE Sample、News、Stars 或 Thermal 被启动后，应用切换器会展示 running app card；App Switcher 的 overlay tree 已接入 hit-test，点击 card 会重新进入对应 `ShellMode::App(AppId)`。`ShellState::app_surface_state()` 会把 App Switcher 中的运行应用暴露为 preview 状态，供 All Apps 和后续 task UI 复用。这仍是内置 route 原型，不是完整独立 task lifecycle。
-- News/Stars/Thermal 内置 app 已继续使用 W10M 资源：News 使用 `news_image.png` / `news_tile.png`，Stars 使用 `sky_bg.png` / `stars_ic.fraw`，Thermal 使用 `embedded_tile.png` / `weather_ic.png` 并保留 FHRE 绘制的低功耗传感器网格。
+- News/Stars/Thermal 内置 app 已继续验证 W10M 资源 fallback：`stars_ic.fraw` / `weather_ic.png` 等轻量资源进入默认 ROMFS，`news_image.png` / `news_tile.png` / `sky_bg.png` / `embedded_tile.png` 等大图只作参考，不安装时由 FHRE fallback 和 cache stats 暴露。
 - Wing Rust crate 已完成第二轮目录模块化拆分：`lib.rs` 现在只声明模块和 re-export 公共能力，具体实现已下沉到 `action/mod.rs`、`animation/mod.rs`、`builder/mod.rs`、`demo/mod.rs`、`demo_home/mod.rs`、`demo_launcher/mod.rs`、`demo_notifications/mod.rs`、`demo_sample_app/mod.rs`、`demo_settings/mod.rs`、`demo_switcher/mod.rs`、`demo_detail/mod.rs`、`demo_overlay/mod.rs`、`demo_status/mod.rs`、`demo_wallpaper/mod.rs`、`key/mod.rs`、`layout/mod.rs`、`node/mod.rs`、`shell/mod.rs`、`spec/mod.rs`、`theme/mod.rs`、`tree/mod.rs`、`tree_layout/mod.rs`、`tree_render/mod.rs`。
 - Wing 已把 `UiKey` 与布局规则从二级 `ui/key`、`ui/layout` 扁平为根模块 `key`、`layout`，使 `lib.rs` 直接声明所有当前顶层 `mod.rs`；`UiTree` 的节点组件类型下沉到 `node/mod.rs`，layout/clip 解析下沉到 `tree_layout/mod.rs`，render build/hit-test 下沉到 `tree_render/mod.rs`，`tree/mod.rs` 保持为 UI frame diff、组件写入、父子链和 dirty 状态机实现。
 - `wing_demo` 的页面绘制也已拆成可独立演进的 shell page modules：wallpaper、status、launcher、all apps、home nav、notification、app switcher、tile detail、settings、sample app 和 overlay submit 分离。后续添加真实 app surface lifecycle 时应该沿用同一结构，而不是再把页面绘制堆回 `demo/mod.rs`。
 - `prelude/mod.rs` 已作为外部 demo 和未来 Wing SDK 的常用公开能力入口；这也明确了 `lib.rs` 的定位是 crate root/API facade，而不是承载实现的长期文件。
+- V3.9 阶段 Wing 不新增页面，只跟随 FHRE 的 `SvgDocumentCache`、image/glyph/glyph-run cache、draw chain stats、codec pipeline stats、dirty present 和 render stats 边界做兼容消费；Shell 页面仍不拥有图片/SVG/字体解析、mask/layer、硬件链或 framebuffer 逻辑。
 
 当前视觉状态：
 
@@ -131,6 +153,7 @@ FHRE V3.5 对 Wing 的实际意义：
 - Notification/AppSwitcher 的完整真实数据模型和 page transition 状态。
 - App UI SDK / Game SDK。
 - 更完整的页面能力：All Apps/Settings 现在已有第一版滚动闭环和最小 app surface 状态展示，但还缺搜索、动态安装、页面转场和真实独立 task/surface lifecycle。结构上当前 `demo` 和 `tree` 已完成基础拆分，下一步应优先补真实数据和 transition，再视复杂度拆 `spec` 的 style/text/icon 子语义。
+- W10M 参考大图还没有轻量化转换流水线；默认 ROMFS 已拒绝安装这些大图，后续需要补 downscale/quantize/FRAW atlas 或多 profile resource pack。
 
 ## 当前新增 API 边界
 
@@ -142,7 +165,7 @@ FHRE V3.5 对 Wing 的实际意义：
 - `AppSurfaceState`：最小应用 surface lifecycle 状态，当前用于明确 stopped/running/focused/preview 语义；`ShellState::app_surface_state(AppId)` 是 shell 页面查询该状态的稳定入口。
 - `ScrollState`：固定容量滚动状态，当前由 `ShellState::all_apps_scroll` 和 `ShellState::settings_scroll` 持有；纵向 drag/键盘 Up/Down 更新 offset，页面绘制阶段根据内容高度设置 max offset。
 - `WingAssetId`：Wing 资源稳定 id，可映射到 FHRE `ImageId`，避免页面代码硬编码 NuttX 文件路径；PNG 资源保持原 ID，新增 raw/FRAW 图标追加 ID。
-- `WingAssetManifest`：Windows 10 Mobile 资源路径 manifest，当前映射到 `/etc/wing/resource/windows10_mobile/assets/*.png` 和 `/etc/wing/resource/windows10_mobile/raw/*.fraw`。
+- `WingAssetManifest`：Windows 10 Mobile 资源路径 manifest，当前映射到 `/etc/wing/resource/windows10_mobile/assets/*.png` 和 `/etc/wing/resource/windows10_mobile/raw/*.fraw`；实际进入 ROMFS 的文件还必须通过 `romfs_manifest.txt` allowlist 和 byte budget。
 - `UiKind::Image` / `ImageNode`：声明式 image 节点，render build 输出 FHRE `DrawCommand::DrawImage`、`DrawImageFit` 或 `DrawImageTint`，实际 decode/cache/fit/tint 由 FHRE runtime 完成。
 - `SettingsRoute`：Settings 子页面 route，当前包含 `Main`、`System`、`Network`、`Personalization`、`About`、`Account`、`Apps`、`Devices`、`Privacy`、`Time`，避免把所有设置页塞进一个布尔状态。
 - `ShellMode::AllApps`、`ShellMode::LockScreen`、`ShellMode::Cortana`、`ShellMode::Settings(SettingsRoute)`、`ShellMode::App(AppId)`：当前 Shell 路由边界。
@@ -152,11 +175,12 @@ FHRE V3.5 对 Wing 的实际意义：
 - `cargo check --manifest-path apps/wing/rust/Cargo.toml` 必须通过。
 - `cargo check --manifest-path apps/examples/wing_demo/rust/Cargo.toml` 必须通过。
 - `nuttx/wing_build.sh` 必须通过。
+- `wing_build.sh` 必须在 ROMFS 安装阶段执行 `romfs_manifest.txt` budget 检查；大图未列入 manifest 时不得进入镜像，列入但超预算必须构建失败。
 - NSH 中运行 `wing_demo` 后，Home 应保持 Lumia/Windows 10 Mobile 风格；点击 All Apps 可进入完整纵向 app 列表并可拖动/键盘滚动；点击 Settings 可进入主设置页并进入 System/Personalization/Network/About/Account/Apps/Devices/Privacy/Time；点击 FHRE Sample 可进入全屏 FHRE app；上滑进入 App Switcher 后可通过 running app card 恢复应用。
 - NSH 中运行 `wing_demo` 后，应能进入 Home、All Apps、Lock Screen、Cortana、Notifications、Settings 子页面、App Switcher、FHRE Sample、News、Stars、Thermal。
-- NSH 中运行 `wing_demo` 时，Home/Notification/Settings/Lock/App 页面应实际加载 `/etc/wing/resource/windows10_mobile/assets/*.png` 和 `/etc/wing/resource/windows10_mobile/raw/*.fraw`；资源加载失败时应显示 fallback 视觉并保持 shell 可操作。
+- NSH 中运行 `wing_demo` 时，Home/Notification/Settings/Lock/App 页面只应加载 manifest 允许的小 PNG/FRAW 资源；未安装的大图资源必须显示 FHRE fallback 视觉并保持 shell 可操作。
 - NSH 中运行 `wing_demo` 时，连续拖动 All Apps/Settings 不应出现输入队列被 move flood 卡住；资源首次加载应优先命中 prewarm/pinned cache。
-- NSH 中运行 `wing_demo` 时，Home/AllApps/Settings/Notification/App/Switcher 不新增页面能力，只验证共享 runtime、view-only image resolver、route prewarm 和 dirty present adapter 是否让交互保持响应。
+- NSH 中运行 `wing_demo` 时，Home/AllApps/Settings/Notification/App/Switcher 不新增页面能力，只验证共享 runtime、view-only image/SVG resolver、route prewarm、cache stats、FHRE draw chain/codec pipeline stats 和 dirty present adapter 是否让交互保持响应。
 
 ## Windows 10 Mobile 资源路径
 
@@ -165,22 +189,22 @@ FHRE V3.5 对 Wing 的实际意义：
 ```text
 source: /home/uan-gpd/codes/windows-10-mobile-lvgl/squareline/assets/*.png
 repo:   apps/wing/resource/windows10_mobile/assets/*.png
-ROMFS:  /etc/wing/resource/windows10_mobile/assets/*.png
+ROMFS:  /etc/wing/resource/windows10_mobile/assets/*.png (manifest allowlist only)
 
 source: /home/uan-gpd/codes/windows-10-mobile-lvgl/src/ui/images/*.c
 repo:   apps/wing/resource/windows10_mobile/raw/*.fraw
-ROMFS:  /etc/wing/resource/windows10_mobile/raw/*.fraw
+ROMFS:  /etc/wing/resource/windows10_mobile/raw/*.fraw (manifest allowlist only)
 ```
 
-这些 PNG/FRAW 是运行时 UI 资源，不是截图预览。截图仍只作为文档和视觉验收参考。Wing 页面只使用 `WingAssetId`，demo/platform glue 通过 `ResourceLoader` 读取 ROMFS 文件，FHRE `PngDecoder/FrawDecoder + ImageCache` 负责解码和复用 decoded image。
+这些 PNG/FRAW 是候选 UI 资源，不是截图预览。真正进入 NuttX ROMFS 的运行时资源必须列在 `apps/wing/resource/windows10_mobile/romfs_manifest.txt` 并通过 byte budget；未列入的大图只作为参考素材留在源码树。Wing 页面只使用 `WingAssetId`，demo/platform glue 通过 `ResourceLoader` 读取 ROMFS 文件，FHRE `PngDecoder/FrawDecoder + ImageCache` 负责解码和复用 decoded image。
 
 当前第一阶段使用的资源包括：
 
-- Start tiles: `phone_ic.png`、`people_ic.png`、`outlook_ic.png`、`message_ic.png`、`news_tile.png`、`photo_tile.png`。
+- Start tiles: `phone_ic.png`、`people_ic.png`、`outlook_ic.png`、`message_ic.png`、`photos_ic.png`。
 - Status / quick actions: `wifi_ic.png`、`bluetooth_ic.png`、`airplane_ic.png`、`battery_ic.png`、`brightness_ic.png`。
 - Settings: `settings_ic.png`、`wp_settings.png`、`wp_system.png`。
 - Raw settings/app icons: `settings_back.fraw`、`padlock.fraw`、`stars_ic.fraw`、`wifi_icon.fraw`、`wp_about.fraw`、`wp_account.fraw`、`wp_apps.fraw`、`wp_devices.fraw`、`wp_network.fraw`、`wp_personalization.fraw`、`wp_privacy.fraw`、`wp_time.fraw`。
-- Wallpaper / app backgrounds: `img2.png`、`img5.png`、`news_image.png`、`news_tile.png`、`sky_bg.png`、`embedded_tile.png`。
+- Wallpaper / app backgrounds: 大图暂不进入默认 ROMFS；页面命中缺失资源时必须显示 FHRE fallback，并通过 cache/codec stats 暴露。
 - Nav resources: `wp_back.png`、`wp_logo.png`、`wp_search.png`、`wp_next.png`。
 
 平台策略：

@@ -6,6 +6,6 @@
 #
 
 menu "TEE Libraries Support"
-source "/home/uan-gpd/codes/FeatherOS/apps/tee/libteec/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/tee/optee_supplicant/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/tee/libteec/Kconfig"
+source "/home/uan-wsl2/codes/FeatherOS/apps/tee/optee_supplicant/Kconfig"
 endmenu # TEE Libraries Support

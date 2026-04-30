@@ -1,6 +1,7 @@
+use crate::svg::SvgDocumentCacheStats;
 use crate::{
-    DrawCommand, FrameStats, GlyphRunCacheStats, ImageCacheStats, LayerSpec, MaskSpec,
-    PixelFormat, PresentStats, Rect,
+    DrawCommand, FrameStats, GlyphRunCacheStats, ImageCacheStats, LayerSpec, MaskSpec, PixelFormat,
+    PresentStats, Rect,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,7 +110,9 @@ impl DrawFeatureFlags {
     pub const BLUR: Self = Self { bits: 1 << 12 };
     pub const VECTOR: Self = Self { bits: 1 << 13 };
     pub const THREE_D: Self = Self { bits: 1 << 14 };
-    pub const ALL_SOFTWARE: Self = Self { bits: (1 << 15) - 1 };
+    pub const ALL_SOFTWARE: Self = Self {
+        bits: (1 << 15) - 1,
+    };
 
     pub const fn bits(self) -> u32 {
         self.bits
@@ -174,6 +177,418 @@ impl DrawTaskCounters {
     }
 }
 
+pub const DEFAULT_DRAW_CHAIN_OPS: usize = 64;
+pub const DEFAULT_CODEC_PIPELINE_STAGES: usize = 16;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DrawChainOpKind {
+    SolidFill,
+    AlphaFill,
+    ImageBlit,
+    ImageBlend,
+    Clip,
+    MaskEnter,
+    MaskExit,
+    LayerEnter,
+    LayerExit,
+    FallbackRange,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawChainOp {
+    pub kind: DrawChainOpKind,
+    pub task: Option<DrawTaskKind>,
+    pub bounds: Rect,
+    pub clip: Option<Rect>,
+    pub command_start: u16,
+    pub command_len: u16,
+}
+
+impl DrawChainOp {
+    pub const EMPTY: Self = Self {
+        kind: DrawChainOpKind::FallbackRange,
+        task: None,
+        bounds: Rect::EMPTY,
+        clip: None,
+        command_start: 0,
+        command_len: 0,
+    };
+
+    pub const fn new(
+        kind: DrawChainOpKind,
+        task: Option<DrawTaskKind>,
+        bounds: Rect,
+        clip: Option<Rect>,
+        command_start: u16,
+        command_len: u16,
+    ) -> Self {
+        Self {
+            kind,
+            task,
+            bounds,
+            clip,
+            command_start,
+            command_len,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawChainStats {
+    pub candidates: u32,
+    pub ops: u32,
+    pub submitted: u32,
+    pub fallbacks: u32,
+    pub unsupported: u32,
+    pub overflows: u32,
+    pub task_hits: DrawTaskCounters,
+}
+
+impl DrawChainStats {
+    pub const fn new() -> Self {
+        Self {
+            candidates: 0,
+            ops: 0,
+            submitted: 0,
+            fallbacks: 0,
+            unsupported: 0,
+            overflows: 0,
+            task_hits: DrawTaskCounters::new(),
+        }
+    }
+
+    pub fn record_op(&mut self, op: DrawChainOp) {
+        if self.candidates == 0 {
+            self.candidates = 1;
+        }
+        self.ops = self.ops.saturating_add(1);
+        if op.kind == DrawChainOpKind::FallbackRange {
+            self.fallbacks = self.fallbacks.saturating_add(1);
+        }
+        if let Some(task) = op.task {
+            self.task_hits.increment(task);
+        }
+    }
+
+    pub fn record_submitted(&mut self) {
+        self.submitted = self.submitted.saturating_add(1);
+    }
+
+    pub fn record_unsupported(&mut self) {
+        self.unsupported = self.unsupported.saturating_add(1);
+        self.fallbacks = self.fallbacks.saturating_add(1);
+    }
+
+    pub fn record_overflow(&mut self) {
+        if self.candidates == 0 {
+            self.candidates = 1;
+        }
+        self.overflows = self.overflows.saturating_add(1);
+        self.fallbacks = self.fallbacks.saturating_add(1);
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.candidates = self.candidates.saturating_add(other.candidates);
+        self.ops = self.ops.saturating_add(other.ops);
+        self.submitted = self.submitted.saturating_add(other.submitted);
+        self.fallbacks = self.fallbacks.saturating_add(other.fallbacks);
+        self.unsupported = self.unsupported.saturating_add(other.unsupported);
+        self.overflows = self.overflows.saturating_add(other.overflows);
+        self.task_hits.merge(other.task_hits);
+    }
+
+    pub fn top_task(self) -> Option<(DrawTaskKind, u32)> {
+        let mut best_kind = None;
+        let mut best_count = 0u32;
+        let mut index = 0usize;
+        while index < DrawTaskKind::COUNT {
+            if let Some(kind) = DrawTaskKind::from_index(index) {
+                let count = self.task_hits.get(kind);
+                if count > best_count {
+                    best_kind = Some(kind);
+                    best_count = count;
+                }
+            }
+            index += 1;
+        }
+        best_kind.map(|kind| (kind, best_count))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawChainCapabilities {
+    pub supported: bool,
+    pub max_ops: usize,
+    pub features: DrawFeatureFlags,
+}
+
+impl DrawChainCapabilities {
+    pub const NONE: Self = Self {
+        supported: false,
+        max_ops: 0,
+        features: DrawFeatureFlags::NONE,
+    };
+
+    pub const fn new(supported: bool, max_ops: usize, features: DrawFeatureFlags) -> Self {
+        Self {
+            supported,
+            max_ops,
+            features,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DrawChainSubmitResult {
+    Submitted,
+    Unsupported,
+    Fallback,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawChain<const OPS: usize> {
+    ops: [DrawChainOp; OPS],
+    len: usize,
+    overflowed: bool,
+    stats: DrawChainStats,
+}
+
+impl<const OPS: usize> DrawChain<OPS> {
+    pub const fn new() -> Self {
+        Self {
+            ops: [DrawChainOp::EMPTY; OPS],
+            len: 0,
+            overflowed: false,
+            stats: DrawChainStats::new(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.len = 0;
+        self.overflowed = false;
+        self.stats = DrawChainStats::new();
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub const fn overflowed(&self) -> bool {
+        self.overflowed
+    }
+
+    pub const fn stats(&self) -> DrawChainStats {
+        self.stats
+    }
+
+    pub fn ops(&self) -> &[DrawChainOp] {
+        &self.ops[..self.len]
+    }
+
+    pub fn push(&mut self, op: DrawChainOp) -> bool {
+        if self.len >= OPS {
+            self.overflowed = true;
+            self.stats.record_overflow();
+            return false;
+        }
+        self.ops[self.len] = op;
+        self.len += 1;
+        self.stats.record_op(op);
+        true
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CodecStageKind {
+    Read,
+    Inspect,
+    Header,
+    Entropy,
+    Parse,
+    Transform,
+    Raster,
+    ColorConvert,
+    Pack,
+    CacheInsert,
+    Fallback,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CodecStagePlan {
+    pub kind: CodecStageKind,
+    pub hardware_candidate: bool,
+    pub supported: bool,
+}
+
+impl CodecStagePlan {
+    pub const EMPTY: Self = Self {
+        kind: CodecStageKind::Fallback,
+        hardware_candidate: false,
+        supported: false,
+    };
+
+    pub const fn new(kind: CodecStageKind, hardware_candidate: bool, supported: bool) -> Self {
+        Self {
+            kind,
+            hardware_candidate,
+            supported,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CodecAcceleratorCapabilities {
+    pub png: bool,
+    pub jpeg: bool,
+    pub fraw: bool,
+    pub ttf: bool,
+    pub svg: bool,
+    pub max_stages: usize,
+}
+
+impl CodecAcceleratorCapabilities {
+    pub const NONE: Self = Self {
+        png: false,
+        jpeg: false,
+        fraw: false,
+        ttf: false,
+        svg: false,
+        max_stages: 0,
+    };
+
+    pub const fn new(
+        png: bool,
+        jpeg: bool,
+        fraw: bool,
+        ttf: bool,
+        svg: bool,
+        max_stages: usize,
+    ) -> Self {
+        Self {
+            png,
+            jpeg,
+            fraw,
+            ttf,
+            svg,
+            max_stages,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CodecPipelineStats {
+    pub candidates: u32,
+    pub stages: u32,
+    pub hardware_candidates: u32,
+    pub fallbacks: u32,
+    pub unsupported: u32,
+    pub overflows: u32,
+}
+
+impl CodecPipelineStats {
+    pub const fn new() -> Self {
+        Self {
+            candidates: 0,
+            stages: 0,
+            hardware_candidates: 0,
+            fallbacks: 0,
+            unsupported: 0,
+            overflows: 0,
+        }
+    }
+
+    pub fn record_stage(&mut self, stage: CodecStagePlan) {
+        if self.candidates == 0 {
+            self.candidates = 1;
+        }
+        self.stages = self.stages.saturating_add(1);
+        if stage.hardware_candidate {
+            self.hardware_candidates = self.hardware_candidates.saturating_add(1);
+            if !stage.supported {
+                self.unsupported = self.unsupported.saturating_add(1);
+                self.fallbacks = self.fallbacks.saturating_add(1);
+            }
+        }
+        if stage.kind == CodecStageKind::Fallback {
+            self.fallbacks = self.fallbacks.saturating_add(1);
+        }
+    }
+
+    pub fn record_overflow(&mut self) {
+        if self.candidates == 0 {
+            self.candidates = 1;
+        }
+        self.overflows = self.overflows.saturating_add(1);
+        self.fallbacks = self.fallbacks.saturating_add(1);
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.candidates = self.candidates.saturating_add(other.candidates);
+        self.stages = self.stages.saturating_add(other.stages);
+        self.hardware_candidates = self
+            .hardware_candidates
+            .saturating_add(other.hardware_candidates);
+        self.fallbacks = self.fallbacks.saturating_add(other.fallbacks);
+        self.unsupported = self.unsupported.saturating_add(other.unsupported);
+        self.overflows = self.overflows.saturating_add(other.overflows);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CodecPipelinePlan<const STAGES: usize> {
+    stages: [CodecStagePlan; STAGES],
+    len: usize,
+    overflowed: bool,
+    stats: CodecPipelineStats,
+}
+
+impl<const STAGES: usize> CodecPipelinePlan<STAGES> {
+    pub const fn new() -> Self {
+        Self {
+            stages: [CodecStagePlan::EMPTY; STAGES],
+            len: 0,
+            overflowed: false,
+            stats: CodecPipelineStats::new(),
+        }
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub const fn overflowed(&self) -> bool {
+        self.overflowed
+    }
+
+    pub const fn stats(&self) -> CodecPipelineStats {
+        self.stats
+    }
+
+    pub fn stages(&self) -> &[CodecStagePlan] {
+        &self.stages[..self.len]
+    }
+
+    pub fn push(&mut self, stage: CodecStagePlan) -> bool {
+        if self.len >= STAGES {
+            self.overflowed = true;
+            self.stats.record_overflow();
+            return false;
+        }
+        self.stages[self.len] = stage;
+        self.len += 1;
+        self.stats.record_stage(stage);
+        true
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BackendCapabilities {
     pub pixel_format: PixelFormat,
@@ -210,6 +625,9 @@ pub struct BackendCapabilities {
     pub draw_3d: bool,
     pub software_draw_features: DrawFeatureFlags,
     pub accelerated_draw_features: DrawFeatureFlags,
+    pub draw_chain: bool,
+    pub max_chain_ops: usize,
+    pub chain_draw_features: DrawFeatureFlags,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -289,6 +707,12 @@ pub struct CodecStats {
     pub truncated: u32,
     pub unsupported: u32,
     pub overflow: u32,
+    pub pipeline_candidates: u32,
+    pub pipeline_stages: u32,
+    pub pipeline_hardware_candidates: u32,
+    pub pipeline_fallbacks: u32,
+    pub pipeline_unsupported: u32,
+    pub pipeline_overflows: u32,
 }
 
 impl CodecStats {
@@ -299,6 +723,12 @@ impl CodecStats {
             truncated: 0,
             unsupported: 0,
             overflow: 0,
+            pipeline_candidates: 0,
+            pipeline_stages: 0,
+            pipeline_hardware_candidates: 0,
+            pipeline_fallbacks: 0,
+            pipeline_unsupported: 0,
+            pipeline_overflows: 0,
         }
     }
 
@@ -338,6 +768,37 @@ impl CodecStats {
         self.truncated = self.truncated.saturating_add(other.truncated);
         self.unsupported = self.unsupported.saturating_add(other.unsupported);
         self.overflow = self.overflow.saturating_add(other.overflow);
+        self.pipeline_candidates = self
+            .pipeline_candidates
+            .saturating_add(other.pipeline_candidates);
+        self.pipeline_stages = self.pipeline_stages.saturating_add(other.pipeline_stages);
+        self.pipeline_hardware_candidates = self
+            .pipeline_hardware_candidates
+            .saturating_add(other.pipeline_hardware_candidates);
+        self.pipeline_fallbacks = self
+            .pipeline_fallbacks
+            .saturating_add(other.pipeline_fallbacks);
+        self.pipeline_unsupported = self
+            .pipeline_unsupported
+            .saturating_add(other.pipeline_unsupported);
+        self.pipeline_overflows = self
+            .pipeline_overflows
+            .saturating_add(other.pipeline_overflows);
+    }
+
+    pub fn record_pipeline(&mut self, stats: CodecPipelineStats) {
+        self.pipeline_candidates = self
+            .pipeline_candidates
+            .saturating_add(stats.candidates);
+        self.pipeline_stages = self.pipeline_stages.saturating_add(stats.stages);
+        self.pipeline_hardware_candidates = self
+            .pipeline_hardware_candidates
+            .saturating_add(stats.hardware_candidates);
+        self.pipeline_fallbacks = self.pipeline_fallbacks.saturating_add(stats.fallbacks);
+        self.pipeline_unsupported = self
+            .pipeline_unsupported
+            .saturating_add(stats.unsupported);
+        self.pipeline_overflows = self.pipeline_overflows.saturating_add(stats.overflows);
     }
 }
 
@@ -429,6 +890,11 @@ pub struct RenderStats {
     pub glyph_run_cache_evictions: u32,
     pub glyph_run_cache_overflows: u32,
     pub glyph_run_cache_slots: u32,
+    pub svg_doc_cache_hits: u32,
+    pub svg_doc_cache_misses: u32,
+    pub svg_doc_cache_loads: u32,
+    pub svg_doc_cache_fallbacks: u32,
+    pub svg_doc_cache_slots: u32,
     pub glyph_id_draw_hits: u32,
     pub codepoint_fallbacks: u32,
     pub selection_fallbacks: u32,
@@ -437,6 +903,19 @@ pub struct RenderStats {
     pub software_path_hits: u32,
     pub accelerated_path_hits: u32,
     pub fallback_path_hits: u32,
+    pub draw_chain_candidates: u32,
+    pub draw_chain_ops: u32,
+    pub draw_chain_submitted: u32,
+    pub draw_chain_fallbacks: u32,
+    pub draw_chain_unsupported: u32,
+    pub draw_chain_overflows: u32,
+    pub task_draw_chain_hits: DrawTaskCounters,
+    pub codec_pipeline_candidates: u32,
+    pub codec_pipeline_stages: u32,
+    pub codec_pipeline_hardware_candidates: u32,
+    pub codec_pipeline_fallbacks: u32,
+    pub codec_pipeline_unsupported: u32,
+    pub codec_pipeline_overflows: u32,
     pub task_software_hits: DrawTaskCounters,
     pub task_accelerated_hits: DrawTaskCounters,
     pub task_fallback_hits: DrawTaskCounters,
@@ -542,6 +1021,11 @@ impl RenderStats {
             glyph_run_cache_evictions: 0,
             glyph_run_cache_overflows: 0,
             glyph_run_cache_slots: 0,
+            svg_doc_cache_hits: 0,
+            svg_doc_cache_misses: 0,
+            svg_doc_cache_loads: 0,
+            svg_doc_cache_fallbacks: 0,
+            svg_doc_cache_slots: 0,
             glyph_id_draw_hits: 0,
             codepoint_fallbacks: 0,
             selection_fallbacks: 0,
@@ -550,6 +1034,19 @@ impl RenderStats {
             software_path_hits: 0,
             accelerated_path_hits: 0,
             fallback_path_hits: 0,
+            draw_chain_candidates: 0,
+            draw_chain_ops: 0,
+            draw_chain_submitted: 0,
+            draw_chain_fallbacks: 0,
+            draw_chain_unsupported: 0,
+            draw_chain_overflows: 0,
+            task_draw_chain_hits: DrawTaskCounters::new(),
+            codec_pipeline_candidates: 0,
+            codec_pipeline_stages: 0,
+            codec_pipeline_hardware_candidates: 0,
+            codec_pipeline_fallbacks: 0,
+            codec_pipeline_unsupported: 0,
+            codec_pipeline_overflows: 0,
             task_software_hits: DrawTaskCounters::new(),
             task_accelerated_hits: DrawTaskCounters::new(),
             task_fallback_hits: DrawTaskCounters::new(),
@@ -636,6 +1133,12 @@ impl RenderStats {
         self.cache_decode_unsupported = cache.decode_unsupported;
         self.cache_decode_overflow = cache.decode_overflow;
         self.cache_evictions = cache.evictions;
+        self.codec_pipeline_candidates = cache.pipeline_candidates;
+        self.codec_pipeline_stages = cache.pipeline_stages;
+        self.codec_pipeline_hardware_candidates = cache.pipeline_hardware_candidates;
+        self.codec_pipeline_fallbacks = cache.pipeline_fallbacks;
+        self.codec_pipeline_unsupported = cache.pipeline_unsupported;
+        self.codec_pipeline_overflows = cache.pipeline_overflows;
         self.codec_missing_resources = cache.load_failures;
         self.codec_invalid = cache.decode_invalid;
         self.codec_truncated = cache.decode_truncated;
@@ -656,6 +1159,14 @@ impl RenderStats {
         self.glyph_run_cache_evictions = cache.evictions;
         self.glyph_run_cache_overflows = cache.overflows;
         self.glyph_run_cache_slots = cache.slots.min(u32::MAX as usize) as u32;
+    }
+
+    pub fn mark_svg_document_cache(&mut self, cache: SvgDocumentCacheStats) {
+        self.svg_doc_cache_hits = cache.hits;
+        self.svg_doc_cache_misses = cache.misses;
+        self.svg_doc_cache_loads = cache.loads;
+        self.svg_doc_cache_fallbacks = cache.fallbacks();
+        self.svg_doc_cache_slots = cache.slots.min(u32::MAX as usize) as u32;
     }
 
     pub fn mark_codec_error(&mut self, kind: CodecErrorKind) {
@@ -688,6 +1199,43 @@ impl RenderStats {
         self.codec_unsupported = self.codec_unsupported.saturating_add(stats.unsupported);
         self.codec_overflow = self.codec_overflow.saturating_add(stats.overflow);
         self.codec_fallbacks = self.codec_fallbacks.saturating_add(stats.total_failures());
+        self.codec_pipeline_candidates = self
+            .codec_pipeline_candidates
+            .saturating_add(stats.pipeline_candidates);
+        self.codec_pipeline_stages = self
+            .codec_pipeline_stages
+            .saturating_add(stats.pipeline_stages);
+        self.codec_pipeline_hardware_candidates = self
+            .codec_pipeline_hardware_candidates
+            .saturating_add(stats.pipeline_hardware_candidates);
+        self.codec_pipeline_fallbacks = self
+            .codec_pipeline_fallbacks
+            .saturating_add(stats.pipeline_fallbacks);
+        self.codec_pipeline_unsupported = self
+            .codec_pipeline_unsupported
+            .saturating_add(stats.pipeline_unsupported);
+        self.codec_pipeline_overflows = self
+            .codec_pipeline_overflows
+            .saturating_add(stats.pipeline_overflows);
+    }
+
+    pub fn mark_codec_pipeline(&mut self, stats: CodecPipelineStats) {
+        self.codec_pipeline_candidates = self
+            .codec_pipeline_candidates
+            .saturating_add(stats.candidates);
+        self.codec_pipeline_stages = self.codec_pipeline_stages.saturating_add(stats.stages);
+        self.codec_pipeline_hardware_candidates = self
+            .codec_pipeline_hardware_candidates
+            .saturating_add(stats.hardware_candidates);
+        self.codec_pipeline_fallbacks = self
+            .codec_pipeline_fallbacks
+            .saturating_add(stats.fallbacks);
+        self.codec_pipeline_unsupported = self
+            .codec_pipeline_unsupported
+            .saturating_add(stats.unsupported);
+        self.codec_pipeline_overflows = self
+            .codec_pipeline_overflows
+            .saturating_add(stats.overflows);
     }
 
     pub fn mark_progressive_jpeg(&mut self) {
@@ -695,7 +1243,8 @@ impl RenderStats {
     }
 
     pub fn mark_progressive_jpeg_scan_fallback(&mut self) {
-        self.progressive_jpeg_scan_fallbacks = self.progressive_jpeg_scan_fallbacks.saturating_add(1);
+        self.progressive_jpeg_scan_fallbacks =
+            self.progressive_jpeg_scan_fallbacks.saturating_add(1);
     }
 
     pub fn mark_cff_raster_glyph(&mut self) {
@@ -835,6 +1384,23 @@ impl RenderStats {
         best_kind.map(|kind| (kind, best_count))
     }
 
+    pub fn top_chain_task(&self) -> Option<(DrawTaskKind, u32)> {
+        let mut best_kind = None;
+        let mut best_count = 0u32;
+        let mut index = 0usize;
+        while index < DrawTaskKind::COUNT {
+            if let Some(kind) = DrawTaskKind::from_index(index) {
+                let count = self.task_draw_chain_hits.get(kind);
+                if count > best_count {
+                    best_count = count;
+                    best_kind = Some(kind);
+                }
+            }
+            index += 1;
+        }
+        best_kind.map(|kind| (kind, best_count))
+    }
+
     pub fn benchmark_summary(&self) -> RenderBenchmarkSummary {
         let top_dispatch = self.top_dispatch_task();
         let top_fallback = self.top_fallback_task();
@@ -868,7 +1434,9 @@ impl RenderStats {
         self.shadow_commands = self.shadow_commands.saturating_add(other.shadow_commands);
         self.line_commands = self.line_commands.saturating_add(other.line_commands);
         self.arc_commands = self.arc_commands.saturating_add(other.arc_commands);
-        self.triangle_commands = self.triangle_commands.saturating_add(other.triangle_commands);
+        self.triangle_commands = self
+            .triangle_commands
+            .saturating_add(other.triangle_commands);
         self.mask_rect_commands = self
             .mask_rect_commands
             .saturating_add(other.mask_rect_commands);
@@ -917,17 +1485,29 @@ impl RenderStats {
         self.opentype_shaping_runs = self
             .opentype_shaping_runs
             .saturating_add(other.opentype_shaping_runs);
-        self.opentype_gsub_hits = self.opentype_gsub_hits.saturating_add(other.opentype_gsub_hits);
-        self.opentype_gpos_hits = self.opentype_gpos_hits.saturating_add(other.opentype_gpos_hits);
-        self.opentype_kern_hits = self.opentype_kern_hits.saturating_add(other.opentype_kern_hits);
+        self.opentype_gsub_hits = self
+            .opentype_gsub_hits
+            .saturating_add(other.opentype_gsub_hits);
+        self.opentype_gpos_hits = self
+            .opentype_gpos_hits
+            .saturating_add(other.opentype_gpos_hits);
+        self.opentype_kern_hits = self
+            .opentype_kern_hits
+            .saturating_add(other.opentype_kern_hits);
         self.svg_clip_paths = self.svg_clip_paths.saturating_add(other.svg_clip_paths);
         self.svg_masks = self.svg_masks.saturating_add(other.svg_masks);
         self.svg_filters = self.svg_filters.saturating_add(other.svg_filters);
         self.svg_gradients = self.svg_gradients.saturating_add(other.svg_gradients);
-        self.svg_real_clip_paths = self.svg_real_clip_paths.saturating_add(other.svg_real_clip_paths);
+        self.svg_real_clip_paths = self
+            .svg_real_clip_paths
+            .saturating_add(other.svg_real_clip_paths);
         self.svg_real_masks = self.svg_real_masks.saturating_add(other.svg_real_masks);
-        self.svg_filter_fallbacks = self.svg_filter_fallbacks.saturating_add(other.svg_filter_fallbacks);
-        self.svg_gradient_fallbacks = self.svg_gradient_fallbacks.saturating_add(other.svg_gradient_fallbacks);
+        self.svg_filter_fallbacks = self
+            .svg_filter_fallbacks
+            .saturating_add(other.svg_filter_fallbacks);
+        self.svg_gradient_fallbacks = self
+            .svg_gradient_fallbacks
+            .saturating_add(other.svg_gradient_fallbacks);
         self.vector_mask_rasters = self
             .vector_mask_rasters
             .saturating_add(other.vector_mask_rasters);
@@ -959,6 +1539,19 @@ impl RenderStats {
             .glyph_run_cache_overflows
             .saturating_add(other.glyph_run_cache_overflows);
         self.glyph_run_cache_slots = self.glyph_run_cache_slots.max(other.glyph_run_cache_slots);
+        self.svg_doc_cache_hits = self
+            .svg_doc_cache_hits
+            .saturating_add(other.svg_doc_cache_hits);
+        self.svg_doc_cache_misses = self
+            .svg_doc_cache_misses
+            .saturating_add(other.svg_doc_cache_misses);
+        self.svg_doc_cache_loads = self
+            .svg_doc_cache_loads
+            .saturating_add(other.svg_doc_cache_loads);
+        self.svg_doc_cache_fallbacks = self
+            .svg_doc_cache_fallbacks
+            .saturating_add(other.svg_doc_cache_fallbacks);
+        self.svg_doc_cache_slots = self.svg_doc_cache_slots.max(other.svg_doc_cache_slots);
         self.glyph_id_draw_hits = self
             .glyph_id_draw_hits
             .saturating_add(other.glyph_id_draw_hits);
@@ -995,8 +1588,44 @@ impl RenderStats {
         self.fallback_path_hits = self
             .fallback_path_hits
             .saturating_add(other.fallback_path_hits);
+        self.draw_chain_candidates = self
+            .draw_chain_candidates
+            .saturating_add(other.draw_chain_candidates);
+        self.draw_chain_ops = self.draw_chain_ops.saturating_add(other.draw_chain_ops);
+        self.draw_chain_submitted = self
+            .draw_chain_submitted
+            .saturating_add(other.draw_chain_submitted);
+        self.draw_chain_fallbacks = self
+            .draw_chain_fallbacks
+            .saturating_add(other.draw_chain_fallbacks);
+        self.draw_chain_unsupported = self
+            .draw_chain_unsupported
+            .saturating_add(other.draw_chain_unsupported);
+        self.draw_chain_overflows = self
+            .draw_chain_overflows
+            .saturating_add(other.draw_chain_overflows);
+        self.task_draw_chain_hits.merge(other.task_draw_chain_hits);
+        self.codec_pipeline_candidates = self
+            .codec_pipeline_candidates
+            .saturating_add(other.codec_pipeline_candidates);
+        self.codec_pipeline_stages = self
+            .codec_pipeline_stages
+            .saturating_add(other.codec_pipeline_stages);
+        self.codec_pipeline_hardware_candidates = self
+            .codec_pipeline_hardware_candidates
+            .saturating_add(other.codec_pipeline_hardware_candidates);
+        self.codec_pipeline_fallbacks = self
+            .codec_pipeline_fallbacks
+            .saturating_add(other.codec_pipeline_fallbacks);
+        self.codec_pipeline_unsupported = self
+            .codec_pipeline_unsupported
+            .saturating_add(other.codec_pipeline_unsupported);
+        self.codec_pipeline_overflows = self
+            .codec_pipeline_overflows
+            .saturating_add(other.codec_pipeline_overflows);
         self.task_software_hits.merge(other.task_software_hits);
-        self.task_accelerated_hits.merge(other.task_accelerated_hits);
+        self.task_accelerated_hits
+            .merge(other.task_accelerated_hits);
         self.task_fallback_hits.merge(other.task_fallback_hits);
         self.clip_changes = self.clip_changes.saturating_add(other.clip_changes);
         self.effective_clip_changes = self
@@ -1004,9 +1633,7 @@ impl RenderStats {
             .saturating_add(other.effective_clip_changes);
         self.dirty_rects = self.dirty_rects.max(other.dirty_rects);
         self.dirty_passes = self.dirty_passes.saturating_add(other.dirty_passes);
-        self.dirty_copy_bytes = self
-            .dirty_copy_bytes
-            .saturating_add(other.dirty_copy_bytes);
+        self.dirty_copy_bytes = self.dirty_copy_bytes.saturating_add(other.dirty_copy_bytes);
         self.pixels_estimate = self.pixels_estimate.saturating_add(other.pixels_estimate);
         self.overflowed |= other.overflowed;
     }
@@ -1085,15 +1712,24 @@ impl RenderStats {
                 self.text_commands = self.text_commands.saturating_add(1);
                 self.label_commands = self.label_commands.saturating_add(1);
             }
-            DrawCommand::DrawImage { .. }
-            | DrawCommand::DrawImageFit { .. }
-            | DrawCommand::DrawImageTint { .. } => {
+            DrawCommand::DrawImage { .. } | DrawCommand::DrawImageFit { .. } => {
+                self.image_commands = self.image_commands.saturating_add(1);
+                self.fast_path_hits = self.fast_path_hits.saturating_add(1);
+            }
+            DrawCommand::DrawImageTint { .. } => {
                 self.image_commands = self.image_commands.saturating_add(1);
             }
             DrawCommand::DrawImageStyled { style, .. } => {
                 self.image_commands = self.image_commands.saturating_add(1);
                 if style.blend != crate::BlendMode::Normal {
                     self.blend_commands = self.blend_commands.saturating_add(1);
+                }
+                if style.blend == crate::BlendMode::Normal
+                    && style.tint.is_none()
+                    && style.clip_radius == 0
+                    && !style.tile
+                {
+                    self.fast_path_hits = self.fast_path_hits.saturating_add(1);
                 }
             }
             DrawCommand::DrawTriangle { .. } | DrawCommand::DrawGradientTriangle { .. } => {
@@ -1133,6 +1769,39 @@ impl RenderStats {
         self.fallback_count = self.fallback_count.saturating_add(1);
         self.draw_task_fallbacks = self.draw_task_fallbacks.saturating_add(1);
         self.fallback_path_hits = self.fallback_path_hits.saturating_add(1);
+    }
+
+    pub fn mark_draw_chain_stats(&mut self, chain: DrawChainStats) {
+        self.draw_chain_candidates = self
+            .draw_chain_candidates
+            .saturating_add(chain.candidates);
+        self.draw_chain_ops = self.draw_chain_ops.saturating_add(chain.ops);
+        self.draw_chain_submitted = self.draw_chain_submitted.saturating_add(chain.submitted);
+        self.draw_chain_fallbacks = self.draw_chain_fallbacks.saturating_add(chain.fallbacks);
+        self.draw_chain_unsupported = self
+            .draw_chain_unsupported
+            .saturating_add(chain.unsupported);
+        self.draw_chain_overflows = self.draw_chain_overflows.saturating_add(chain.overflows);
+        self.task_draw_chain_hits.merge(chain.task_hits);
+    }
+
+    pub fn mark_draw_chain_submit(
+        &mut self,
+        mut chain: DrawChainStats,
+        result: DrawChainSubmitResult,
+    ) {
+        match result {
+            DrawChainSubmitResult::Submitted => {
+                chain.record_submitted();
+            }
+            DrawChainSubmitResult::Unsupported => {
+                chain.record_unsupported();
+            }
+            DrawChainSubmitResult::Fallback => {
+                chain.fallbacks = chain.fallbacks.saturating_add(1);
+            }
+        }
+        self.mark_draw_chain_stats(chain);
     }
 
     pub fn mark_draw_dispatch(&mut self, path: DrawPathKind) {
@@ -1233,6 +1902,9 @@ impl BackendCapabilities {
         draw_3d: true,
         software_draw_features: DrawFeatureFlags::ALL_SOFTWARE,
         accelerated_draw_features: DrawFeatureFlags::NONE,
+        draw_chain: false,
+        max_chain_ops: 0,
+        chain_draw_features: DrawFeatureFlags::NONE,
     };
 
     pub const fn software(pixel_format: PixelFormat) -> Self {
@@ -1271,6 +1943,9 @@ impl BackendCapabilities {
             draw_3d: true,
             software_draw_features: DrawFeatureFlags::ALL_SOFTWARE,
             accelerated_draw_features: DrawFeatureFlags::NONE,
+            draw_chain: false,
+            max_chain_ops: 0,
+            chain_draw_features: DrawFeatureFlags::NONE,
         }
     }
 
@@ -1282,6 +1957,18 @@ impl BackendCapabilities {
 pub trait RenderBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities::SOFTWARE_UNKNOWN
+    }
+
+    fn submit_draw_chain<const OPS: usize>(
+        &mut self,
+        chain: &DrawChain<OPS>,
+        stats: &mut RenderStats,
+    ) -> DrawChainSubmitResult {
+        if chain.is_empty() {
+            return DrawChainSubmitResult::Unsupported;
+        }
+        stats.mark_draw_chain_submit(chain.stats(), DrawChainSubmitResult::Unsupported);
+        DrawChainSubmitResult::Unsupported
     }
 
     fn set_clip(&mut self, _clip: Option<Rect>) {}

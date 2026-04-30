@@ -1,22 +1,27 @@
-use crate::{ImageFormat, ImageView};
+use crate::{
+    backend::{
+        CodecAcceleratorCapabilities, CodecPipelinePlan, CodecStageKind, CodecStagePlan,
+    },
+    ImageFormat, ImageView,
+};
 use alloc::vec::Vec;
 
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 
 const LENGTH_BASE: [u16; 29] = [
-    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115,
-    131, 163, 195, 227, 258,
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
+    163, 195, 227, 258,
 ];
 const LENGTH_EXTRA: [u8; 29] = [
     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
 ];
 const DIST_BASE: [u16; 30] = [
-    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025,
-    1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+    2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
 ];
 const DIST_EXTRA: [u8; 30] = [
-    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12,
-    12, 13, 13,
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+    13,
 ];
 const CODE_LENGTH_ORDER: [usize; 19] = [
     16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
@@ -106,6 +111,30 @@ impl PngDecoder {
     pub fn decode_result(bytes: &[u8]) -> Result<DecodedImage, PngError> {
         decode_png_result(bytes)
     }
+
+    pub fn plan_pipeline<const STAGES: usize>() -> CodecPipelinePlan<STAGES> {
+        Self::plan_pipeline_with_caps(CodecAcceleratorCapabilities::NONE)
+    }
+
+    pub fn plan_pipeline_with_caps<const STAGES: usize>(
+        caps: CodecAcceleratorCapabilities,
+    ) -> CodecPipelinePlan<STAGES> {
+        let supported = caps.png && caps.max_stages >= 8;
+        let mut plan = CodecPipelinePlan::new();
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Read, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Inspect, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Header, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Entropy, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Transform, true, supported));
+        let _ = plan.push(CodecStagePlan::new(
+            CodecStageKind::ColorConvert,
+            true,
+            supported,
+        ));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Pack, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::CacheInsert, false, true));
+        plan
+    }
 }
 
 pub fn decode_png(bytes: &[u8]) -> Option<DecodedImage> {
@@ -128,14 +157,7 @@ pub fn decode_png_rgb565_cover(bytes: &[u8], width: u16, height: u16) -> Option<
     Some(DecodedRgb565 {
         width,
         height,
-        data: scale_cover_rgb565(
-            &pixels,
-            source.width,
-            source.height,
-            &source,
-            width,
-            height,
-        )?,
+        data: scale_cover_rgb565(&pixels, source.width, source.height, &source, width, height)?,
     })
 }
 
@@ -179,7 +201,11 @@ impl PngSource {
     }
 
     fn sample_bytes(&self) -> usize {
-        if self.bit_depth == 16 { 2 } else { 1 }
+        if self.bit_depth == 16 {
+            2
+        } else {
+            1
+        }
     }
 
     fn pixel_bytes(&self) -> usize {
@@ -472,7 +498,12 @@ fn inflate_huffman_block(
     }
 }
 
-fn copy_match(out: &mut Vec<u8>, expected_len: usize, distance: usize, length: usize) -> Option<()> {
+fn copy_match(
+    out: &mut Vec<u8>,
+    expected_len: usize,
+    distance: usize,
+    length: usize,
+) -> Option<()> {
     if distance == 0 || distance > out.len() || out.len().checked_add(length)? > expected_len {
         return None;
     }
@@ -597,13 +628,7 @@ impl Huffman {
 
         let table_len = 1usize.checked_shl(max_bits as u32)?;
         let mut table = Vec::new();
-        table.resize(
-            table_len,
-            HuffmanEntry {
-                symbol: 0,
-                len: 0,
-            },
-        );
+        table.resize(table_len, HuffmanEntry { symbol: 0, len: 0 });
 
         for (symbol, &len) in lengths.iter().enumerate() {
             if len == 0 {
@@ -744,7 +769,11 @@ fn unfilter_png(raw: &[u8], width: u32, height: u32, bpp: usize) -> Option<Vec<u
         let mut i = 0usize;
         while i < stride {
             let encoded = *raw.get(source + i)?;
-            let left = if i >= bpp { out[row_start + i - bpp] } else { 0 };
+            let left = if i >= bpp {
+                out[row_start + i - bpp]
+            } else {
+                0
+            };
             let up = if row > 0 { out[prev_start + i] } else { 0 };
             let up_left = if row > 0 && i >= bpp {
                 out[prev_start + i - bpp]
@@ -942,7 +971,12 @@ fn scale_cover_rgb565(
     let crop_y0 = (src_h - crop_h) / 2;
 
     let mut out = Vec::new();
-    out.resize((dst_w as usize).checked_mul(dst_h as usize)?.checked_mul(2)?, 0);
+    out.resize(
+        (dst_w as usize)
+            .checked_mul(dst_h as usize)?
+            .checked_mul(2)?,
+        0,
+    );
 
     let mut offset = 0usize;
     let mut y = 0u32;
@@ -1041,7 +1075,11 @@ fn sample_rgba_at(
         3 => {
             let palette_index = *pixels.get(index)? as usize;
             let rgb = *source.palette.get(palette_index)?;
-            let alpha = source.transparency.get(palette_index).copied().unwrap_or(255);
+            let alpha = source
+                .transparency
+                .get(palette_index)
+                .copied()
+                .unwrap_or(255);
             Some((rgb[0], rgb[1], rgb[2], alpha))
         }
         4 => {
@@ -1094,7 +1132,11 @@ fn trns_rgb_alpha(source: &PngSource, pixels: &[u8], index: usize) -> Option<u8>
     let r = sample_u16(pixels, index, sample_bytes)?;
     let g = sample_u16(pixels, index + sample_bytes, sample_bytes)?;
     let b = sample_u16(pixels, index + sample_bytes * 2, sample_bytes)?;
-    Some(if r == tr && g == tg && b == tb { 0 } else { 255 })
+    Some(if r == tr && g == tg && b == tb {
+        0
+    } else {
+        255
+    })
 }
 
 #[allow(dead_code)]

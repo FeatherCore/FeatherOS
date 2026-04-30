@@ -1,15 +1,26 @@
-use crate::{
-    glyph::glyph_5x7_a8, Color, FontId, GlyphView, Point, Rect, Surface, TextAlign, TextDecor,
-    TextLayout, TextLayoutLine, TextLayoutOptions, TextStyle, GLYPH_RUN_RESOLVER_CAPACITY,
-};
 use crate::ttf::{GlyphRun, GlyphRunItem, ShapeOptions};
+use crate::{
+    glyph::glyph_5x7_a8,
+    raster::{clamp_i32, rgb565},
+    surface_pixels::blend_rgb565_raw,
+    Color, FontId, GlyphView, PixelFormat, Point, Rect, Surface, TextAlign, TextDecor, TextLayout,
+    TextLayoutLine, TextLayoutOptions, TextStyle, GLYPH_RUN_RESOLVER_CAPACITY,
+};
 
 impl Surface {
     pub fn draw_text(&mut self, x: i32, y: i32, text: &str, color: Color, scale: u16) {
         self.draw_text_font(x, y, text, FontId(0), color, scale);
     }
 
-    pub fn draw_text_font(&mut self, mut x: i32, mut y: i32, text: &str, font: FontId, color: Color, scale: u16) {
+    pub fn draw_text_font(
+        &mut self,
+        mut x: i32,
+        mut y: i32,
+        text: &str,
+        font: FontId,
+        color: Color,
+        scale: u16,
+    ) {
         let origin_x = x;
         let line_h = if font.0 == 0 {
             8i32.saturating_mul(scale.max(1) as i32)
@@ -38,7 +49,11 @@ impl Surface {
         }));
 
         let scale = style.scale.max(1);
-        let glyph_w = if style.font.0 == 0 { 6u16.saturating_mul(scale) } else { (scale / 2).max(4) };
+        let glyph_w = if style.font.0 == 0 {
+            6u16.saturating_mul(scale)
+        } else {
+            (scale / 2).max(4)
+        };
         let line_h = if style.font.0 == 0 {
             8u16.saturating_mul(scale)
         } else {
@@ -149,7 +164,10 @@ impl Surface {
             if start < line_end && end > line_start {
                 let (sx, ex) = self.selection_x_range_run(run, line, x, style, start, end);
                 if ex > sx {
-                    self.fill_rect(Rect::new(sx, y, (ex - sx).min(u16::MAX as i32) as u16, line_h), bg);
+                    self.fill_rect(
+                        Rect::new(sx, y, (ex - sx).min(u16::MAX as i32) as u16, line_h),
+                        bg,
+                    );
                 }
                 self.draw_glyph_run_text(run, line, x, y, style, Some((start, end, fg)));
             } else {
@@ -161,11 +179,21 @@ impl Surface {
 
         if style.decor.contains(TextDecor::UNDERLINE) {
             let ly = y + line_h as i32 - 2;
-            self.draw_wide_line(Point::new(x, ly), Point::new(x + width as i32, ly), 1, style.color);
+            self.draw_wide_line(
+                Point::new(x, ly),
+                Point::new(x + width as i32, ly),
+                1,
+                style.color,
+            );
         }
         if style.decor.contains(TextDecor::STRIKETHROUGH) {
             let ly = y + line_h as i32 / 2;
-            self.draw_wide_line(Point::new(x, ly), Point::new(x + width as i32, ly), 1, style.color);
+            self.draw_wide_line(
+                Point::new(x, ly),
+                Point::new(x + width as i32, ly),
+                1,
+                style.color,
+            );
         }
     }
 
@@ -196,7 +224,9 @@ impl Surface {
                 color,
                 style.scale,
             );
-            x = x.saturating_add(item.advance.max(1) as i32).saturating_add(spacing);
+            x = x
+                .saturating_add(item.advance.max(1) as i32)
+                .saturating_add(spacing);
             i += 1;
         }
     }
@@ -222,7 +252,9 @@ impl Surface {
             if char_range_end(char_start, char_len) > selection_start && start_x.is_none() {
                 start_x = Some(pen);
             }
-            pen = pen.saturating_add(item.advance.max(1) as i32).saturating_add(spacing);
+            pen = pen
+                .saturating_add(item.advance.max(1) as i32)
+                .saturating_add(spacing);
             if char_start < selection_end {
                 end_x = pen;
             }
@@ -304,7 +336,9 @@ impl Surface {
             let codepoint = ch as u32;
             let kern = if style.kerning {
                 previous
-                    .map(|prev| self.kerning_adjust(style.font, prev, codepoint, style.scale) as i32)
+                    .map(|prev| {
+                        self.kerning_adjust(style.font, prev, codepoint, style.scale) as i32
+                    })
                     .unwrap_or(0)
             } else {
                 0
@@ -312,7 +346,8 @@ impl Surface {
             let advance = self.glyph_advance(style.font, ch, style.scale).max(1);
             let candidate_width = width.saturating_add(kern).saturating_add(advance);
             if chars != 0 && candidate_width > limit {
-                if let Some((space_start, space_end, visible_chars, consumed_at_space)) = last_space {
+                if let Some((space_start, space_end, visible_chars, consumed_at_space)) = last_space
+                {
                     if visible_chars != 0 {
                         return (space_start, space_end, consumed_at_space);
                     }
@@ -362,10 +397,21 @@ impl Surface {
                 let sel0 = start.saturating_sub(line_start).min(count);
                 let sel1 = end.saturating_sub(line_start).min(count);
                 if sel1 > sel0 {
-                    let (sx, ex) =
-                        self.selection_x_range(line, x, style, char_offset, start, end, glyph_w, letter_extra);
+                    let (sx, ex) = self.selection_x_range(
+                        line,
+                        x,
+                        style,
+                        char_offset,
+                        start,
+                        end,
+                        glyph_w,
+                        letter_extra,
+                    );
                     if ex > sx {
-                        self.fill_rect(Rect::new(sx, y, (ex - sx).min(u16::MAX as i32) as u16, line_h), bg);
+                        self.fill_rect(
+                            Rect::new(sx, y, (ex - sx).min(u16::MAX as i32) as u16, line_h),
+                            bg,
+                        );
                     }
                     self.draw_label_selected_text(x, y, line, style, char_offset, start, end, fg);
                 } else {
@@ -380,11 +426,21 @@ impl Surface {
 
         if style.decor.contains(TextDecor::UNDERLINE) {
             let ly = y + line_h as i32 - 2;
-            self.draw_wide_line(Point::new(x, ly), Point::new(x + width as i32, ly), 1, style.color);
+            self.draw_wide_line(
+                Point::new(x, ly),
+                Point::new(x + width as i32, ly),
+                1,
+                style.color,
+            );
         }
         if style.decor.contains(TextDecor::STRIKETHROUGH) {
             let ly = y + line_h as i32 / 2;
-            self.draw_wide_line(Point::new(x, ly), Point::new(x + width as i32, ly), 1, style.color);
+            self.draw_wide_line(
+                Point::new(x, ly),
+                Point::new(x + width as i32, ly),
+                1,
+                style.color,
+            );
         }
     }
 
@@ -483,7 +539,13 @@ impl Surface {
         }
     }
 
-    fn measure_label_line(&self, line: &str, style: TextStyle, glyph_w: u16, letter_extra: u16) -> u16 {
+    fn measure_label_line(
+        &self,
+        line: &str,
+        style: TextStyle,
+        glyph_w: u16,
+        letter_extra: u16,
+    ) -> u16 {
         let mut width = 0i32;
         let mut count = 0usize;
         let mut previous: Option<u32> = None;
@@ -537,7 +599,9 @@ impl Surface {
             if index >= selection_start && start_x.is_none() {
                 start_x = Some(pen);
             }
-            let advance = self.glyph_advance(style.font, ch, style.scale).max(glyph_w as i32);
+            let advance = self
+                .glyph_advance(style.font, ch, style.scale)
+                .max(glyph_w as i32);
             pen += advance + letter_extra as i32;
             if index < selection_end {
                 end_x = pen;
@@ -574,7 +638,15 @@ impl Surface {
         }
     }
 
-    fn draw_char_font(&mut self, x: i32, y: i32, ch: char, font: FontId, color: Color, scale: u16) -> i32 {
+    fn draw_char_font(
+        &mut self,
+        x: i32,
+        y: i32,
+        ch: char,
+        font: FontId,
+        color: Color,
+        scale: u16,
+    ) -> i32 {
         if font.0 != 0 {
             let size = scale.max(1);
             let codepoint = ch as u32;
@@ -662,6 +734,11 @@ impl Surface {
         let baseline = y + size.max(1) as i32;
         let start_x = x + glyph.bearing_x as i32;
         let start_y = baseline - glyph.bearing_y as i32;
+
+        if self.draw_glyph_view_rgb565_a8(start_x, start_y, glyph, color) {
+            return;
+        }
+
         let mut row = 0u8;
         while row < glyph.height {
             let mut col = 0u8;
@@ -681,12 +758,99 @@ impl Surface {
         }
     }
 
+    fn draw_glyph_view_rgb565_a8(
+        &mut self,
+        start_x: i32,
+        start_y: i32,
+        glyph: GlyphView,
+        color: Color,
+    ) -> bool {
+        if self.format != PixelFormat::Rgb565 || color.a == 0 || !self.is_valid() {
+            return false;
+        }
+        if glyph.width == 0 || glyph.height == 0 {
+            return true;
+        }
+        if glyph.data.is_null() {
+            return false;
+        }
+
+        let glyph_rect = Rect::new(start_x, start_y, glyph.width as u16, glyph.height as u16);
+        let clipped = match self.clip {
+            Some(clip) => glyph_rect.clipped_to(clip),
+            None => glyph_rect,
+        };
+        let x0 = clamp_i32(clipped.x, 0, self.width as i32);
+        let y0 = clamp_i32(clipped.y, 0, self.height as i32);
+        let x1 = clamp_i32(clipped.right(), 0, self.width as i32);
+        let y1 = clamp_i32(clipped.bottom(), 0, self.height as i32);
+        if x0 >= x1 || y0 >= y1 {
+            return true;
+        }
+
+        let src_r = color.r as u32;
+        let src_g = color.g as u32;
+        let src_b = color.b as u32;
+        let src_raw = rgb565(Color::rgb(color.r, color.g, color.b));
+        let base_alpha = color.a as u32;
+        let glyph_w = glyph.width as usize;
+        let has_masks = self.has_masks();
+
+        let mut y = y0;
+        while y < y1 {
+            let glyph_y = (y - start_y) as usize;
+            let mut x = x0;
+            while x < x1 {
+                let glyph_x = (x - start_x) as usize;
+                let offset = glyph_y.saturating_mul(glyph_w).saturating_add(glyph_x);
+                if offset < glyph.len {
+                    let glyph_alpha = unsafe { *glyph.data.add(offset) };
+                    if glyph_alpha != 0 {
+                        let mut alpha = (glyph_alpha as u32 * base_alpha) / 255;
+                        if has_masks {
+                            let mask = self.mask_alpha(Point::new(x, y)) as u32;
+                            alpha = (alpha * mask) / 255;
+                        }
+                        if alpha != 0 {
+                            unsafe {
+                                let dst = self.pixels.add(y as usize * self.stride + x as usize * 2)
+                                    as *mut u16;
+                                if alpha == 255 {
+                                    core::ptr::write_unaligned(dst, src_raw);
+                                } else {
+                                    let raw = core::ptr::read_unaligned(dst);
+                                    core::ptr::write_unaligned(
+                                        dst,
+                                        blend_rgb565_raw(raw, src_r, src_g, src_b, alpha),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                x += 1;
+            }
+            y += 1;
+        }
+        true
+    }
+
     fn draw_missing_glyph(&mut self, x: i32, y: i32, size: u16, color: Color) {
         let h = size.max(8);
         let w = (h / 2).max(4);
         self.draw_wide_line(Point::new(x, y), Point::new(x + w as i32, y), 1, color);
-        self.draw_wide_line(Point::new(x + w as i32, y), Point::new(x + w as i32, y + h as i32), 1, color);
-        self.draw_wide_line(Point::new(x + w as i32, y + h as i32), Point::new(x, y + h as i32), 1, color);
+        self.draw_wide_line(
+            Point::new(x + w as i32, y),
+            Point::new(x + w as i32, y + h as i32),
+            1,
+            color,
+        );
+        self.draw_wide_line(
+            Point::new(x + w as i32, y + h as i32),
+            Point::new(x, y + h as i32),
+            1,
+            color,
+        );
         self.draw_wide_line(Point::new(x, y + h as i32), Point::new(x, y), 1, color);
     }
 }

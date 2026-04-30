@@ -1,8 +1,9 @@
 use crate::{
     backend::{BackendCapabilities, RenderBackend},
     raster::clamp_i32,
-    Color, DrawCommand, GlyphIdResolver, GlyphResolver, GlyphRunResolver, ImageResolver, KerningResolver, LayerBudget, LayerSpec, MaskSpec,
-    PixelFormat, Point, Rect, RenderStats, SvgResolver,
+    Color, DrawCommand, GlyphIdResolver, GlyphResolver, GlyphRunResolver, ImageResolver,
+    KerningResolver, LayerBudget, LayerSpec, MaskSpec, PixelFormat, Point, Rect, RenderStats,
+    SvgResolver,
 };
 
 const SURFACE_MASK_STACK: usize = 4;
@@ -200,7 +201,8 @@ impl Surface {
             return;
         }
 
-        if !self.has_masks() && color.a == 255 && self.fill_rect_opaque_fast(x0, y0, x1, y1, color) {
+        if !self.has_masks() && color.a == 255 && self.fill_rect_opaque_fast(x0, y0, x1, y1, color)
+        {
             return;
         }
 
@@ -238,7 +240,10 @@ impl Surface {
             let row = y.saturating_sub(rect.y).clamp(0, h.saturating_sub(1));
             let t = ((row * 255) / h) as u8;
             let color = top.mix(bottom, t);
-            if !self.has_masks() && color.a == 255 && self.fill_rect_opaque_fast(x0, y, x1, y + 1, color) {
+            if !self.has_masks()
+                && color.a == 255
+                && self.fill_rect_opaque_fast(x0, y, x1, y + 1, color)
+            {
                 y += 1;
                 continue;
             }
@@ -254,7 +259,6 @@ impl Surface {
             y += 1;
         }
     }
-
 }
 
 impl RenderBackend for Surface {

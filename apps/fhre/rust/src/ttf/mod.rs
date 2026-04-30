@@ -1,3 +1,6 @@
+use crate::backend::{
+    CodecAcceleratorCapabilities, CodecPipelinePlan, CodecStageKind, CodecStagePlan,
+};
 use alloc::vec::Vec;
 
 const TYPE2_STACK_LIMIT: usize = 48;
@@ -205,12 +208,34 @@ impl TtfDecoder {
     pub fn parse(bytes: &[u8]) -> Result<FontFace<'_>, TtfError> {
         FontFace::parse(bytes)
     }
+
+    pub fn plan_pipeline<const STAGES: usize>() -> CodecPipelinePlan<STAGES> {
+        Self::plan_pipeline_with_caps(CodecAcceleratorCapabilities::NONE)
+    }
+
+    pub fn plan_pipeline_with_caps<const STAGES: usize>(
+        caps: CodecAcceleratorCapabilities,
+    ) -> CodecPipelinePlan<STAGES> {
+        let supported = caps.ttf && caps.max_stages >= 7;
+        let mut plan = CodecPipelinePlan::new();
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Read, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Inspect, false, true));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Header, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Parse, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Raster, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Pack, true, supported));
+        let _ = plan.push(CodecStagePlan::new(CodecStageKind::CacheInsert, false, true));
+        plan
+    }
 }
 
 impl<'a> FontFace<'a> {
     pub fn parse(data: &'a [u8]) -> Result<Self, TtfError> {
         let sfnt = read_u32(data, 0).ok_or(TtfError::Truncated)?;
-        if sfnt != 0x0001_0000 && sfnt != u32::from_be_bytes(*b"true") && sfnt != u32::from_be_bytes(*b"OTTO") {
+        if sfnt != 0x0001_0000
+            && sfnt != u32::from_be_bytes(*b"true")
+            && sfnt != u32::from_be_bytes(*b"OTTO")
+        {
             return Err(TtfError::BadSignature);
         }
         let count = read_u16(data, 4).ok_or(TtfError::Truncated)? as usize;
@@ -258,7 +283,8 @@ impl<'a> FontFace<'a> {
         }
 
         let units_per_em = read_u16(data, tables.head.offset + 18).ok_or(TtfError::Truncated)?;
-        let index_to_loc_format = read_i16(data, tables.head.offset + 50).ok_or(TtfError::Truncated)?;
+        let index_to_loc_format =
+            read_i16(data, tables.head.offset + 50).ok_or(TtfError::Truncated)?;
         let ascent = read_i16(data, tables.hhea.offset + 4).ok_or(TtfError::Truncated)?;
         let descent = read_i16(data, tables.hhea.offset + 6).ok_or(TtfError::Truncated)?;
         let hmetric_count = read_u16(data, tables.hhea.offset + 34).ok_or(TtfError::Truncated)?;
@@ -309,7 +335,9 @@ impl<'a> FontFace<'a> {
             if options.gsub {
                 if let Some((_, next)) = chars.peek().copied() {
                     let next_glyph = self.glyph_index(next as u32).unwrap_or(0);
-                    if let Some(ligature_glyph) = gsub_ligature_substitute(self.data, self.tables.gsub, glyph_id, next_glyph) {
+                    if let Some(ligature_glyph) =
+                        gsub_ligature_substitute(self.data, self.tables.gsub, glyph_id, next_glyph)
+                    {
                         let _ = chars.next();
                         glyph_id = ligature_glyph;
                         char_len = 2;
@@ -326,12 +354,16 @@ impl<'a> FontFace<'a> {
                 }
             }
             if options.gsub {
-                if let Some(substitute) = gsub_single_substitute(self.data, self.tables.gsub, glyph_id) {
+                if let Some(substitute) =
+                    gsub_single_substitute(self.data, self.tables.gsub, glyph_id)
+                {
                     glyph_id = substitute;
                     shaping |= GLYPH_RUN_FLAG_GSUB;
                 }
             }
-            let mut advance = self.advance_width(glyph_id).unwrap_or(self.info.units_per_em / 2) as i16;
+            let mut advance = self
+                .advance_width(glyph_id)
+                .unwrap_or(self.info.units_per_em / 2) as i16;
             if let Some(left) = previous {
                 if options.gpos {
                     let adjust = gpos_pair_adjust(self.data, self.tables.gpos, left, glyph_id);
@@ -370,11 +402,19 @@ impl<'a> FontFace<'a> {
         kern_format0_lookup(self.data, self.tables.kern, left_glyph, right_glyph).unwrap_or(0)
     }
 
-    pub fn rasterize_glyph(&self, codepoint: u32, options: GlyphRasterOptions) -> Result<RasterGlyph, TtfError> {
+    pub fn rasterize_glyph(
+        &self,
+        codepoint: u32,
+        options: GlyphRasterOptions,
+    ) -> Result<RasterGlyph, TtfError> {
         let glyph_id = self.glyph_index(codepoint).ok_or(TtfError::InvalidGlyph)?;
-        let advance_units = self.advance_width(glyph_id).unwrap_or(self.info.units_per_em / 2);
+        let advance_units = self
+            .advance_width(glyph_id)
+            .unwrap_or(self.info.units_per_em / 2);
         if self.kind == FontFaceKind::OpenTypeCff {
-            if let Ok(glyph) = rasterize_cff_glyph(self, codepoint, glyph_id, advance_units, options.pixel_size) {
+            if let Ok(glyph) =
+                rasterize_cff_glyph(self, codepoint, glyph_id, advance_units, options.pixel_size)
+            {
                 return Ok(glyph);
             }
             return Ok(cff_fallback_glyph(
@@ -387,9 +427,20 @@ impl<'a> FontFace<'a> {
         let mut outline = Outline::new();
         self.load_outline(glyph_id, &mut outline, 0)?;
         if outline.points.is_empty() || outline.contours.is_empty() {
-            return Ok(empty_glyph(codepoint, advance_units, self.info.units_per_em, options.pixel_size));
+            return Ok(empty_glyph(
+                codepoint,
+                advance_units,
+                self.info.units_per_em,
+                options.pixel_size,
+            ));
         }
-        rasterize_outline(codepoint, &outline, advance_units, self.info.units_per_em, options.pixel_size)
+        rasterize_outline(
+            codepoint,
+            &outline,
+            advance_units,
+            self.info.units_per_em,
+            options.pixel_size,
+        )
     }
 
     fn advance_width(&self, glyph_id: u16) -> Option<u16> {
@@ -416,15 +467,25 @@ impl<'a> FontFace<'a> {
 
     fn glyph_offset(&self, glyph_id: u16) -> Result<usize, TtfError> {
         if self.index_to_loc_format == 0 {
-            Ok(read_u16(self.data, self.tables.loca.offset + glyph_id as usize * 2)
-                .ok_or(TtfError::Truncated)? as usize * 2)
+            Ok(
+                read_u16(self.data, self.tables.loca.offset + glyph_id as usize * 2)
+                    .ok_or(TtfError::Truncated)? as usize
+                    * 2,
+            )
         } else {
-            Ok(read_u32(self.data, self.tables.loca.offset + glyph_id as usize * 4)
-                .ok_or(TtfError::Truncated)? as usize)
+            Ok(
+                read_u32(self.data, self.tables.loca.offset + glyph_id as usize * 4)
+                    .ok_or(TtfError::Truncated)? as usize,
+            )
         }
     }
 
-    fn load_outline(&self, glyph_id: u16, outline: &mut Outline, depth: u8) -> Result<(), TtfError> {
+    fn load_outline(
+        &self,
+        glyph_id: u16,
+        outline: &mut Outline,
+        depth: u8,
+    ) -> Result<(), TtfError> {
         if depth > 4 {
             return Err(TtfError::Unsupported);
         }
@@ -470,7 +531,11 @@ fn latin_ligature_codepoint(left: char, right: char) -> Option<u32> {
     }
 }
 
-fn parse_simple_glyph(glyph: &[u8], contour_count: usize, outline: &mut Outline) -> Result<(), TtfError> {
+fn parse_simple_glyph(
+    glyph: &[u8],
+    contour_count: usize,
+    outline: &mut Outline,
+) -> Result<(), TtfError> {
     let mut offset = 10usize;
     let mut ends = Vec::new();
     let mut i = 0usize;
@@ -480,7 +545,9 @@ fn parse_simple_glyph(glyph: &[u8], contour_count: usize, outline: &mut Outline)
         i += 1;
     }
     let instruction_len = read_u16(glyph, offset).ok_or(TtfError::Truncated)? as usize;
-    offset = offset.checked_add(2 + instruction_len).ok_or(TtfError::Truncated)?;
+    offset = offset
+        .checked_add(2 + instruction_len)
+        .ok_or(TtfError::Truncated)?;
     let point_count = ends.last().copied().unwrap_or(0).saturating_add(1);
     let mut flags = Vec::new();
     while flags.len() < point_count {
@@ -504,7 +571,11 @@ fn parse_simple_glyph(glyph: &[u8], contour_count: usize, outline: &mut Outline)
         let dx = if flag & 0x02 != 0 {
             let v = *glyph.get(offset).ok_or(TtfError::Truncated)? as i32;
             offset += 1;
-            if flag & 0x10 != 0 { v } else { -v }
+            if flag & 0x10 != 0 {
+                v
+            } else {
+                -v
+            }
         } else if flag & 0x10 != 0 {
             0
         } else {
@@ -522,7 +593,11 @@ fn parse_simple_glyph(glyph: &[u8], contour_count: usize, outline: &mut Outline)
         let dy = if flag & 0x04 != 0 {
             let v = *glyph.get(offset).ok_or(TtfError::Truncated)? as i32;
             offset += 1;
-            if flag & 0x20 != 0 { v } else { -v }
+            if flag & 0x20 != 0 {
+                v
+            } else {
+                -v
+            }
         } else if flag & 0x20 != 0 {
             0
         } else {
@@ -550,7 +625,12 @@ fn parse_simple_glyph(glyph: &[u8], contour_count: usize, outline: &mut Outline)
     Ok(())
 }
 
-fn parse_composite_glyph(face: &FontFace<'_>, glyph: &[u8], outline: &mut Outline, depth: u8) -> Result<(), TtfError> {
+fn parse_composite_glyph(
+    face: &FontFace<'_>,
+    glyph: &[u8],
+    outline: &mut Outline,
+    depth: u8,
+) -> Result<(), TtfError> {
     let mut offset = 10usize;
     loop {
         let flags = read_u16(glyph, offset).ok_or(TtfError::Truncated)?;
@@ -567,7 +647,11 @@ fn parse_composite_glyph(face: &FontFace<'_>, glyph: &[u8], outline: &mut Outlin
             offset += 2;
             (a, b)
         };
-        let (dx, dy) = if flags & 0x0002 != 0 { (arg1, arg2) } else { (0, 0) };
+        let (dx, dy) = if flags & 0x0002 != 0 {
+            (arg1, arg2)
+        } else {
+            (0, 0)
+        };
         let mut xx = 1.0f32;
         let mut yy = 1.0f32;
         if flags & 0x0008 != 0 {
@@ -617,7 +701,12 @@ fn rasterize_outline(
         max_y = max_y.max(point.y);
     }
     if min_x >= max_x || min_y >= max_y {
-        return Ok(empty_glyph(codepoint, advance_units, units_per_em, pixel_size));
+        return Ok(empty_glyph(
+            codepoint,
+            advance_units,
+            units_per_em,
+            pixel_size,
+        ));
     }
     let scale_num = pixel_size.max(1) as i32;
     let scale_den = units_per_em.max(1) as i32;
@@ -670,7 +759,12 @@ fn point_in_outline(outline: &Outline, x: i32, y: i32) -> bool {
     inside
 }
 
-fn empty_glyph(codepoint: u32, advance_units: u16, units_per_em: u16, pixel_size: u8) -> RasterGlyph {
+fn empty_glyph(
+    codepoint: u32,
+    advance_units: u16,
+    units_per_em: u16,
+    pixel_size: u8,
+) -> RasterGlyph {
     RasterGlyph {
         codepoint,
         width: 1,
@@ -725,9 +819,20 @@ fn rasterize_cff_glyph(
     execute_type2_charstring(&cff, glyph_id as usize, &mut outline, &mut state, 0)?;
     close_type2_contour(&mut outline, &mut state);
     if outline.points.is_empty() || outline.contours.is_empty() {
-        return Ok(empty_glyph(codepoint, advance_units, face.info.units_per_em, pixel_size));
+        return Ok(empty_glyph(
+            codepoint,
+            advance_units,
+            face.info.units_per_em,
+            pixel_size,
+        ));
     }
-    rasterize_outline(codepoint, &outline, advance_units, face.info.units_per_em, pixel_size)
+    rasterize_outline(
+        codepoint,
+        &outline,
+        advance_units,
+        face.info.units_per_em,
+        pixel_size,
+    )
 }
 
 fn parse_cff_font<'a>(face: &FontFace<'a>) -> Result<CffFont<'a>, TtfError> {
@@ -753,7 +858,13 @@ fn parse_cff_font<'a>(face: &FontFace<'a>) -> Result<CffFont<'a>, TtfError> {
     }
     let (_end, charstrings) = read_cff_index(table, dict.charstrings_offset)?;
     let mut local_subrs = Vec::new();
-    if dict.private_len != 0 && dict.private_offset.checked_add(dict.private_len).ok_or(TtfError::Truncated)? <= table.len() {
+    if dict.private_len != 0
+        && dict
+            .private_offset
+            .checked_add(dict.private_len)
+            .ok_or(TtfError::Truncated)?
+            <= table.len()
+    {
         let private = table
             .get(dict.private_offset..dict.private_offset + dict.private_len)
             .ok_or(TtfError::Truncated)?;
@@ -777,7 +888,10 @@ fn parse_cff_font<'a>(face: &FontFace<'a>) -> Result<CffFont<'a>, TtfError> {
     })
 }
 
-fn read_cff_index<'a>(data: &'a [u8], mut offset: usize) -> Result<(usize, Vec<&'a [u8]>), TtfError> {
+fn read_cff_index<'a>(
+    data: &'a [u8],
+    mut offset: usize,
+) -> Result<(usize, Vec<&'a [u8]>), TtfError> {
     let count = read_u16(data, offset).ok_or(TtfError::Truncated)? as usize;
     offset += 2;
     let mut items = Vec::new();
@@ -805,8 +919,12 @@ fn read_cff_index<'a>(data: &'a [u8], mut offset: usize) -> Result<(usize, Vec<&
     let data_start = offset;
     let mut n = 0usize;
     while n < count {
-        let start = data_start.checked_add(offsets[n].saturating_sub(1)).ok_or(TtfError::Truncated)?;
-        let end = data_start.checked_add(offsets[n + 1].saturating_sub(1)).ok_or(TtfError::Truncated)?;
+        let start = data_start
+            .checked_add(offsets[n].saturating_sub(1))
+            .ok_or(TtfError::Truncated)?;
+        let end = data_start
+            .checked_add(offsets[n + 1].saturating_sub(1))
+            .ok_or(TtfError::Truncated)?;
         items.push(data.get(start..end).ok_or(TtfError::Truncated)?);
         n += 1;
     }
@@ -898,7 +1016,10 @@ fn execute_type2_charstring(
     if depth >= TYPE2_SUBR_DEPTH_LIMIT {
         return Err(TtfError::Unsupported);
     }
-    let bytes = *cff.charstrings.get(glyph_id).ok_or(TtfError::InvalidGlyph)?;
+    let bytes = *cff
+        .charstrings
+        .get(glyph_id)
+        .ok_or(TtfError::InvalidGlyph)?;
     execute_type2_bytes(cff, bytes, outline, state, depth)
 }
 
@@ -974,7 +1095,16 @@ fn execute_type2_bytes(
             8 => {
                 let mut i = 0usize;
                 while i + 5 < stack.len() {
-                    type2_curve(outline, state, stack[i], stack[i + 1], stack[i + 2], stack[i + 3], stack[i + 4], stack[i + 5]);
+                    type2_curve(
+                        outline,
+                        state,
+                        stack[i],
+                        stack[i + 1],
+                        stack[i + 2],
+                        stack[i + 3],
+                        stack[i + 4],
+                        stack[i + 5],
+                    );
                     i += 6;
                 }
                 stack.clear();
@@ -1019,7 +1149,9 @@ fn execute_type2_bytes(
             24 => {
                 while stack.len() > 2 {
                     let args = take_six(&mut stack)?;
-                    type2_curve(outline, state, args[0], args[1], args[2], args[3], args[4], args[5]);
+                    type2_curve(
+                        outline, state, args[0], args[1], args[2], args[3], args[4], args[5],
+                    );
                 }
                 if stack.len() == 2 {
                     type2_line(outline, state, stack[0], stack[1]);
@@ -1033,7 +1165,9 @@ fn execute_type2_bytes(
                     type2_line(outline, state, dx, dy);
                 }
                 if stack.len() == 6 {
-                    type2_curve(outline, state, stack[0], stack[1], stack[2], stack[3], stack[4], stack[5]);
+                    type2_curve(
+                        outline, state, stack[0], stack[1], stack[2], stack[3], stack[4], stack[5],
+                    );
                 }
                 stack.clear();
             }
@@ -1067,7 +1201,16 @@ fn execute_type2_escaped(
             // flex operators are approximated by the final curve endpoints.
             let mut i = 0usize;
             while i + 5 < stack.len() {
-                type2_curve(outline, state, stack[i], stack[i + 1], stack[i + 2], stack[i + 3], stack[i + 4], stack[i + 5]);
+                type2_curve(
+                    outline,
+                    state,
+                    stack[i],
+                    stack[i + 1],
+                    stack[i + 2],
+                    stack[i + 3],
+                    stack[i + 4],
+                    stack[i + 5],
+                );
                 i += 6;
             }
             stack.clear();
@@ -1095,9 +1238,27 @@ fn execute_type2_hv_curve(
     }
     while i + 3 < stack.len() {
         if horizontal {
-            type2_curve(outline, state, stack[i], first_extra, stack[i + 1], stack[i + 2], stack[i + 3], 0);
+            type2_curve(
+                outline,
+                state,
+                stack[i],
+                first_extra,
+                stack[i + 1],
+                stack[i + 2],
+                stack[i + 3],
+                0,
+            );
         } else {
-            type2_curve(outline, state, first_extra, stack[i], stack[i + 1], stack[i + 2], 0, stack[i + 3]);
+            type2_curve(
+                outline,
+                state,
+                first_extra,
+                stack[i],
+                stack[i + 1],
+                stack[i + 2],
+                0,
+                stack[i + 3],
+            );
         }
         first_extra = 0;
         horizontal = !horizontal;
@@ -1115,11 +1276,33 @@ fn execute_type2_alternating_curve(
     let mut i = 0usize;
     let mut horizontal = horizontal_first;
     while i + 3 < stack.len() {
-        let last = if i + 4 == stack.len() - 1 { stack[i + 4] } else { 0 };
-        if horizontal {
-            type2_curve(outline, state, stack[i], 0, stack[i + 1], stack[i + 2], last, stack[i + 3]);
+        let last = if i + 4 == stack.len() - 1 {
+            stack[i + 4]
         } else {
-            type2_curve(outline, state, 0, stack[i], stack[i + 1], stack[i + 2], stack[i + 3], last);
+            0
+        };
+        if horizontal {
+            type2_curve(
+                outline,
+                state,
+                stack[i],
+                0,
+                stack[i + 1],
+                stack[i + 2],
+                last,
+                stack[i + 3],
+            );
+        } else {
+            type2_curve(
+                outline,
+                state,
+                0,
+                stack[i],
+                stack[i + 1],
+                stack[i + 2],
+                stack[i + 3],
+                last,
+            );
         }
         horizontal = !horizontal;
         i += if i + 4 == stack.len() - 1 { 5 } else { 4 };
@@ -1219,8 +1402,12 @@ fn type2_curve(
     while step <= 4 {
         let t = step;
         let inv = 4 - step;
-        let x = (inv * inv * inv * x0 + 3 * inv * inv * t * x1 + 3 * inv * t * t * x2 + t * t * t * x3) / 64;
-        let y = (inv * inv * inv * y0 + 3 * inv * inv * t * y1 + 3 * inv * t * t * y2 + t * t * t * y3) / 64;
+        let x =
+            (inv * inv * inv * x0 + 3 * inv * inv * t * x1 + 3 * inv * t * t * x2 + t * t * t * x3)
+                / 64;
+        let y =
+            (inv * inv * inv * y0 + 3 * inv * inv * t * y1 + 3 * inv * t * t * y2 + t * t * t * y3)
+                / 64;
         type2_line(outline, state, x - state.x, y - state.y);
         step += 1;
     }
@@ -1247,7 +1434,12 @@ fn cff_subr_bias(count: usize) -> i32 {
     }
 }
 
-fn cff_fallback_glyph(codepoint: u32, advance_units: u16, units_per_em: u16, pixel_size: u8) -> RasterGlyph {
+fn cff_fallback_glyph(
+    codepoint: u32,
+    advance_units: u16,
+    units_per_em: u16,
+    pixel_size: u8,
+) -> RasterGlyph {
     let height = pixel_size.max(8).min(48);
     let width = (height / 2).max(4);
     let mut data = Vec::new();
@@ -1285,7 +1477,8 @@ fn cmap_lookup(data: &[u8], cmap: Table, codepoint: u32) -> Option<u16> {
     if codepoint > 0xffff {
         return cmap_format12_lookup(data, cmap, codepoint);
     }
-    cmap_format4_lookup(data, cmap, codepoint).or_else(|| cmap_format12_lookup(data, cmap, codepoint))
+    cmap_format4_lookup(data, cmap, codepoint)
+        .or_else(|| cmap_format12_lookup(data, cmap, codepoint))
 }
 
 fn cmap_format4_lookup(data: &[u8], cmap: Table, codepoint: u32) -> Option<u16> {
@@ -1474,7 +1667,8 @@ fn gsub_ligature_substitute(data: &[u8], gsub: Table, first: u16, second: u16) -
         if coverage_index >= set_count {
             return None;
         }
-        let set = subtable.checked_add(read_u16(table, subtable + 6 + coverage_index * 2)? as usize)?;
+        let set =
+            subtable.checked_add(read_u16(table, subtable + 6 + coverage_index * 2)? as usize)?;
         let lig_count = read_u16(table, set)? as usize;
         let mut i = 0usize;
         while i < lig_count {
@@ -1572,7 +1766,8 @@ fn gpos_pair_pos_format1(table: &[u8], subtable: usize, left: u16, right: u16) -
     if left_index >= pair_set_count {
         return None;
     }
-    let pair_set = subtable.checked_add(read_u16(table, subtable + 10 + left_index * 2)? as usize)?;
+    let pair_set =
+        subtable.checked_add(read_u16(table, subtable + 10 + left_index * 2)? as usize)?;
     let pair_count = read_u16(table, pair_set)? as usize;
     let value_size1 = value_record_size(value_format1);
     let value_size2 = value_record_size(value_format2);
@@ -1672,11 +1867,17 @@ fn f2dot14(value: i16) -> f32 {
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_be_bytes([*bytes.get(offset)?, *bytes.get(offset + 1)?]))
+    Some(u16::from_be_bytes([
+        *bytes.get(offset)?,
+        *bytes.get(offset + 1)?,
+    ]))
 }
 
 fn read_i16(bytes: &[u8], offset: usize) -> Option<i16> {
-    Some(i16::from_be_bytes([*bytes.get(offset)?, *bytes.get(offset + 1)?]))
+    Some(i16::from_be_bytes([
+        *bytes.get(offset)?,
+        *bytes.get(offset + 1)?,
+    ]))
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {

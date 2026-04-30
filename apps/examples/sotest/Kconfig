@@ -6,7 +6,7 @@
 #
 
 menu "sotest example"
-source "/home/uan-gpd/codes/FeatherOS/apps/examples/sotest/main/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/examples/sotest/modprint/Kconfig"
-source "/home/uan-gpd/codes/FeatherOS/apps/examples/sotest/sotest/Kconfig"
+source "$APPSDIR/examples/sotest/main/Kconfig"
+source "$APPSDIR/examples/sotest/modprint/Kconfig"
+source "$APPSDIR/examples/sotest/sotest/Kconfig"
 endmenu # sotest example
