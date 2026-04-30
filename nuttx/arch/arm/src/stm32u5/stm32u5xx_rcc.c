@@ -929,3 +929,374 @@ void stm32_stdclockconfig(void)
     }
 }
 #endif
+
+/****************************************************************************
+ * Clock Frequency Query Functions
+ ****************************************************************************/
+
+/* MSI frequency lookup table (in Hz) */
+static const uint32_t g_msi_freq_table[] =
+{
+  48000000,   /* 0x0: 48 MHz */
+  24000000,   /* 0x1: 24 MHz */
+  16000000,   /* 0x2: 16 MHz */
+  12000000,   /* 0x3: 12 MHz */
+  4000000,    /* 0x4: 4 MHz */
+  2000000,    /* 0x5: 2 MHz */
+  1330000,    /* 0x6: 1.33 MHz (approximate) */
+  1000000,    /* 0x7: 1 MHz */
+  3072000,    /* 0x8: 3.072 MHz */
+  1536000,    /* 0x9: 1.536 MHz */
+  1024000,    /* 0xA: 1.024 MHz */
+  768000,     /* 0xB: 768 kHz */
+  512000,     /* 0xC: 512 kHz */
+  384000,     /* 0xD: 384 kHz */
+  256000,     /* 0xE: 256 kHz */
+  192000      /* 0xF: 192 kHz */
+};
+
+/****************************************************************************
+ * Name: stm32_get_msis_frequency
+ *
+ * Description:
+ *   Get the frequency of the MSIS clock in Hz.
+ *
+ ****************************************************************************/
+
+uint32_t stm32_get_msis_frequency(void)
+{
+  uint32_t regval;
+  uint32_t range;
+
+  regval = getreg32(STM32_RCC_ICSCR1);
+
+  /* Check if MSIS range selection is enabled */
+
+  if (regval & RCC_ICSCR1_MSIRGSEL_ICSCR1)
+    {
+      /* Use MSISRANGE */
+
+      range = (regval & RCC_ICSCR1_MSISRANGE_MASK) >> RCC_ICSCR1_MSISRANGE_SHIFT;
+    }
+  else
+    {
+      /* Use MSISRANGE after standby (not typically used in run mode) */
+
+      range = (regval & RCC_ICSCR1_MSISRANGE_MASK) >> RCC_ICSCR1_MSISRANGE_SHIFT;
+    }
+
+  if (range < sizeof(g_msi_freq_table) / sizeof(g_msi_freq_table[0]))
+    {
+      return g_msi_freq_table[range];
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: stm32_get_msik_frequency
+ *
+ * Description:
+ *   Get the frequency of the MSIK clock in Hz.
+ *
+ ****************************************************************************/
+
+uint32_t stm32_get_msik_frequency(void)
+{
+  uint32_t regval;
+  uint32_t range;
+
+  regval = getreg32(STM32_RCC_ICSCR1);
+  range = (regval & RCC_ICSCR1_MSIKRANGE_MASK) >> RCC_ICSCR1_MSIKRANGE_SHIFT;
+
+  if (range < sizeof(g_msi_freq_table) / sizeof(g_msi_freq_table[0]))
+    {
+      return g_msi_freq_table[range];
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: stm32_get_pllsrc_frequency
+ *
+ * Description:
+ *   Get the frequency of the PLL source clock in Hz.
+ *
+ ****************************************************************************/
+
+uint32_t stm32_get_pllsrc_frequency(uint32_t pll_id)
+{
+  uint32_t regval;
+  uint32_t src;
+
+  if (pll_id == 1)
+    {
+      regval = getreg32(STM32_RCC_PLL1CFGR);
+      src = regval & RCC_PLL1CFGR_PLL1SRC_MASK;
+
+      switch (src)
+        {
+          case RCC_PLL1CFGR_PLL1SRC_HSI:
+            return STM32_HSI_FREQUENCY;
+
+          case RCC_PLL1CFGR_PLL1SRC_HSE:
+            return STM32_HSE_FREQUENCY;
+
+          case RCC_PLL1CFGR_PLL1SRC_MSIS:
+            return stm32_get_msis_frequency();
+
+          default:
+            return 0;
+        }
+    }
+  else if (pll_id == 2)
+    {
+      regval = getreg32(STM32_RCC_PLL2CFGR);
+      src = regval & RCC_PLL2CFGR_PLL2SRC_MASK;
+
+      switch (src)
+        {
+          case RCC_PLL2CFGR_PLL2SRC_HSI:
+            return STM32_HSI_FREQUENCY;
+
+          case RCC_PLL2CFGR_PLL2SRC_HSE:
+            return STM32_HSE_FREQUENCY;
+
+          case RCC_PLL2CFGR_PLL2SRC_MSIS:
+            return stm32_get_msis_frequency();
+
+          default:
+            return 0;
+        }
+    }
+  else if (pll_id == 3)
+    {
+      regval = getreg32(STM32_RCC_PLL3CFGR);
+      src = regval & RCC_PLL3CFGR_PLL3SRC_MASK;
+
+      switch (src)
+        {
+          case RCC_PLL3CFGR_PLL3SRC_HSI:
+            return STM32_HSI_FREQUENCY;
+
+          case RCC_PLL3CFGR_PLL3SRC_HSE:
+            return STM32_HSE_FREQUENCY;
+
+          case RCC_PLL3CFGR_PLL3SRC_MSIS:
+            return stm32_get_msis_frequency();
+
+          default:
+            return 0;
+        }
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: stm32_get_pllout_frequency
+ *
+ * Description:
+ *   Calculate the output frequency of a PLL.
+ *
+ ****************************************************************************/
+
+uint32_t stm32_get_pllout_frequency(uint32_t pllsrc_freq,
+                                   uint32_t pllm_div,
+                                   uint32_t plln_mul,
+                                   uint32_t plln_frac,
+                                   uint32_t pllout_div)
+{
+  uint64_t vco_freq;
+  uint32_t output_freq;
+
+  if (pllm_div == 0 || pllout_div == 0)
+    {
+      return 0;
+    }
+
+  /* Calculate VCO frequency with fractional N support
+   * Formula: Fvco = (Fsrc / M) * (N + FRACN / 8192)
+   */
+
+  vco_freq = (uint64_t)pllsrc_freq * ((uint64_t)plln_mul * 8192 + plln_frac);
+  vco_freq /= (uint64_t)pllm_div * 8192;
+
+  /* Calculate output frequency */
+
+  output_freq = (uint32_t)(vco_freq / pllout_div);
+
+  return output_freq;
+}
+
+/****************************************************************************
+ * Name: stm32_get_sysclk_frequency
+ *
+ * Description:
+ *   Get the system clock frequency in Hz.
+ *
+ ****************************************************************************/
+
+uint32_t stm32_get_sysclk_frequency(void)
+{
+  uint32_t regval;
+  uint32_t src;
+  uint32_t pllsrc_freq;
+  uint32_t pllm_div;
+  uint32_t plln_mul;
+  uint32_t plln_frac;
+  uint32_t pllr_div;
+
+  regval = getreg32(STM32_RCC_CFGR1);
+  src = regval & RCC_CFGR1_SWS_MASK;
+
+  switch (src)
+    {
+      case RCC_CFGR1_SWS_HSI:
+        return STM32_HSI_FREQUENCY;
+
+      case RCC_CFGR1_SWS_HSE:
+        return STM32_HSE_FREQUENCY;
+
+      case RCC_CFGR1_SWS_MSIS:
+        return stm32_get_msis_frequency();
+
+      case RCC_CFGR1_SWS_PLL:
+        /* Get PLL1 configuration */
+
+        pllsrc_freq = stm32_get_pllsrc_frequency(1);
+
+        regval = getreg32(STM32_RCC_PLL1CFGR);
+        pllm_div = ((regval & RCC_PLL1CFGR_PLL1M_MASK) >> RCC_PLL1CFGR_PLL1M_SHIFT) + 1;
+
+        regval = getreg32(STM32_RCC_PLL1DIVR);
+        plln_mul = (regval & RCC_PLL1DIVR_PLL1N_MASK) >> RCC_PLL1DIVR_PLL1N_SHIFT;
+        pllr_div = ((regval & RCC_PLL1DIVR_PLL1R_MASK) >> RCC_PLL1DIVR_PLL1R_SHIFT) + 1;
+
+        /* Get fractional N value if enabled */
+
+        regval = getreg32(STM32_RCC_PLL1CFGR);
+        if (regval & RCC_PLL1CFGR_PLL1FRACEN)
+          {
+            plln_frac = getreg32(STM32_RCC_PLL1FRACR) & RCC_PLL1FRACR_PLL1FRACN_MASK;
+          }
+        else
+          {
+            plln_frac = 0;
+          }
+
+        return stm32_get_pllout_frequency(pllsrc_freq, pllm_div, plln_mul,
+                                          plln_frac, pllr_div);
+
+      default:
+        return 0;
+    }
+}
+/****************************************************************************
+ * Name: stm32_set_epod_booster
+ *
+ * Description:
+ *   Configure the EPOD booster for high-frequency operation.
+ *   The EPOD booster clock frequency should be between 4 and 16 MHz.
+ *   This function sets the PLL1MBOOST prescaler and enables the booster.
+ *
+ * Input Parameters:
+ *   pllsrc_freq - PLL1 source clock frequency in Hz
+ *   pllm_div    - PLL1 M divider value
+ *
+ ****************************************************************************/
+
+void stm32_set_epod_booster(uint32_t pllsrc_freq, uint32_t pllm_div)
+{
+  uint32_t epod_freq;
+  uint32_t regval;
+  volatile int timeout;
+
+  /* Calculate EPOD clock frequency: F_epod = F_pllsrc / M / prescaler */
+
+  if (pllm_div == 0)
+    {
+      return;
+    }
+
+  /* Reset EPOD Prescaler and disable booster first */
+
+  regval = getreg32(STM32_RCC_PLL1CFGR);
+  regval &= ~RCC_PLL1CFGR_PLL1MBOOST_MASK;
+  regval |= RCC_PLL1CFGR_PLL1MBOOST_DIV_1;
+  putreg32(regval, STM32_RCC_PLL1CFGR);
+
+  regval = getreg32(STM32_PWR_VOSR);
+  regval &= ~PWR_VOSR_BOOSTEN;
+  putreg32(regval, STM32_PWR_VOSR);
+
+  /* Wait for booster to be disabled */
+
+  for (timeout = 1000; timeout > 0; timeout--)
+    {
+      if ((getreg32(STM32_PWR_VOSR) & PWR_VOSR_BOOSTRDY) == 0)
+        {
+          break;
+        }
+      up_udelay(1);
+    }
+
+  /* Only configure for system clock > 55 MHz */
+
+  if (STM32_SYSCLK_FREQUENCY <= 55000000)
+    {
+      return;
+    }
+
+  /* Calculate appropriate prescaler to get EPOD clock between 4-16 MHz */
+
+  epod_freq = pllsrc_freq / pllm_div;
+
+  /* Find the best prescaler value */
+
+  if (epod_freq <= 16000000)
+    {
+      /* No prescaler needed, EPOD clock is already <= 16 MHz */
+
+      regval = getreg32(STM32_RCC_PLL1CFGR);
+      regval &= ~RCC_PLL1CFGR_PLL1MBOOST_MASK;
+      regval |= RCC_PLL1CFGR_PLL1MBOOST_DIV_1;
+      putreg32(regval, STM32_RCC_PLL1CFGR);
+    }
+  else
+    {
+      uint32_t div = (epod_freq + 16000000 - 1) / 16000000;
+
+      /* Limit to maximum prescaler value */
+
+      if (div > 16)
+        {
+          div = 16;
+        }
+
+      regval = getreg32(STM32_RCC_PLL1CFGR);
+      regval &= ~RCC_PLL1CFGR_PLL1MBOOST_MASK;
+      regval |= (div << RCC_PLL1CFGR_PLL1MBOOST_SHIFT);
+      putreg32(regval, STM32_RCC_PLL1CFGR);
+    }
+
+  /* Enable EPOD booster */
+
+  regval = getreg32(STM32_PWR_VOSR);
+  regval |= PWR_VOSR_BOOSTEN;
+  putreg32(regval, STM32_PWR_VOSR);
+
+  /* Wait for booster ready */
+
+  for (timeout = 1000; timeout > 0; timeout--)
+    {
+      if ((getreg32(STM32_PWR_VOSR) & PWR_VOSR_BOOSTRDY) != 0)
+        {
+          break;
+        }
+      up_udelay(1);
+    }
+
+  DEBUGASSERT(timeout > 0);
+}

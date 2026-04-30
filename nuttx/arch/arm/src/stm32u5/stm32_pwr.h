@@ -174,6 +174,32 @@ void stm32_pwr_set_wakeup_clock(uint32_t clk_source);
 
 void stm32_pwr_enable_sram_retention(uint8_t sram_bitmap);
 
+/****************************************************************************
+ * Name: stm32_pwr_enter_shutdown_mode
+ *
+ * Description:
+ *   Enter SHUTDOWN mode. In Shutdown mode, the voltage regulator is 
+ *   disabled. The SRAM and register contents are lost except for 
+ *   registers in the Backup domain and Standby circuitry.
+ *
+ ****************************************************************************/
+
+void stm32_pwr_enter_shutdown_mode(void);
+
+/****************************************************************************
+ * Name: stm32_pwr_set_voltage_scaling
+ *
+ * Description:
+ *   Set the voltage scaling for the given frequency.
+ *   This function determines the appropriate voltage range based on frequency.
+ *
+ * Input Parameters:
+ *   hclk_freq - Target HCLK frequency in Hz
+ *
+ ****************************************************************************/
+
+void stm32_pwr_set_voltage_scaling(uint32_t hclk_freq);
+
 # undef EXTERN
 # if defined(__cplusplus)
 }

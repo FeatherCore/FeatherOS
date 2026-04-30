@@ -475,3 +475,116 @@ void stm32_pwr_enable_sram_retention(uint8_t sram_bitmap)
 
   putreg32(regval, STM32_PWR_CR1);
 }
+
+/****************************************************************************
+ * Name: stm32_pwr_enter_shutdown_mode
+ *
+ * Description:
+ *   Enter SHUTDOWN mode. In Shutdown mode, the voltage regulator is 
+ *   disabled. The SRAM and register contents are lost except for 
+ *   registers in the Backup domain and Standby circuitry.
+ *
+ ****************************************************************************/
+
+void stm32_pwr_enter_shutdown_mode(void)
+{
+  uint32_t regval;
+
+  /* Select SHUTDOWN mode */
+
+  regval = getreg32(STM32_PWR_CR1);
+  regval &= ~PWR_CR1_LPMS_MASK;
+  regval |= PWR_CR1_LPMS_SHUTDOWN;
+  putreg32(regval, STM32_PWR_CR1);
+
+  /* Clear wake-up flags */
+
+  putreg32(0xffffffff, STM32_PWR_WUSCR);
+
+  /* Enter SHUTDOWN mode: Set SLEEPDEEP bit of Cortex System Control Register */
+
+  regval = getreg32(NVIC_SYSCON);
+  regval |= NVIC_SYSCON_SLEEPDEEP;
+  putreg32(NVIC_SYSCON, regval);
+
+  /* Wait for interrupt */
+
+  __asm__ volatile ("dsb" ::: "memory");
+  __asm__ volatile ("wfi");
+  __asm__ volatile ("isb" ::: "memory");
+
+  /* After waking up, clear SLEEPDEEP bit */
+  regval = getreg32(NVIC_SYSCON);
+  regval &= ~NVIC_SYSCON_SLEEPDEEP;
+  putreg32(NVIC_SYSCON, regval);
+}
+/****************************************************************************
+ * Name: stm32_pwr_set_voltage_scaling
+ *
+ * Description:
+ *   Set the voltage scaling for the given frequency.
+ *   This function determines the appropriate voltage range based on frequency.
+ *
+ * Input Parameters:
+ *   hclk_freq - Target HCLK frequency in Hz
+ *
+ ****************************************************************************/
+
+void stm32_pwr_set_voltage_scaling(uint32_t hclk_freq)
+{
+  uint32_t regval;
+  uint32_t target_vos;
+
+  /* Determine the appropriate voltage range based on frequency */
+
+  if (hclk_freq <= 25000000)
+    {
+      target_vos = PWR_VOSR_VOS_RANGE4;
+    }
+  else if (hclk_freq <= 55000000)
+    {
+      target_vos = PWR_VOSR_VOS_RANGE3;
+    }
+  else if (hclk_freq <= 110000000)
+    {
+      target_vos = PWR_VOSR_VOS_RANGE2;
+    }
+  else
+    {
+      target_vos = PWR_VOSR_VOS_RANGE1;
+    }
+
+  /* Set the voltage scaling */
+
+  regval = getreg32(STM32_PWR_VOSR);
+  regval &= ~PWR_VOSR_VOS_MASK;
+  regval |= target_vos;
+
+  /* Enable BOOST if frequency > 55 MHz */
+
+  if (hclk_freq > 55000000)
+    {
+      regval |= PWR_VOSR_BOOSTEN;
+    }
+  else
+    {
+      regval &= ~PWR_VOSR_BOOSTEN;
+    }
+
+  putreg32(regval, STM32_PWR_VOSR);
+
+  /* Wait for voltage scaling to be ready */
+
+  while ((getreg32(STM32_PWR_VOSR) & PWR_VOSR_VOSRDY) == 0)
+    {
+    }
+
+  /* Wait for booster to be ready if enabled */
+
+  if ((regval & PWR_VOSR_BOOSTEN) != 0)
+    {
+      while ((getreg32(STM32_PWR_VOSR) & PWR_VOSR_BOOSTRDY) == 0)
+        {
+        }
+    }
+}

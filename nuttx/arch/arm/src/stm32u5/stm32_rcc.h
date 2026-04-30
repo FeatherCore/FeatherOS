@@ -217,6 +217,85 @@ void stm32_rcc_disablelsi(void);
 
 void stm32_rcc_enableperipherals(void);
 
+/****************************************************************************
+ * Name: stm32_get_msis_frequency
+ *
+ * Description:
+ *   Get the frequency of the MSIS clock in Hz.
+ *
+ ****************************************************************************/
+
+uint32_t stm32_get_msis_frequency(void);
+
+/****************************************************************************
+ * Name: stm32_get_msik_frequency
+ *
+ * Description:
+ *   Get the frequency of the MSIK clock in Hz.
+ *
+ ****************************************************************************/
+
+uint32_t stm32_get_msik_frequency(void);
+
+/****************************************************************************
+ * Name: stm32_get_pllsrc_frequency
+ *
+ * Description:
+ *   Get the frequency of the PLL source clock in Hz.
+ *
+ * Input Parameters:
+ *   pll_id - PLL identifier (1, 2, or 3)
+ *
+ ****************************************************************************/
+
+uint32_t stm32_get_pllsrc_frequency(uint32_t pll_id);
+
+/****************************************************************************
+ * Name: stm32_get_pllout_frequency
+ *
+ * Description:
+ *   Calculate the output frequency of a PLL.
+ *
+ * Input Parameters:
+ *   pllsrc_freq - Frequency of the PLL source clock
+ *   pllm_div - M divider value
+ *   plln_mul - N multiplier value
+ *   plln_frac - N fractional value
+ *   pllout_div - R/P/Q divider value
+ *
+ ****************************************************************************/
+
+uint32_t stm32_get_pllout_frequency(uint32_t pllsrc_freq,
+                                   uint32_t pllm_div,
+                                   uint32_t plln_mul,
+                                   uint32_t plln_frac,
+                                   uint32_t pllout_div);
+
+/****************************************************************************
+ * Name: stm32_get_sysclk_frequency
+ *
+ * Description:
+ *   Get the system clock frequency in Hz.
+ *
+ ****************************************************************************/
+
+uint32_t stm32_get_sysclk_frequency(void);
+
+/****************************************************************************
+ * Name: stm32_set_epod_booster
+ *
+ * Description:
+ *   Configure the EPOD booster for high-frequency operation.
+ *   The EPOD booster clock frequency should be between 4 and 16 MHz.
+ *
+ * Input Parameters:
+ *   pllsrc_freq - PLL1 source clock frequency in Hz
+ *   pllm_div    - PLL1 M divider value
+ *
+ ****************************************************************************/
+
+void stm32_set_epod_booster(uint32_t pllsrc_freq, uint32_t pllm_div);
+
 #undef EXTERN
 #if defined(__cplusplus)
 }
