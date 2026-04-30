@@ -256,6 +256,55 @@ void stm32u5_dmafree(DMA_HANDLE handle);
 int stm32u5_dmawait(DMA_HANDLE handle);
 
 /****************************************************************************
+ * Name: stm32u5_dmasuspend
+ *
+ * Description:
+ *   Suspend a DMA transfer.
+ *
+ * Input Parameters:
+ *   handle - DMA channel handle
+ *
+ * Returned Value:
+ *   Zero on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+int stm32u5_dmasuspend(DMA_HANDLE handle);
+
+/****************************************************************************
+ * Name: stm32u5_dmaresume
+ *
+ * Description:
+ *   Resume a suspended DMA transfer.
+ *
+ * Input Parameters:
+ *   handle - DMA channel handle
+ *
+ * Returned Value:
+ *   Zero on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+int stm32u5_dmaresume(DMA_HANDLE handle);
+
+/****************************************************************************
+ * Name: stm32u5_dmagetstatus
+ *
+ * Description:
+ *   Get the current status of a DMA transfer.
+ *
+ * Input Parameters:
+ *   handle      - DMA channel handle
+ *   remaining   - Pointer to store the remaining bytes to transfer
+ *
+ * Returned Value:
+ *   DMA status flags on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+int stm32u5_dmagetstatus(DMA_HANDLE handle, uint32_t *remaining);
+
+/****************************************************************************
  * Name: stm32u5_dmasample
  *
  * Description:

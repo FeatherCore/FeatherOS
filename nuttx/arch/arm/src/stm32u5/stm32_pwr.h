@@ -120,10 +120,64 @@ void stm32_pwr_adjustvcore(unsigned sysclock);
 
 void stm32_pwr_enablesmps(bool enable);
 
-#undef EXTERN
-#if defined(__cplusplus)
+/****************************************************************************
+ * Name: stm32_pwr_enter_stop_mode
+ *
+ * Description:
+ *   Enter specified STOP mode. In Stop mode, the HSI16 and HSE oscillators are 
+ *   stopped. The PLL, the HSI16 and the HSE RC oscillators can be retained in 
+ *   low-power mode to save startup time.
+ *
+ * Input Parameters:
+ *   stop_mode - Which STOP mode to enter (0-3)
+ *
+ ****************************************************************************/
+
+void stm32_pwr_enter_stop_mode(uint8_t stop_mode);
+
+/****************************************************************************
+ * Name: stm32_pwr_enter_standby_mode
+ *
+ * Description:
+ *   Enter STANDBY mode. In Standby mode, the PLL, the HSI16 RC and the HSE 
+ *   crystal oscillators are stopped. The voltage regulator is disabled and 
+ *   the V_CORE supply domain is consequently powered off. RTC registers and 
+ *   backup registers are still powered from the V_BAT supply.
+ *
+ ****************************************************************************/
+
+void stm32_pwr_enter_standby_mode(void);
+
+/****************************************************************************
+ * Name: stm32_pwr_set_wakeup_clock
+ *
+ * Description:
+ *   Set the wakeup clock selection after wake from Stop mode.
+ *
+ * Input Parameters:
+ *   clk_source - Wakeup clock source (refer to reference manual)
+ *
+ ****************************************************************************/
+
+void stm32_pwr_set_wakeup_clock(uint32_t clk_source);
+
+/****************************************************************************
+ * Name: stm32_pwr_enable_sram_retention
+ *
+ * Description:
+ *   Enable SRAM retention in Stop 3 and Standby modes.
+ *
+ * Input Parameters:
+ *   sram_bitmap - Bitmap of SRAM banks to retain (bit 0: SRAM2 page 1, bit 1: SRAM2 page 2)
+ *
+ ****************************************************************************/
+
+void stm32_pwr_enable_sram_retention(uint8_t sram_bitmap);
+
+# undef EXTERN
+# if defined(__cplusplus)
 }
-#endif
+# endif
 
 #endif /* __ASSEMBLY__ */
 #endif /* __ARCH_ARM_SRC_STM32U5_STM32_PWR_H */

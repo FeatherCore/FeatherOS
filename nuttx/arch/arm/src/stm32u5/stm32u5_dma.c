@@ -554,4 +554,126 @@ void stm32u5_dmareset(unsigned int controller, unsigned int channel)
     }
 }
 
-#endif /* CONFIG_STM32U5_DMA */
+#endif /* CONFIG_STM32U5_DMA *//****************************************************************************
+ * Name: stm32u5_dmasuspend
+ *
+ * Description:
+ *   Suspend a DMA transfer.
+ *
+ ****************************************************************************/
+
+int stm32u5_dmasuspend(DMA_HANDLE handle)
+{
+  struct stm32u5_dma_channel_s *dmach = (struct stm32u5_dma_channel_s *)handle;
+  uint32_t regaddr;
+  uint32_t regval;
+  volatile int timeout;
+
+  DEBUGASSERT(dmach != NULL);
+
+  /* Suspend the channel */
+
+  if (dmach->controller == DMA_GPDMA1)
+    {
+      regaddr = STM32U5_GPDMA_CH0_CCR + (dmach->channel * STM32U5_GPDMA_CH_OFFSET);
+      
+      /* Write suspend bit */
+      modifyreg32(regaddr, 0, GPDMA_CCR_SUSP);
+
+      /* Wait for suspend flag */
+      regaddr = STM32U5_GPDMA_CH0_CSR + (dmach->channel * STM32U5_GPDMA_CH_OFFSET);
+      for (timeout = 1000; timeout > 0; timeout--)
+        {
+          regval = getreg32(regaddr);
+          if (regval & GPDMA_CSR_SUSPF)
+            {
+              break;
+            }
+          up_udelay(10);
+        }
+
+      if (timeout == 0)
+        {
+          return -ETIMEDOUT;
+        }
+    }
+  else
+    {
+      /* LPDMA1 does not support suspend in the same way */
+      /* Just stop the channel temporarily */
+      regaddr = STM32U5_LPDMA_CH0_CCR + (dmach->channel * STM32U5_LPDMA_CH_OFFSET);
+      modifyreg32(regaddr, LPDMA_CCR_EN, 0);
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: stm32u5_dmaresume
+ *
+ * Description:
+ *   Resume a suspended DMA transfer.
+ *
+ ****************************************************************************/
+
+int stm32u5_dmaresume(DMA_HANDLE handle)
+{
+  struct stm32u5_dma_channel_s *dmach = (struct stm32u5_dma_channel_s *)handle;
+  uint32_t regaddr;
+
+  DEBUGASSERT(dmach != NULL);
+
+  /* Resume the channel */
+
+  if (dmach->controller == DMA_GPDMA1)
+    {
+      regaddr = STM32U5_GPDMA_CH0_CCR + (dmach->channel * STM32U5_GPDMA_CH_OFFSET);
+      
+      /* Clear suspend bit to resume */
+      modifyreg32(regaddr, GPDMA_CCR_SUSP, 0);
+    }
+  else
+    {
+      /* LPDMA1: re-enable the channel */
+      regaddr = STM32U5_LPDMA_CH0_CCR + (dmach->channel * STM32U5_LPDMA_CH_OFFSET);
+      modifyreg32(regaddr, 0, LPDMA_CCR_EN);
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: stm32u5_dmagetstatus
+ *
+ * Description:
+ *   Get the current status of a DMA transfer.
+ *
+ ****************************************************************************/
+
+int stm32u5_dmagetstatus(DMA_HANDLE handle, uint32_t *remaining)
+{
+  struct stm32u5_dma_channel_s *dmach = (struct stm32u5_dma_channel_s *)handle;
+  uint32_t regaddr;
+
+  DEBUGASSERT(dmach != NULL);
+
+  if (remaining == NULL)
+    {
+      return -EINVAL;
+    }
+
+  /* Get the remaining bytes to transfer */
+
+  if (dmach->controller == DMA_GPDMA1)
+    {
+      regaddr = STM32U5_GPDMA_CH0_CNDTR + (dmach->channel * STM32U5_GPDMA_CH_OFFSET);
+      *remaining = getreg32(regaddr);
+    }
+  else
+    {
+      regaddr = STM32U5_LPDMA_CH0_CNDTR + (dmach->channel * STM32U5_LPDMA_CH_OFFSET);
+      *remaining = getreg32(regaddr);
+    }
+
+  return dmach->status;
+}
