@@ -535,6 +535,22 @@ config RA8P_MEMC_BUS_WIDTH
 	help
 	  SDRAM bus width (16 or 32 bits).
 
+comment "NPU (Neural Processing Unit) Configuration"
+
+config RA8P_NPU
+	bool "NPU (Ethos-U55)"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC && RA8P_NPU_ETHOS_U55
+	help
+	  Enable Ethos-U55 NPU support for AI/ML operations.
+
+config RA8P_NPU_MACS
+	int "Number of MAC Units"
+	default 512
+	depends on RA8P_NPU
+	help
+	  Number of MAC (Multiply-Accumulate) units (256, 512, or 1024).
+
 comment "GLCDC Configuration"
 
 config RA8P_GLCDC
