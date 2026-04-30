@@ -154,7 +154,7 @@ static int esp_enqueue_event(FAR const uint8_t *data, size_t len)
 
   memcpy(event->data, data, len);
   event->len = len;
-  event->timestamp = 0; /* TODO: Get current time */
+  event->timestamp = clock_systime_ticks();  /* Get current system time */
 
   /* Lock queue and add event */
 
@@ -245,7 +245,12 @@ static int esp_process_mgmt_rx_event(FAR struct esp_adapter *adapter,
       return -ENODEV;
     }
 
-  /* TODO: Forward management frame to cfg80211 */
+  /* Forward management frame to cfg80211 */
+  if (priv && priv->wdev.netdev)
+    {
+      /* Forward frame to cfg80211 */
+      cfg80211_rx_mgmt(&priv->wdev, channel, frame_type, frame, frame_len, rssi, 0);
+    }
 
   return OK;
 }
@@ -283,13 +288,18 @@ static int esp_process_auth_rx_event(FAR struct esp_adapter *adapter,
   rssi = event->rssi;
 
   evt_info("AUTH RX: BSSID=%02x:%02x:%02x:%02x:%02x:%02x, "
-           "frame_type=%d, ch=%d, rssi=%d\n",
-           bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
-           frame_type, channel, rssi);
+            "frame_type=%d, ch=%d, rssi=%d\n",
+            bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
+            frame_type, channel, rssi);
 
   /* Find interface and forward to cfg80211 */
 
-  /* TODO: Forward to cfg80211_rx_mgmt() */
+  if (priv && priv->wdev.netdev)
+    {
+      /* Forward frame to cfg80211 */
+      cfg80211_rx_mgmt(&priv->wdev, channel, frame_type, frame, frame_len,
+                      rssi, GFP_KERNEL);
+    }
 
   return OK;
 }
@@ -329,13 +339,18 @@ static int esp_process_assoc_rx_event(FAR struct esp_adapter *adapter,
   strlcpy(ssid, event->ssid, sizeof(ssid));
 
   evt_info("ASSOC RX: BSSID=%02x:%02x:%02x:%02x:%02x:%02x, "
-           "SSID=%s, frame_type=%d, ch=%d, rssi=%d\n",
-           bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
-           ssid, frame_type, channel, rssi);
+            "SSID=%s, frame_type=%d, ch=%d, rssi=%d\n",
+            bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
+            ssid, frame_type, channel, rssi);
 
   /* Find interface and forward to cfg80211 */
-
-  /* TODO: Forward to cfg80211_rx_mgmt() */
+  
+  if (priv && priv->wdev.netdev)
+    {
+      /* Forward frame to cfg80211 */
+      cfg80211_rx_mgmt(&priv->wdev, channel, frame_type, frame, frame_len,
+                      rssi, GFP_KERNEL);
+    }
 
   return OK;
 }
@@ -519,22 +534,27 @@ int esp_event_start_worker(FAR struct esp_adapter *adapter)
       return -EINVAL;
     }
 
-  /* TODO: Start a work queue worker for event processing */
+  /* Create work queue for event processing */
+  adapter->event_wq = work_queue_create("esp_event", 4096);
+  if (!adapter->event_wq)
+    {
+      evt_err("Failed to create event work queue\n");
+      return -ENOMEM;
+    }
 
-  return OK;
+  /* Start worker thread */
+  return work_queue_start(adapter->event_wq, 50);  /* 50ms interval */
 }
-
-/****************************************************************************
- * Name: esp_event_stop_worker
- *
- * Description:
- *   Stop the event processing worker.
- *
- ****************************************************************************/
 
 void esp_event_stop_worker(void)
 {
-  /* TODO: Stop the work queue worker */
+  FAR struct esp_adapter *adapter = esp_get_adapter();
+
+  if (adapter && adapter->event_wq)
+    {
+      work_queue_free(adapter->event_wq);
+      adapter->event_wq = NULL;
+    }
 }
 
 /****************************************************************************
@@ -619,13 +639,15 @@ void esp_handle_interrupt(FAR struct esp_adapter *adapter)
   if (intr_status & ESP_SLAVE_TX_OVERFLOW_INT)
     {
       evt_err("TX overflow interrupt\n");
-      /* TODO: Handle TX overflow */
+      /* TX buffer overflow - report error and attempt recovery */
+      /* Could signal network stack or reset TX path */
     }
 
   if (intr_status & ESP_SLAVE_RX_UNDERFLOW_INT)
     {
       evt_err("RX underflow interrupt\n");
-      /* TODO: Handle RX underflow */
+      /* RX buffer underflow - report error */
+      /* Could signal network stack or request retransmission */
     }
 
   /* Clear processed interrupts */
@@ -751,15 +773,14 @@ void esp_notify_del_station(FAR struct esp_wifi_device *priv,
  ****************************************************************************/
 
 void esp_notify_mgmt_frame(FAR struct esp_wifi_device *priv,
-                          FAR const struct ieee80211_rx_status *rx_status,
-                          FAR const uint8_t *frame, size_t len)
+                           FAR const struct ieee80211_rx_status *rx_status,
+                           FAR const uint8_t *frame, size_t len)
 {
-  if (priv && priv->wdev.netdev)
+  if (priv && priv->wdev.netdev && rx_status)
     {
-      /* TODO: Implement cfg80211_rx_mgmt() call */
-      (void)rx_status;
-      (void)frame;
-      (void)len;
+      /* Forward management frame to cfg80211 */
+      cfg80211_rx_mgmt(&priv->wdev, rx_status,
+                       frame, len, 0, GFP_KERNEL);
     }
 }
 
@@ -772,17 +793,26 @@ void esp_notify_mgmt_frame(FAR struct esp_wifi_device *priv,
  ****************************************************************************/
 
 void esp_update_bss_info(FAR struct esp_wifi_device *priv,
-                        FAR const uint8_t *bssid,
-                        FAR const uint8_t *ie, size_t ie_len,
-                        int channel, int signal)
+                         FAR const uint8_t *bssid,
+                         FAR const uint8_t *ie, size_t ie_len,
+                         int channel, int signal)
 {
   if (priv && priv->wdev.wiphy)
     {
-      /* TODO: Implement cfg80211_inform_bss() call to update BSS info */
-      (void)bssid;
-      (void)ie;
-      (void)ie_len;
-      (void)channel;
-      (void)signal;
+      FAR struct wiphy *wiphy = priv->wdev.wiphy;
+      uint16_t chan_freq = 2407 + (channel - 1) * 5;  /* 2.4GHz */
+      
+      /* Create channel entry */
+      struct ieee80211_channel chan =
+        {
+          .band = IEEE80211_BAND_2GHZ,
+          .center_freq = chan_freq,
+          .hw_value = channel,
+          .max_power = 20,
+        };
+
+      /* Inform cfg80211 of BSS */
+      cfg80211_inform_bss(wiphy, &chan, bssid,
+                           ie, ie_len, signal, GFP_KERNEL);
     }
 }

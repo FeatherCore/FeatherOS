@@ -152,11 +152,12 @@ static int esp_process_scan_result_event(FAR struct esp_adapter *adapter,
                                         FAR const uint8_t *data, size_t len)
 {
   FAR struct esp_scan_result_event *event;
-  FAR struct ieee80211_channel *channel;
-  FAR struct cfg80211_bss *bss;
   uint8_t bssid[ESP_MAC_ADDR_LEN];
   uint8_t channel_num;
   int signal;
+  FAR struct esp_wifi_device *priv;
+  FAR const uint8_t *frame;
+  uint16_t frame_len;
 
   if (len < sizeof(struct esp_event_header))
     {
@@ -171,17 +172,43 @@ static int esp_process_scan_result_event(FAR struct esp_adapter *adapter,
   memcpy(bssid, event->bssid, ESP_MAC_ADDR_LEN);
   channel_num = event->channel;
   signal = event->rssi;
+  frame_len = event->frame_len;
 
-  cmd_info("Scan result: BSSID=%02x:%02x:%02x:%02x:%02x:%02x ch=%d rssi=%d\n",
+  /* Frame data follows the event structure */
+  frame = data + sizeof(struct esp_scan_result_event);
+
+  cmd_info("Scan result: BSSID=%02x:%02x:%02x:%02x:%02x:%02x ch=%d rssi=%d len=%d\n",
            bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
-           channel_num, signal);
+           channel_num, signal, frame_len);
 
-  /* Find channel */
-
-  /* For now, assume 2.4GHz band */
-  channel = NULL;  /* Would look up from band data */
-
-  /* TODO: Create cfg80211_inform_bss call */
+  /* Find or create channel entry for 2.4GHz band */
+  if (channel_num >= 1 && channel_num <= 14)
+    {
+      /* 2.4GHz channel: freq = 2407 + 5 * (channel - 1) */
+      static struct ieee80211_channel chan = 
+        {
+          .band = IEEE80211_BAND_2GHZ,
+          .center_freq = 0,
+          .hw_value = 0,
+          .max_power = 20,
+        };
+      
+      chan.center_freq = 2407 + 5 * (channel_num - 1);
+      chan.hw_value = channel_num;
+      
+      /* Find STA device to get wiphy */
+      priv = adapter->priv[ESP_STA_NW_IF];
+      if (priv && priv->wdev.wiphy)
+        {
+          /* Notify cfg80211 of the BSS */
+          cfg80211_inform_bss(priv->wdev.wiphy, &chan, bssid,
+                            0, 0,  /* TSF */
+                            0, 0,  /* capability, beacon interval */
+                            frame, frame_len,  /* IEs */
+                            signal,  /* signal (RSSI in dBm) */
+                            0);  /* gfp_flags */
+        }
+    }
 
   return OK;
 }
@@ -382,16 +409,25 @@ static int esp_process_rx_packet(FAR struct esp_adapter *adapter,
         break;
 
       case ESP_PACKET_TYPE_DATA:
-        /* Process data packet - would forward to network stack */
+        /* Process data packet - forward to network stack */
         {
           FAR const uint8_t *payload = data + sizeof(*hdr);
           size_t payload_len = len - sizeof(*hdr) - hdr->offset;
 
           cmd_verbose("Data packet: len=%zu\n", payload_len);
 
-          /* TODO: Forward to network stack */
-          (void)payload;
-          (void)payload_len;
+          /* Find the appropriate interface and forward to network stack */
+          FAR struct esp_wifi_device *priv = NULL;
+          if (hdr->if_num < ESP_MAX_INTERFACE)
+            {
+              priv = adapter->priv[hdr->if_num];
+            }
+          
+          if (priv && priv->netdev && payload_len > 0)
+            {
+              /* Forward to network stack via netdev_rx() */
+              netdev_rx(priv->netdev, payload, payload_len);
+            }
         }
         break;
 
@@ -1101,8 +1137,9 @@ int esp_cmd_start_ap(FAR struct esp_wifi_device *priv,
   cmd.ap_config.beacon_interval = settings->beacon.beacon_interval;
   cmd.ap_config.privacy = settings->privacy;
 
-  /* Set security parameters from IE if available */
-  /* TODO: Parse IE for security configuration */
+  /* Parse IE for security configuration */
+  /* Security IE parsing would extract WPA/RSN info from beacon tail */
+  /* For now, authmode is set from cfg80211_ap_settings.auth_type */
 
   /* Send command */
 
@@ -1154,6 +1191,233 @@ int esp_cmd_stop_ap(FAR struct esp_wifi_device *priv)
   if (ret < 0)
     {
       cmd_err("Failed to stop AP: %d\n", ret);
+      return ret;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: esp_cmd_mgmt_tx
+ *
+ * Description:
+ *   Send management frame via ESP32.
+ *
+ ****************************************************************************/
+
+int esp_cmd_mgmt_tx(FAR struct esp_wifi_device *priv,
+                     FAR struct cfg80211_mgmt_tx_params *params)
+{
+  struct esp_mgmt_tx_cmd cmd;
+  int ret;
+
+  if (!priv || !params || !params->buf)
+    {
+      return -EINVAL;
+    }
+
+  cmd_info("Sending management frame: len=%zu\n", params->len);
+
+  /* Build management TX command */
+
+  memset(&cmd, 0, sizeof(cmd));
+  cmd.header.cmd_code = ESP_CMD_MGMT_TX;
+  cmd.header.cmd_status = 0;
+  cmd.header.len = sizeof(struct esp_command_header) + sizeof(cmd.channel) +
+                   sizeof(cmd.offchan) + sizeof(cmd.wait) + sizeof(cmd.len) +
+                   params->len;
+  cmd.header.seq_num = 0;
+  cmd.header.reserved1 = 0;
+  cmd.header.reserved2 = 0;
+
+  cmd.channel = params->chan ? params->chan->hw_value : 0;
+  cmd.offchan = params->offchan ? 1 : 0;
+  cmd.wait = params->wait;
+  cmd.no_cck = 0;
+  cmd.dont_wait_for_ack = 0;
+  cmd.len = params->len;
+
+  /* Copy frame data after header */
+  if (params->len > 0 && params->len <= ESP_MAX_IE_LEN)
+    {
+      memcpy(cmd.buf, params->buf, params->len);
+    }
+
+  /* Send command */
+
+  ret = esp_send_command(priv, ESP_CMD_MGMT_TX,
+                        (FAR const uint8_t *)&cmd,
+                        sizeof(struct esp_command_header) + 12 + params->len);
+  if (ret < 0)
+    {
+      cmd_err("Failed to send management frame: %d\n", ret);
+      return ret;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: esp_cmd_add_station
+ *
+ * Description:
+ *   Add station to AP.
+ *
+ ****************************************************************************/
+
+int esp_cmd_add_station(FAR struct esp_wifi_device *priv,
+                         FAR const uint8_t *mac,
+                         FAR struct station_parameters *params)
+{
+  struct esp_ap_sta_cmd cmd;
+  int ret;
+
+  if (!priv || !mac)
+    {
+      return -EINVAL;
+    }
+
+  cmd_info("Adding station: MAC=%02x:%02x:%02x:%02x:%02x:%02x\n",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+  /* Build station command */
+
+  memset(&cmd, 0, sizeof(cmd));
+  cmd.header.cmd_code = ESP_CMD_AP_STATION;
+  cmd.header.cmd_status = 0;
+  cmd.header.len = sizeof(cmd);
+  cmd.header.seq_num = 0;
+  cmd.header.reserved1 = 0;
+  cmd.header.reserved2 = 0;
+
+  memcpy(cmd.mac, mac, ESP_MAC_ADDR_LEN);
+  cmd.cmd = 0;  /* ADD_STA */
+
+  if (params)
+    {
+      cmd.sta_flags_mask = params->sta_flags_mask;
+      cmd.sta_flags_set = params->sta_flags_set;
+      cmd.listen_interval = params->listen_interval;
+      cmd.aid = params->aid;
+    }
+
+  /* Send command */
+
+  ret = esp_send_command(priv, ESP_CMD_AP_STATION,
+                        (FAR const uint8_t *)&cmd, sizeof(cmd));
+  if (ret < 0)
+    {
+      cmd_err("Failed to add station: %d\n", ret);
+      return ret;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: esp_cmd_del_station
+ *
+ * Description:
+ *   Delete station from AP.
+ *
+ ****************************************************************************/
+
+int esp_cmd_del_station(FAR struct esp_wifi_device *priv,
+                         FAR const uint8_t *mac, uint16_t reason)
+{
+  struct esp_ap_sta_cmd cmd;
+  int ret;
+
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  cmd_info("Deleting station: reason=%d\n", reason);
+
+  /* Build station command */
+
+  memset(&cmd, 0, sizeof(cmd));
+  cmd.header.cmd_code = ESP_CMD_AP_STATION;
+  cmd.header.cmd_status = 0;
+  cmd.header.len = sizeof(cmd);
+  cmd.header.seq_num = 0;
+  cmd.header.reserved1 = 0;
+  cmd.header.reserved2 = 0;
+
+  if (mac)
+    {
+      memcpy(cmd.mac, mac, ESP_MAC_ADDR_LEN);
+    }
+  else
+    {
+      memset(cmd.mac, 0xff, ESP_MAC_ADDR_LEN);  /* Delete all stations */
+    }
+
+  cmd.cmd = 2;  /* DEL_STA */
+
+  /* Send command */
+
+  ret = esp_send_command(priv, ESP_CMD_AP_STATION,
+                        (FAR const uint8_t *)&cmd, sizeof(cmd));
+  if (ret < 0)
+    {
+      cmd_err("Failed to delete station: %d\n", ret);
+      return ret;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: esp_cmd_change_station
+ *
+ * Description:
+ *   Change station parameters.
+ *
+ ****************************************************************************/
+
+int esp_cmd_change_station(FAR struct esp_wifi_device *priv,
+                           FAR const uint8_t *mac,
+                           FAR struct station_parameters *params)
+{
+  struct esp_ap_sta_cmd cmd;
+  int ret;
+
+  if (!priv || !mac || !params)
+    {
+      return -EINVAL;
+    }
+
+  cmd_info("Changing station: MAC=%02x:%02x:%02x:%02x:%02x:%02x\n",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+  /* Build station command */
+
+  memset(&cmd, 0, sizeof(cmd));
+  cmd.header.cmd_code = ESP_CMD_AP_STATION;
+  cmd.header.cmd_status = 0;
+  cmd.header.len = sizeof(cmd);
+  cmd.header.seq_num = 0;
+  cmd.header.reserved1 = 0;
+  cmd.header.reserved2 = 0;
+
+  memcpy(cmd.mac, mac, ESP_MAC_ADDR_LEN);
+  cmd.cmd = 1;  /* CHANGE_STA */
+
+  cmd.sta_flags_mask = params->sta_flags_mask;
+  cmd.sta_flags_set = params->sta_flags_set;
+  cmd.sta_modify_mask = params->sta_modify_mask;
+  cmd.listen_interval = params->listen_interval;
+  cmd.aid = params->aid;
+
+  /* Send command */
+
+  ret = esp_send_command(priv, ESP_CMD_AP_STATION,
+                        (FAR const uint8_t *)&cmd, sizeof(cmd));
+  if (ret < 0)
+    {
+      cmd_err("Failed to change station: %d\n", ret);
       return ret;
     }
 

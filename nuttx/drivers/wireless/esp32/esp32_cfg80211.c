@@ -21,7 +21,10 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Included Files
+ * ESP32 cfg80211 Driver Implementation
+ *
+ * This file implements the cfg80211 operations for ESP32 WiFi driver.
+ * It provides standard cfg80211 interface for wpa_supplicant/hostapd.
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -29,110 +32,51 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
+#include <semaphore.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/nuttx.h>
+#include <nuttx/semaphore.h>
+#include <nuttx/wqueue.h>
 #include <nuttx/wireless/cfg80211.h>
 #include <nuttx/wireless/nl80211.h>
+
+#include "esp_cfg80211.h"
+#include "esp_host_if.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_WIRELESS_INFO
-#  define esp32_wlaninfo(format, ...) \
-     ninfo("esp32: " format, ##__VA_ARGS__)
+#  define esp_info(fmt, ...)  ninfo("esp32: " fmt, ##__VA_ARGS__)
 #else
-#  define esp32_wlaninfo(format, ...)
+#  define esp_info(fmt, ...)
 #endif
 
 #ifdef CONFIG_DEBUG_WIRELESS_ERROR
-#  define esp32_wlanerr(format, ...) \
-     nerr("esp32: " format, ##__VA_ARGS__)
+#  define esp_err(fmt, ...)   nerr("esp32: " fmt, ##__VA_ARGS__)
 #else
-#  define esp32_wlanerr(format, ...)
+#  define esp_err(fmt, ...)
 #endif
 
 #ifdef CONFIG_DEBUG_WIRELESS_WARN
-#  define esp32_wlanwarn(format, ...) \
-     nwarn("esp32: " format, ##__VA_ARGS__)
+#  define esp_warn(fmt, ...)  nwarn("esp32: " fmt, ##__VA_ARGS__)
 #else
-#  define esp32_wlanwarn(format, ...)
+#  define esp_warn(fmt, ...)
 #endif
 
-#ifndef CONFIG_ESP32_WIFI_NINTERFACES
-#  define CONFIG_ESP32_WIFI_NINTERFACES 1
-#endif
+/* Default values */
 
-/* Supported bands and rates for ESP32 */
+#define ESP_DEFAULT_TX_POWER_DBM 15
 
-#define ESP32_NUM_CHANNELS_2GHZ     14
-#define ESP32_NUM_RATES             12
+/* Channels and rates for 2.4GHz band */
 
-/****************************************************************************
- * Private Types
- ****************************************************************************/
-
-/* ESP32 private data structure */
-
-struct esp32_priv
-{
-  struct wiphy *wiphy;              /* Wiphy structure */
-  struct wireless_dev wdev;         /* Wireless device */
-  struct net_device *netdev;        /* Network device */
-  uint8_t mac_addr[6];             /* MAC address */
-  bool connected;                  /* Connection status */
-  uint8_t ssid[32];               /* SSID */
-  size_t ssid_len;                 /* SSID length */
-  uint8_t bssid[6];               /* BSSID */
-  int8_t rssi;                    /* Signal strength */
-};
-
-/****************************************************************************
- * Private Function Prototypes
- ****************************************************************************/
-
-static int esp32_cfg80211_add_iface(struct wiphy *wiphy,
-                                   const char *name,
-                                   unsigned char name_assign_type,
-                                   enum nl80211_iftype type,
-                                   struct vif_params *params);
-static int esp32_cfg80211_del_iface(struct wiphy *wiphy,
-                                   struct wireless_dev *wdev);
-static int esp32_cfg80211_change_iface(struct wiphy *wiphy,
-                                      struct wireless_dev *wdev,
-                                      enum nl80211_iftype type,
-                                      struct vif_params *params);
-static int esp32_cfg80211_scan(struct wiphy *wiphy,
-                              struct cfg80211_scan_request *request);
-static int esp32_cfg80211_connect(struct wiphy *wiphy,
-                                 struct net_device *dev,
-                                 struct cfg80211_connect_params *sme);
-static int esp32_cfg80211_disconnect(struct wiphy *wiphy,
-                                    struct net_device *dev,
-                                    u16 reason_code);
-static int esp32_cfg80211_add_key(struct wiphy *wiphy,
-                                 struct net_device *netdev,
-                                 u8 key_index, bool pairwise,
-                                 const u8 *mac_addr,
-                                 struct key_params *params);
-static int esp32_cfg80211_del_key(struct wiphy *wiphy,
-                                 struct net_device *netdev,
-                                 u8 key_index, bool pairwise,
-                                 const u8 *mac_addr);
-static int esp32_cfg80211_set_default_key(struct wiphy *wiphy,
-                                         struct net_device *netdev,
-                                         u8 key_index);
-
-/****************************************************************************
- * Private Data
- ****************************************************************************/
-
-/* 2.4GHz channels supported by ESP32 */
-
-static struct ieee80211_channel g_esp32_channels_2ghz[ESP32_NUM_CHANNELS_2GHZ] =
+static struct ieee80211_channel g_esp_channels_2ghz[] =
 {
   { .band = IEEE80211_BAND_2GHZ, .center_freq = 2412, .hw_value = 1, .max_power = 20 },
   { .band = IEEE80211_BAND_2GHZ, .center_freq = 2417, .hw_value = 2, .max_power = 20 },
@@ -150,369 +94,1031 @@ static struct ieee80211_channel g_esp32_channels_2ghz[ESP32_NUM_CHANNELS_2GHZ] =
   { .band = IEEE80211_BAND_2GHZ, .center_freq = 2484, .hw_value = 14, .max_power = 20 },
 };
 
-/* Rates supported by ESP32 */
+/* Rates */
 
-static struct ieee80211_rate g_esp32_rates[ESP32_NUM_RATES] =
+static struct ieee80211_rate g_esp_rates[] =
 {
-  { .bitrate = 10, .hw_value = 0x00 },
-  { .bitrate = 20, .hw_value = 0x01 },
-  { .bitrate = 55, .hw_value = 0x02 },
-  { .bitrate = 110, .hw_value = 0x03 },
-  { .bitrate = 60, .hw_value = 0x0B },
-  { .bitrate = 90, .hw_value = 0x0F },
-  { .bitrate = 120, .hw_value = 0x0A },
-  { .bitrate = 180, .hw_value = 0x0E },
-  { .bitrate = 240, .hw_value = 0x09 },
-  { .bitrate = 360, .hw_value = 0x0D },
-  { .bitrate = 480, .hw_value = 0x08 },
-  { .bitrate = 540, .hw_value = 0x0C },
+  { .bitrate = 10, .hw_value = 0x00 },  /* 1 Mbps */
+  { .bitrate = 20, .hw_value = 0x01 },  /* 2 Mbps */
+  { .bitrate = 55, .hw_value = 0x02 },  /* 5.5 Mbps */
+  { .bitrate = 110, .hw_value = 0x03 }, /* 11 Mbps */
+  { .bitrate = 60, .hw_value = 0x0B },  /* 6 Mbps */
+  { .bitrate = 90, .hw_value = 0x0F },  /* 9 Mbps */
+  { .bitrate = 120, .hw_value = 0x0A }, /* 12 Mbps */
+  { .bitrate = 180, .hw_value = 0x0E }, /* 18 Mbps */
+  { .bitrate = 240, .hw_value = 0x09 }, /* 24 Mbps */
+  { .bitrate = 360, .hw_value = 0x0D }, /* 36 Mbps */
+  { .bitrate = 480, .hw_value = 0x08 }, /* 48 Mbps */
+  { .bitrate = 540, .hw_value = 0x0C }, /* 54 Mbps */
 };
 
-/* 2.4GHz band supported by ESP32 */
+/* 2.4GHz band definition */
 
-static struct ieee80211_supported_band g_esp32_band_2ghz =
+static struct ieee80211_supported_band g_esp_wifi_bands_2ghz =
 {
   .band = IEEE80211_BAND_2GHZ,
-  .channels = g_esp32_channels_2ghz,
-  .n_channels = ESP32_NUM_CHANNELS_2GHZ,
-  .bitrates = g_esp32_rates,
-  .n_bitrates = ESP32_NUM_RATES,
+  .channels = g_esp_channels_2ghz,
+  .n_channels = sizeof(g_esp_channels_2ghz) / sizeof(g_esp_channels_2ghz[0]),
+  .bitrates = g_esp_rates,
+  .n_bitrates = sizeof(g_esp_rates) / sizeof(g_esp_rates[0]),
   .ht_cap.ht_supported = true,
-  .ht_cap.cap = IEEE80211_HT_CAP_SUP_WIDTH_20_40 |
-                IEEE80211_HT_CAP_SGI_20 |
-                IEEE80211_HT_CAP_RX_STBC |
-                IEEE80211_HT_CAP_DSSSCCK40,
-  .ht_cap.ampdu_factor = IEEE80211_HT_MAX_AMPDU_64K,
-  .ht_cap.ampdu_density = IEEE80211_HT_MPDU_DENSITY_16,
-  .ht_cap.mcs.rx_mask = { 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-  .ht_cap.mcs.tx_params = IEEE80211_HT_MCS_TX_DEFINED,
+  .ht_cap.cap = IEEE80211_HT_CAP_SUP_WIDTH_20_40 | IEEE80211_HT_CAP_SGI_20 |
+                IEEE80211_HT_CAP_RX_STBC | IEEE80211_HT_CAP_DSSSCCK40,
 };
 
-/* Cipher suites supported by ESP32 */
+/* Supported cipher suites */
 
-static const u32 g_esp32_cipher_suites[] =
+static const uint32_t g_esp_cipher_suites[] =
 {
-  WLAN_CIPHER_SUITE_WEP40,
-  WLAN_CIPHER_SUITE_WEP104,
-  WLAN_CIPHER_SUITE_TKIP,
-  WLAN_CIPHER_SUITE_CCMP,
+  NL80211_CIPHER_SUITE_WEP40,
+  NL80211_CIPHER_SUITE_WEP104,
+  NL80211_CIPHER_SUITE_TKIP,
+  NL80211_CIPHER_SUITE_CCMP,
+  NL80211_CIPHER_SUITE_AES_CMAC,
 };
 
-/* ESP32 cfg80211 operations */
+/* Default management frame types */
 
-static const struct cfg80211_ops g_esp32_cfg80211_ops =
+static const struct ieee80211_txrx_stypes
+g_esp_default_mgmt_stypes[NL80211_IFTYPE_MAX] =
 {
-  .add_virtual_intf = esp32_cfg80211_add_iface,
-  .del_virtual_intf = esp32_cfg80211_del_iface,
-  .change_virtual_intf = esp32_cfg80211_change_iface,
-  .scan = esp32_cfg80211_scan,
-  .connect = esp32_cfg80211_connect,
-  .disconnect = esp32_cfg80211_disconnect,
-  .add_key = esp32_cfg80211_add_key,
-  .del_key = esp32_cfg80211_del_key,
-  .set_default_key = esp32_cfg80211_set_default_key,
+  [NL80211_IFTYPE_STATION] = {
+    .tx = 0xffff,
+    .rx = BIT(IEEE80211_STYPE_ACTION >> 4) | BIT(IEEE80211_STYPE_PROBE_REQ >> 4),
+  },
+  [NL80211_IFTYPE_AP] = {
+    .tx = 0xffff,
+    .rx = BIT(IEEE80211_STYPE_ASSOC_REQ >> 4) |
+          BIT(IEEE80211_STYPE_REASSOC_REQ >> 4) |
+          BIT(IEEE80211_STYPE_PROBE_REQ >> 4) |
+          BIT(IEEE80211_STYPE_DISASSOC >> 4) |
+          BIT(IEEE80211_STYPE_AUTH >> 4) |
+          BIT(IEEE80211_STYPE_DEAUTH >> 4) |
+          BIT(IEEE80211_STYPE_ACTION >> 4),
+  },
 };
 
-/* ESP32 private data instances */
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
 
-static struct esp32_priv g_esp32_priv[CONFIG_ESP32_WIFI_NINTERFACES];
+static struct esp_adapter g_esp_adapter;
+
+/****************************************************************************
+ * Private Function Prototypes
+ ****************************************************************************/
+
+/* cfg80211 operations */
+
+static int esp_cfg80211_add_iface(struct wiphy *wiphy,
+                                   const char *name,
+                                   enum nl80211_iftype type,
+                                   struct vif_params *params);
+static int esp_cfg80211_del_iface(struct wiphy *wiphy,
+                                   struct wireless_dev *wdev);
+static int esp_cfg80211_change_iface(struct wiphy *wiphy,
+                                    struct wireless_dev *wdev,
+                                    enum nl80211_iftype type,
+                                    struct vif_params *params);
+static int esp_cfg80211_scan(struct wiphy *wiphy,
+                                struct cfg80211_scan_request *request);
+static int esp_cfg80211_connect(struct wiphy *wiphy,
+                                 struct net_device *dev,
+                                 struct cfg80211_connect_params *sme);
+static int esp_cfg80211_disconnect(struct wiphy *wiphy,
+                                    struct net_device *dev,
+                                    uint16_t reason_code);
+static int esp_cfg80211_add_key(struct wiphy *wiphy,
+                                 struct net_device *dev,
+                                 uint8_t key_index, bool pairwise,
+                                 const uint8_t *mac_addr,
+                                 struct key_params *params);
+static int esp_cfg80211_del_key(struct wiphy *wiphy,
+                                 struct net_device *dev,
+                                 uint8_t key_index, bool pairwise,
+                                 const uint8_t *mac_addr);
+static int esp_cfg80211_set_default_key(struct wiphy *wiphy,
+                                          struct net_device *dev,
+                                          uint8_t key_index,
+                                          bool unicast, bool multicast);
+static int esp_cfg80211_start_ap(struct wiphy *wiphy,
+                                 struct net_device *dev,
+                                 struct cfg80211_ap_settings *settings);
+static int esp_cfg80211_stop_ap(struct wiphy *wiphy,
+                                struct net_device *dev);
+static int esp_cfg80211_change_beacon(struct wiphy *wiphy,
+                                       struct net_device *dev,
+                                       struct cfg80211_beacon_settings *info);
+static int esp_cfg80211_add_station(struct wiphy *wiphy,
+                                  struct net_device *dev,
+                                  const uint8_t *mac,
+                                  struct station_parameters *params);
+static int esp_cfg80211_del_station(struct wiphy *wiphy,
+                                  struct net_device *dev,
+                                  struct station_del_parameters *params);
+static int esp_cfg80211_change_station(struct wiphy *wiphy,
+                                     struct net_device *dev,
+                                     const uint8_t *mac,
+                                     struct station_parameters *params);
+static int esp_cfg80211_get_station(struct wiphy *wiphy,
+                                  struct net_device *dev,
+                                  const uint8_t *mac,
+                                  struct station_info *sinfo);
+static int esp_cfg80211_set_tx_power(struct wiphy *wiphy,
+                                    struct wireless_dev *wdev,
+                                    enum nl80211_tx_power_setting type,
+                                    int mbm);
+static int esp_cfg80211_get_tx_power(struct wiphy *wiphy,
+                                    struct wireless_dev *wdev,
+                                    int *dbm);
+static int esp_cfg80211_set_wiphy_params(struct wiphy *wiphy,
+                                          uint32_t changed);
+static int esp_cfg80211_mgmt_tx(struct wiphy *wiphy,
+                                struct wireless_dev *wdev,
+                                struct cfg80211_mgmt_tx_params *params,
+                                uint64_t *cookie);
+static int esp_cfg80211_set_bitrate_mask(struct wiphy *wiphy,
+                                      struct net_device *dev,
+                                      const uint8_t *peer,
+                                      struct cfg80211_bitrate_mask *mask);
+
+static const struct cfg80211_ops g_esp_cfg80211_ops =
+{
+  .add_virtual_intf = esp_cfg80211_add_iface,
+  .del_virtual_intf = esp_cfg80211_del_iface,
+  .change_virtual_intf = esp_cfg80211_change_iface,
+  .scan = esp_cfg80211_scan,
+  .connect = esp_cfg80211_connect,
+  .disconnect = esp_cfg80211_disconnect,
+  .add_key = esp_cfg80211_add_key,
+  .del_key = esp_cfg80211_del_key,
+  .set_default_key = esp_cfg80211_set_default_key,
+  .start_ap = esp_cfg80211_start_ap,
+  .stop_ap = esp_cfg80211_stop_ap,
+  .change_beacon = esp_cfg80211_change_beacon,
+  .add_station = esp_cfg80211_add_station,
+  .del_station = esp_cfg80211_del_station,
+  .change_station = esp_cfg80211_change_station,
+  .get_station = esp_cfg80211_get_station,
+  .set_tx_power = esp_cfg80211_set_tx_power,
+  .get_tx_power = esp_cfg80211_get_tx_power,
+  .set_wiphy_params = esp_cfg80211_set_wiphy_params,
+  .mgmt_tx = esp_cfg80211_mgmt_tx,
+};
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-static int esp32_cfg80211_add_iface(struct wiphy *wiphy,
+/****************************************************************************
+ * Name: esp_cfg80211_add_iface
+ *
+ * Description:
+ *   Add a virtual interface.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_add_iface(struct wiphy *wiphy,
                                    const char *name,
-                                   unsigned char name_assign_type,
                                    enum nl80211_iftype type,
                                    struct vif_params *params)
 {
-  struct esp32_priv *priv;
-  struct net_device *netdev;
-  int ifindex;
+  struct esp_adapter *adapter;
+  struct esp_wifi_device *priv;
   int ret;
 
-  esp32_wlaninfo("Adding interface: %s, type: %d\n", name, type);
-
-  /* Find available private data */
-
-  priv = NULL;
-  for (ifindex = 0; ifindex < CONFIG_ESP32_WIFI_NINTERFACES; ifindex++)
+  if (!wiphy || !name)
     {
-      if (!g_esp32_priv[ifindex].wiphy)
-        {
-          priv = &g_esp32_priv[ifindex];
-          break;
-        }
+      esp_err("Invalid parameters\n");
+      return -EINVAL;
     }
 
+  adapter = wiphy_priv(wiphy);
+  if (!adapter)
+    {
+      esp_err("Invalid adapter\n");
+      return -EINVAL;
+    }
+
+  /* Allocate WiFi device */
+  priv = kmm_zalloc(sizeof(struct esp_wifi_device));
   if (!priv)
     {
-      esp32_wlanerr("No available interface slots\n");
-      return -ENOSPC;
-    }
-
-  /* Allocate network device */
-
-  netdev = netdev_alloc(name, name_assign_type, sizeof(struct esp32_priv *));
-  if (!netdev)
-    {
-      esp32_wlanerr("Failed to allocate network device\n");
+      esp_err("Failed to allocate WiFi device\n");
       return -ENOMEM;
     }
 
-  /* Initialize private data */
-
-  memset(priv, 0, sizeof(struct esp32_priv));
-  priv->wiphy = wiphy;
-  priv->netdev = netdev;
-  netdev_set_priv(netdev, priv);
-
-  /* Initialize wireless device */
-
+  /* Initialize WiFi device */
   priv->wdev.wiphy = wiphy;
-  priv->wdev.netdev = netdev;
+  priv->adapter = adapter;
+  priv->if_type = (type == NL80211_IFTYPE_STATION) ? ESP_STA_IF_TYPE : ESP_AP_IF_TYPE;
+  priv->if_num = (priv->if_type == ESP_STA_IF_TYPE) ? 0 : 1;
   priv->wdev.iftype = type;
 
-  /* Set up network device callbacks */
-
-  netdev->d_ifup = NULL;  /* To be filled by upper layers */
-  netdev->d_ifdown = NULL;
-  netdev->d_txavail = NULL;
-  netdev->d_txmit = NULL;
-  netdev->d_pktsize = CONFIG_NET_ETH_PKTSIZE;
-  netdev->d_llhdrlen = 14; /* Ethernet header length */
-
-  /* Generate random MAC address */
-
-  eth_random_ethaddr(priv->mac_addr);
-
-  /* Set MAC address */
-
-  netdev->d_mac.ether.ether_addr_octet[0] = priv->mac_addr[0];
-  netdev->d_mac.ether.ether_addr_octet[1] = priv->mac_addr[1];
-  netdev->d_mac.ether.ether_addr_octet[2] = priv->mac_addr[2];
-  netdev->d_mac.ether.ether_addr_octet[3] = priv->mac_addr[3];
-  netdev->d_mac.ether.ether_addr_octet[4] = priv->mac_addr[4];
-  netdev->d_mac.ether.ether_addr_octet[5] = priv->mac_addr[5];
-
-  /* Register network device */
-
-  ret = netdev_register(netdev);
+  /* Register with ESP32 */
+  ret = esp_cmd_init_interface(priv);
   if (ret < 0)
     {
-      esp32_wlanerr("Failed to register network device: %d\n", ret);
-      netdev_free(netdev);
+      esp_err("Failed to initialize interface: %d\n", ret);
+      kmm_free(priv);
       return ret;
     }
 
-  esp32_wlaninfo("Interface %s added successfully\n", name);
+  /* Get MAC address */
+  ret = esp_cmd_get_mac(priv);
+  if (ret < 0)
+    {
+      esp_err("Failed to get MAC: %d\n", ret);
+      esp_cmd_deinit_interface(priv);
+      kmm_free(priv);
+      return ret;
+    }
+
+  /* Register netdevice */
+  ret = esp32_netdev_register(priv);
+  if (ret < 0)
+    {
+      esp_err("Failed to register netdev: %d\n", ret);
+      esp_cmd_deinit_interface(priv);
+      kmm_free(priv);
+      return ret;
+    }
+
+  /* Store in adapter */
+  if (priv->if_num < ESP_MAX_INTERFACE)
+    {
+      adapter->priv[priv->if_num] = priv;
+    }
+
+  esp_info("Added interface %s (type=%d, MAC=%02x:%02x:%02x:%02x:%02x:%02x)\n",
+            name, type,
+            priv->mac_address[0], priv->mac_address[1],
+            priv->mac_address[2], priv->mac_address[3],
+            priv->mac_address[4], priv->mac_address[5]);
+
   return 0;
 }
 
-static int esp32_cfg80211_del_iface(struct wiphy *wiphy,
+/****************************************************************************
+ * Name: esp_cfg80211_del_iface
+ *
+ * Description:
+ *   Delete a virtual interface.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_del_iface(struct wiphy *wiphy,
                                    struct wireless_dev *wdev)
 {
-  struct esp32_priv *priv = NULL;
-  int i;
+  struct esp_wifi_device *priv;
 
-  esp32_wlaninfo("Deleting interface\n");
-
-  /* Find the corresponding private data */
-
-  for (i = 0; i < CONFIG_ESP32_WIFI_NINTERFACES; i++)
-    {
-      if (g_esp32_priv[i].wdev.netdev == wdev->netdev)
-        {
-          priv = &g_esp32_priv[i];
-          break;
-        }
-    }
-
-  if (!priv)
-    {
-      esp32_wlanerr("Private data not found\n");
-      return -ENOENT;
-    }
-
-  /* Unregister network device */
-
-  if (priv->netdev)
-    {
-      netdev_unregister(priv->netdev);
-      netdev_free(priv->netdev);
-      priv->netdev = NULL;
-    }
-
-  /* Clear wiphy reference */
-
-  priv->wiphy = NULL;
-  memset(&priv->wdev, 0, sizeof(priv->wdev));
-
-  esp32_wlaninfo("Interface deleted successfully\n");
-  return 0;
-}
-
-static int esp32_cfg80211_change_iface(struct wiphy *wiphy,
-                                      struct wireless_dev *wdev,
-                                      enum nl80211_iftype type,
-                                      struct vif_params *params)
-{
-  struct esp32_priv *priv = NULL;
-  int i;
-
-  esp32_wlaninfo("Changing interface type to: %d\n", type);
-
-  /* Find the corresponding private data */
-
-  for (i = 0; i < CONFIG_ESP32_WIFI_NINTERFACES; i++)
-    {
-      if (g_esp32_priv[i].wdev.netdev == wdev->netdev)
-        {
-          priv = &g_esp32_priv[i];
-          break;
-        }
-    }
-
-  if (!priv)
-    {
-      esp32_wlanerr("Private data not found\n");
-      return -ENOENT;
-    }
-
-  /* Update interface type */
-
-  priv->wdev.iftype = type;
-
-  esp32_wlaninfo("Interface type changed successfully\n");
-  return 0;
-}
-
-static int esp32_cfg80211_scan(struct wiphy *wiphy,
-                              struct cfg80211_scan_request *request)
-{
-  esp32_wlaninfo("Starting scan operation\n");
-
-  /* In a real implementation, this would send a command to the ESP32
-   * to start scanning and eventually call cfg80211_scan_done() when
-   * the scan is complete.
-   */
-
-  /* For simulation purposes, complete the scan immediately */
-
-  cfg80211_scan_done(request, false);
-
-  esp32_wlaninfo("Scan operation initiated\n");
-  return 0;
-}
-
-static int esp32_cfg80211_connect(struct wiphy *wiphy,
-                                 struct net_device *dev,
-                                 struct cfg80211_connect_params *sme)
-{
-  struct esp32_priv *priv = netdev_priv(dev);
-  int ret;
-
-  esp32_wlaninfo("Connecting to SSID: %.*s\n",
-                  (int)sme->ssid_len, sme->ssid);
-
-  /* Store connection parameters */
-
-  if (sme->ssid_len > sizeof(priv->ssid))
+  if (!wiphy || !wdev)
     {
       return -EINVAL;
     }
 
-  memcpy(priv->ssid, sme->ssid, sme->ssid_len);
-  priv->ssid_len = sme->ssid_len;
-
-  if (sme->bssid)
+  priv = container_of(wdev, struct esp_wifi_device, wdev);
+  if (!priv)
     {
-      memcpy(priv->bssid, sme->bssid, 6);
+      return -EINVAL;
     }
 
-  /* In a real implementation, this would send connection parameters
-   * to the ESP32 chip and eventually call cfg80211_connect_result()
-   * when the connection is established.
-   */
+  /* Unregister netdevice */
+  esp32_netdev_unregister(priv);
 
-  /* For simulation, assume connection succeeds immediately */
+  /* Deinit interface */
+  esp_cmd_deinit_interface(priv);
 
-  priv->connected = true;
-  priv->rssi = -45; /* Simulated RSSI */
+  /* Clear from adapter */
+  if (priv->adapter && priv->if_num < ESP_MAX_INTERFACE)
+    {
+      priv->adapter->priv[priv->if_num] = NULL;
+    }
 
-  /* Notify connection result */
+  /* Free private data */
+  kmm_free(priv);
 
-  ret = cfg80211_connect_result(dev, sme->bssid, sme->ie, sme->ie_len,
-                               NULL, 0, 0, 0);
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_change_iface
+ *
+ * Description:
+ *   Change interface type.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_change_iface(struct wiphy *wiphy,
+                                    struct wireless_dev *wdev,
+                                    enum nl80211_iftype type,
+                                    struct vif_params *params)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !wdev)
+    {
+      return -EINVAL;
+    }
+
+  priv = container_of(wdev, struct esp_wifi_device, wdev);
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  /* Set mode */
+  ret = esp_cmd_set_mode(priv, (type == NL80211_IFTYPE_STATION) ? 0 : 1);
   if (ret < 0)
     {
-      esp32_wlanerr("Failed to notify connection result: %d\n", ret);
+      esp_err("Failed to set mode: %d\n", ret);
+      return ret;
     }
 
-  esp32_wlaninfo("Connection initiated\n");
+  /* Update type */
+  priv->if_type = (type == NL80211_IFTYPE_STATION) ? ESP_STA_IF_TYPE : ESP_AP_IF_TYPE;
+  wdev->iftype = type;
+
   return 0;
 }
 
-static int esp32_cfg80211_disconnect(struct wiphy *wiphy,
-                                    struct net_device *dev,
-                                    u16 reason_code)
+/****************************************************************************
+ * Name: esp_cfg80211_scan
+ *
+ * Description:
+ *   Trigger a scan.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_scan(struct wiphy *wiphy,
+                                struct cfg80211_scan_request *request)
 {
-  struct esp32_priv *priv = netdev_priv(dev);
+  struct esp_wifi_device *priv;
+  int ret;
 
-  esp32_wlaninfo("Disconnecting, reason: %d\n", reason_code);
+  if (!wiphy || !request || !request->wdev)
+    {
+      return -EINVAL;
+    }
 
-  /* In a real implementation, this would send a disconnect command
-   * to the ESP32 chip and eventually call cfg80211_disconnected()
-   * when the disconnection is complete.
-   */
+  priv = container_of(request->wdev, struct esp_wifi_device, wdev);
+  if (!priv)
+    {
+      return -EINVAL;
+    }
 
-  priv->connected = false;
-  memset(priv->ssid, 0, sizeof(priv->ssid));
-  priv->ssid_len = 0;
+  priv->scan_request = request;
+  priv->scan_in_progress = 1;
 
-  /* Notify disconnection */
+  ret = esp_cmd_scan_request(priv, request);
+  if (ret < 0)
+    {
+      esp_err("Scan request failed: %d\n", ret);
+      priv->scan_in_progress = 0;
+      return ret;
+    }
 
-  cfg80211_disconnected(dev, reason_code, NULL, 0, true, 0);
-
-  esp32_wlaninfo("Disconnected\n");
   return 0;
 }
 
-static int esp32_cfg80211_add_key(struct wiphy *wiphy,
-                                 struct net_device *netdev,
-                                 u8 key_index, bool pairwise,
-                                 const u8 *mac_addr,
+/****************************************************************************
+ * Name: esp_cfg80211_connect
+ *
+ * Description:
+ *   Connect to an AP.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_connect(struct wiphy *wiphy,
+                                 struct net_device *dev,
+                                 struct cfg80211_connect_params *sme)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !dev || !sme)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_cmd_connect(priv, sme);
+  if (ret < 0)
+    {
+      esp_err("Connect failed: %d\n", ret);
+      return ret;
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_disconnect
+ *
+ * Description:
+ *   Disconnect from an AP.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_disconnect(struct wiphy *wiphy,
+                                    struct net_device *dev,
+                                    uint16_t reason_code)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !dev)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_cmd_disconnect(priv, reason_code, NULL);
+  if (ret < 0)
+    {
+      esp_err("Disconnect failed: %d\n", ret);
+      return ret;
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_add_key
+ *
+ * Description:
+ *   Add a key.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_add_key(struct wiphy *wiphy,
+                                 struct net_device *dev,
+                                 uint8_t key_index, bool pairwise,
+                                 const uint8_t *mac_addr,
                                  struct key_params *params)
 {
-  esp32_wlaninfo("Adding key: index=%d, pairwise=%d\n", key_index, pairwise);
+  struct esp_wifi_device *priv;
+  int ret;
 
-  /* In a real implementation, this would send the key to the ESP32
-   * for security purposes.
-   */
+  if (!wiphy || !dev || !params)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_cmd_add_key(priv, key_index, pairwise, mac_addr, params);
+  if (ret < 0)
+    {
+      esp_err("Add key failed: %d\n", ret);
+      return ret;
+    }
 
   return 0;
 }
 
-static int esp32_cfg80211_del_key(struct wiphy *wiphy,
-                                 struct net_device *netdev,
-                                 u8 key_index, bool pairwise,
-                                 const u8 *mac_addr)
-{
-  esp32_wlaninfo("Deleting key: index=%d, pairwise=%d\n", key_index, pairwise);
+/****************************************************************************
+ * Name: esp_cfg80211_del_key
+ *
+ * Description:
+ *   Delete a key.
+ *
+ ****************************************************************************/
 
-  /* In a real implementation, this would remove the key from the ESP32 */
+static int esp_cfg80211_del_key(struct wiphy *wiphy,
+                                 struct net_device *dev,
+                                 uint8_t key_index, bool pairwise,
+                                 const uint8_t *mac_addr)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !dev)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_cmd_del_key(priv, key_index, pairwise, mac_addr);
+  if (ret < 0)
+    {
+      esp_err("Delete key failed: %d\n", ret);
+      return ret;
+    }
 
   return 0;
 }
 
-static int esp32_cfg80211_set_default_key(struct wiphy *wiphy,
-                                         struct net_device *netdev,
-                                         u8 key_index)
-{
-  esp32_wlaninfo("Setting default key: index=%d\n", key_index);
+/****************************************************************************
+ * Name: esp_cfg80211_set_default_key
+ *
+ * Description:
+ *   Set default key.
+ *
+ ****************************************************************************/
 
-  /* In a real implementation, this would set the default key on the ESP32 */
+static int esp_cfg80211_set_default_key(struct wiphy *wiphy,
+                                          struct net_device *dev,
+                                          uint8_t key_index,
+                                          bool unicast, bool multicast)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !dev)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_cmd_set_default_key(priv, key_index);
+  if (ret < 0)
+    {
+      esp_err("Set default key failed: %d\n", ret);
+      return ret;
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_start_ap
+ *
+ * Description:
+ *   Start AP mode.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_start_ap(struct wiphy *wiphy,
+                                 struct net_device *dev,
+                                 struct cfg80211_ap_settings *settings)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !dev || !settings)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_cmd_start_ap(priv, settings);
+  if (ret < 0)
+    {
+      esp_err("Start AP failed: %d\n", ret);
+      return ret;
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_stop_ap
+ *
+ * Description:
+ *   Stop AP mode.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_stop_ap(struct wiphy *wiphy,
+                                struct net_device *dev)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !dev)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_cmd_stop_ap(priv);
+  if (ret < 0)
+    {
+      esp_err("Stop AP failed: %d\n", ret);
+      return ret;
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_change_beacon
+ *
+ * Description:
+ *   Change beacon parameters.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_change_beacon(struct wiphy *wiphy,
+                                       struct net_device *dev,
+                                       struct cfg80211_beacon_settings *info)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !dev || !info)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  esp_info("Changing beacon for dev %s\n", dev->name);
+
+  /* Forward beacon change to ESP32 via command */
+  ret = esp_cmd_set_ie(priv, ESP_IE_BEACON_PROBE_HEAD,
+                         info->beacon, info->beacon_len);
+  if (ret < 0)
+    {
+      esp_err("Failed to set beacon head IE: %d\n", ret);
+      return ret;
+    }
+
+  if (info->beacon_tail && info->beacon_tail_len > 0)
+    {
+      ret = esp_cmd_set_ie(priv, ESP_IE_BEACON_PROBE_TAIL,
+                           info->beacon_tail, info->beacon_tail_len);
+      if (ret < 0)
+        {
+          esp_err("Failed to set beacon tail IE: %d\n", ret);
+          return ret;
+        }
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_add_station
+ *
+ * Description:
+ *   Add a station to AP.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_add_station(struct wiphy *wiphy,
+                                  struct net_device *dev,
+                                  const uint8_t *mac,
+                                  struct station_parameters *params)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !dev || !mac)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_cmd_add_station(priv, mac, params);
+  if (ret < 0)
+    {
+      esp_err("Add station failed: %d\n", ret);
+      return ret;
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_del_station
+ *
+ * Description:
+ *   Delete a station from AP.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_del_station(struct wiphy *wiphy,
+                                  struct net_device *dev,
+                                  struct station_del_parameters *params)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !dev || !params)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_cmd_del_station(priv, params->mac, params->reason_code);
+  if (ret < 0)
+    {
+      esp_err("Delete station failed: %d\n", ret);
+      return ret;
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_change_station
+ *
+ * Description:
+ *   Change station parameters.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_change_station(struct wiphy *wiphy,
+                                     struct net_device *dev,
+                                     const uint8_t *mac,
+                                     struct station_parameters *params)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !dev || !mac || !params)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  esp_info("Changing station params for %02x:%02x:%02x:%02x:%02x:%02x\n",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+  /* Forward station change to ESP32 via command */
+  ret = esp_cmd_change_station(priv, mac, params);
+  if (ret < 0)
+    {
+      esp_err("Change station failed: %d\n", ret);
+      return ret;
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_get_station
+ *
+ * Description:
+ *   Get station information.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_get_station(struct wiphy *wiphy,
+                                  struct net_device *dev,
+                                  const uint8_t *mac,
+                                  struct station_info *sinfo)
+{
+  struct esp_wifi_device *priv;
+
+  if (!wiphy || !dev || !mac || !sinfo)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct esp_wifi_device *)dev->d_private;
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  esp_info("Getting station info for %02x:%02x:%02x:%02x:%02x:%02x\n",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+  /* Fill in station information */
+  sinfo->filled = 0;
+
+  /* Get RSSI from ESP32 */
+  int rssi;
+  if (esp_cmd_get_rssi(priv, &rssi) == 0)
+    {
+      sinfo->filled |= CFG80211_STA_INFO_SIGNAL;
+      sinfo->signal = rssi;
+    }
+
+  /* Indicate signal average is the same as signal */
+  if (sinfo->filled & CFG80211_STA_INFO_SIGNAL)
+    {
+      sinfo->filled |= CFG80211_STA_INFO_SIGNAL_AVG;
+      sinfo->signal_avg = sinfo->signal;
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_set_tx_power
+ *
+ * Description:
+ *   Set TX power.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_set_tx_power(struct wiphy *wiphy,
+                                    struct wireless_dev *wdev,
+                                    enum nl80211_tx_power_setting type,
+                                    int mbm)
+{
+  struct esp_wifi_device *priv;
+
+  if (!wiphy || !wdev)
+    {
+      return -EINVAL;
+    }
+
+  priv = container_of(wdev, struct esp_wifi_device, wdev);
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  return esp_cmd_set_tx_power(priv, mbm / 100);  /* Convert mBm to dBm */
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_get_tx_power
+ *
+ * Description:
+ *   Get TX power.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_get_tx_power(struct wiphy *wiphy,
+                                    struct wireless_dev *wdev,
+                                    int *dbm)
+{
+  struct esp_wifi_device *priv;
+
+  if (!wiphy || !wdev || !dbm)
+    {
+      return -EINVAL;
+    }
+
+  priv = container_of(wdev, struct esp_wifi_device, wdev);
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  return esp_cmd_get_tx_power(priv);
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_set_wiphy_params
+ *
+ * Description:
+ *   Set wiphy parameters.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_set_wiphy_params(struct wiphy *wiphy,
+                                          uint32_t changed)
+{
+  if (!wiphy)
+    {
+      return -EINVAL;
+    }
+
+  esp_info("Setting wiphy params, changed=0x%x\n", changed);
+
+  /* Handle various wiphy parameter changes */
+  if (changed & WIPHY_PARAM_RTS_THRESHOLD)
+    {
+      esp_info("RTS threshold: %d\n", wiphy->rts_threshold);
+    }
+
+  if (changed & WIPHY_PARAM_FRAG_THRESHOLD)
+    {
+      esp_info("Fragmentation threshold: %d\n", wiphy->frag_threshold);
+    }
+
+  if (changed & WIPHY_PARAM_RETRY_SHORT)
+    {
+      esp_info("Short retry limit: %d\n", wiphy->retry_short);
+    }
+
+  if (changed & WIPHY_PARAM_RETRY_LONG)
+    {
+      esp_info("Long retry limit: %d\n", wiphy->retry_long);
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_mgmt_tx
+ *
+ * Description:
+ *   Transmit a management frame.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_mgmt_tx(struct wiphy *wiphy,
+                                struct wireless_dev *wdev,
+                                struct cfg80211_mgmt_tx_params *params,
+                                uint64_t *cookie)
+{
+  struct esp_wifi_device *priv;
+  int ret;
+
+  if (!wiphy || !wdev || !params)
+    {
+      return -EINVAL;
+    }
+
+  priv = container_of(wdev, struct esp_wifi_device, wdev);
+  if (!priv)
+    {
+      return -EINVAL;
+    }
+
+  /* Generate cookie for tracking */
+  if (cookie)
+    {
+      static uint64_t mgmt_cookie = 0;
+      *cookie = ++mgmt_cookie;
+    }
+
+  /* Send management frame via command */
+  ret = esp_cmd_mgmt_tx(priv, params);
+  if (ret < 0)
+    {
+      esp_err("Management TX failed: %d\n", ret);
+      return ret;
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_cfg80211_set_bitrate_mask
+ *
+ * Description:
+ *   Set bitrate mask.
+ *
+ ****************************************************************************/
+
+static int esp_cfg80211_set_bitrate_mask(struct wiphy *wiphy,
+                                      struct net_device *dev,
+                                      const uint8_t *peer,
+                                      struct cfg80211_bitrate_mask *mask)
+{
+  if (!wiphy || !dev || !mask)
+    {
+      return -EINVAL;
+    }
+
+  esp_info("Setting bitrate mask for dev %s\n", dev->name);
+
+  /* For now, just acknowledge the request */
+  /* ESP32 firmware would handle the actual rate limiting */
+  /* This could be implemented by sending a vendor-specific command */
 
   return 0;
 }
@@ -521,538 +1127,137 @@ static int esp32_cfg80211_set_default_key(struct wiphy *wiphy,
  * Public Functions
  ****************************************************************************/
 
-int esp32_cfg80211_register(void)
+/****************************************************************************
+ * Name: esp_cfg80211_init
+ *
+ * Description:
+ *   Initialize ESP32 cfg80211.
+ *
+ ****************************************************************************/
+
+int esp_cfg80211_init(void)
 {
   struct wiphy *wiphy;
+  struct esp_adapter *adapter = &g_esp_adapter;
   int ret;
-  int i;
 
-  esp32_wlaninfo("Registering ESP32 with cfg80211\n");
+  esp_info("Initializing ESP32 cfg80211\n");
 
-  /* Allocate wiphy structure */
-
-  wiphy = wiphy_new(&g_esp32_cfg80211_ops, sizeof(struct esp32_priv *));
+  /* Allocate wiphy */
+  wiphy = wiphy_new(&g_esp_cfg80211_ops, sizeof(struct esp_adapter));
   if (!wiphy)
     {
-      esp32_wlanerr("Failed to allocate wiphy\n");
+      esp_err("Failed to allocate wiphy\n");
       return -ENOMEM;
     }
 
   /* Initialize wiphy */
+  wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION) | BIT(NL80211_IFTYPE_AP);
+  wiphy->bands[IEEE80211_BAND_2GHZ] = &g_esp_wifi_bands_2ghz;
+  wiphy->cipher_suites = g_esp_cipher_suites;
+  wiphy->n_cipher_suites = sizeof(g_esp_cipher_suites) / sizeof(g_esp_cipher_suites[0]);
+  wiphy->mgmt_stypes = g_esp_default_mgmt_stypes;
+  wiphy->max_scan_ssids = 10;
+  wiphy->max_scan_ie_len = 512;
+  wiphy->signal_type = CFG80211_SIGNAL_TYPE_DBM;
+  wiphy->flags = WIPHY_FLAG_REPORTS_OBSS;
 
-  wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION);
-#ifdef CONFIG_ESP32_AP_MODE
-  wiphy->interface_modes |= BIT(NL80211_IFTYPE_AP);
-#endif
+  /* Set private data */
+  adapter = wiphy_priv(wiphy);
+  memset(adapter, 0, sizeof(struct esp_adapter));
+  adapter->wiphy = wiphy;
 
-  /* Set supported bands */
+  /* Initialize queues */
+  sq_init(&adapter->cmd_free_queue);
+  sq_init(&adapter->cmd_pending_queue);
+  sq_init(&adapter->event_queue);
 
-  wiphy->bands[IEEE80211_BAND_2GHZ] = &g_esp32_band_2ghz;
+  /* Initialize semaphores */
+  nxsem_init(&adapter->cmd_lock, 0, 1);
+  nxsem_init(&adapter->cmd_resp_sem, 0, 0);
+  nxsem_init(&adapter->event_lock, 0, 1);
 
-  /* Set cipher suites */
+  /* Initialize command pool */
+  adapter->cmd_pool = kmm_malloc(ESP_NUM_OF_CMD_NODES * sizeof(struct esp_cmd_node));
+  if (!adapter->cmd_pool)
+    {
+      esp_err("Failed to allocate command pool\n");
+      wiphy_free(wiphy);
+      return -ENOMEM;
+    }
 
-  wiphy->cipher_suites = g_esp32_cipher_suites;
-  wiphy->n_cipher_suites = ARRAY_SIZE(g_esp32_cipher_suites);
-
-  /* Set capabilities */
-
-  wiphy->max_scan_ssids = 4;
-  wiphy->max_scan_ie_len = 2304;
-  wiphy->signal_type = CFG80211_SIGNAL_TYPE_MBM;
-
-  /* Set wiphy features */
-
-  wiphy->flags |= WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL |
-                  WIPHY_FLAG_OFFCHAN_TX |
-                  WIPHY_FLAG_HAVE_AP_SME;
+  memset(adapter->cmd_pool, 0, ESP_NUM_OF_CMD_NODES * sizeof(struct esp_cmd_node));
 
   /* Register wiphy */
-
   ret = wiphy_register(wiphy);
   if (ret < 0)
     {
-      esp32_wlanerr("Failed to register wiphy: %d\n", ret);
+      esp_err("Failed to register wiphy: %d\n", ret);
+      kmm_free(adapter->cmd_pool);
       wiphy_free(wiphy);
       return ret;
     }
 
-  /* Initialize private data structures */
-
-  for (i = 0; i < CONFIG_ESP32_WIFI_NINTERFACES; i++)
-    {
-      memset(&g_esp32_priv[i], 0, sizeof(struct esp32_priv));
-      g_esp32_priv[i].wiphy = wiphy;
-    }
-
-  esp32_wlaninfo("ESP32 registered with cfg80211 successfully\n");
+  esp_info("ESP32 cfg80211 initialized\n");
   return 0;
 }
 
-void esp32_cfg80211_unregister(void)
+/****************************************************************************
+ * Name: esp_cfg80211_deinit
+ *
+ * Description:
+ *   Deinitialize ESP32 cfg80211.
+ *
+ ****************************************************************************/
+
+void esp_cfg80211_deinit(void)
 {
-  struct esp32_priv *priv;
+  struct esp_adapter *adapter = &g_esp_adapter;
   int i;
 
-  esp32_wlaninfo("Unregistering ESP32 from cfg80211\n");
+  esp_info("Deinitializing ESP32 cfg80211\n");
 
-  /* Find the wiphy and unregister it */
-
-  for (i = 0; i < CONFIG_ESP32_WIFI_NINTERFACES; i++)
+  /* Unregister wiphy */
+  if (adapter->wiphy)
     {
-      priv = &g_esp32_priv[i];
-      if (priv->wiphy)
+      wiphy_unregister(adapter->wiphy);
+
+      /* Free command pool */
+      if (adapter->cmd_pool)
         {
-          wiphy_unregister(priv->wiphy);
-          wiphy_free(priv->wiphy);
-          priv->wiphy = NULL;
+          for (i = 0; i < ESP_NUM_OF_CMD_NODES; i++)
+            {
+                if (adapter->cmd_pool[i].cmd_buf)
+                  {
+                      kmm_free(adapter->cmd_pool[i].cmd_buf);
+                  }
+            }
+          kmm_free(adapter->cmd_pool);
         }
+
+      wiphy_free(adapter->wiphy);
+      adapter->wiphy = NULL;
     }
 
-  esp32_wlaninfo("ESP32 unregistered from cfg80211\n");
-}
-    }
+  /* Destroy semaphores */
+  nxsem_destroy(&adapter->cmd_lock);
+  nxsem_destroy(&adapter->cmd_resp_sem);
+  nxsem_destroy(&adapter->event_lock);
 
-  if (!priv)
-    {
-      esp32_wlanerr("No available interface slots\n");
-      return -ENOSPC;
-    }
+  memset(adapter, 0, sizeof(struct esp_adapter));
 
-  /* Allocate network device */
-
-  netdev = netdev_alloc(name, name_assign_type, sizeof(struct esp32_priv *));
-  if (!netdev)
-    {
-      esp32_wlanerr("Failed to allocate network device\n");
-      return -ENOMEM;
-    }
-
-  /* Initialize private data */
-
-  memset(priv, 0, sizeof(struct esp32_priv));
-  priv->wiphy = wiphy;
-  priv->netdev = netdev;
-  netdev_set_priv(netdev, &priv);
-
-  /* Initialize wireless device */
-
-  priv->wdev.wiphy = wiphy;
-  priv->wdev.netdev = netdev;
-  priv->wdev.iftype = type;
-
-  /* Set up network device callbacks */
-
-  netdev->d_ifup = NULL;  /* To be filled by upper layers */
-  netdev->d_ifdown = NULL;
-  netdev->d_txavail = NULL;
-  netdev->d_txmit = NULL;
-  netdev->d_pktsize = CONFIG_NET_ETH_PKTSIZE;
-  netdev->d_llhdrlen = 14; /* Ethernet header length */
-
-  /* Generate random MAC address */
-
-  eth_random_ethaddr(priv->mac_addr);
-
-  /* Set MAC address */
-
-  netdev->d_mac.ether.ether_addr_octet[0] = priv->mac_addr[0];
-  netdev->d_mac.ether.ether_addr_octet[1] = priv->mac_addr[1];
-  netdev->d_mac.ether.ether_addr_octet[2] = priv->mac_addr[2];
-  netdev->d_mac.ether.ether_addr_octet[3] = priv->mac_addr[3];
-  netdev->d_mac.ether.ether_addr_octet[4] = priv->mac_addr[4];
-  netdev->d_mac.ether.ether_addr_octet[5] = priv->mac_addr[5];
-
-  /* Register network device */
-
-  ret = netdev_register(netdev);
-  if (ret < 0)
-    {
-      esp32_wlanerr("Failed to register network device: %d\n", ret);
-      netdev_free(netdev);
-      priv->wiphy = NULL;
-      return ret;
-    }
-
-  esp32_wlaninfo("Interface %s added successfully\n", name);
-  return 0;
+  esp_info("ESP32 cfg80211 deinitialized\n");
 }
 
 /****************************************************************************
- * Name: esp32_cfg80211_del_iface
+ * Name: esp_get_adapter
  *
  * Description:
- *   Delete a virtual interface from the ESP32 device.
+ *   Get esp_adapter pointer.
  *
  ****************************************************************************/
 
-static int esp32_cfg80211_del_iface(struct wiphy *wiphy,
-                                   struct wireless_dev *wdev)
+struct esp_adapter *esp_get_adapter(void)
 {
-  struct esp32_priv *priv = NULL;
-  int i;
-
-  esp32_wlaninfo("Deleting interface\n");
-
-  /* Find the corresponding private data */
-
-  for (i = 0; i < CONFIG_ESP32_WIFI_NINTERFACES; i++)
-    {
-      if (g_esp32_priv[i].wdev.netdev == wdev->netdev)
-        {
-          priv = &g_esp32_priv[i];
-          break;
-        }
-    }
-
-  if (!priv)
-    {
-      esp32_wlanerr("Private data not found\n");
-      return -ENOENT;
-    }
-
-  /* Unregister network device */
-
-  if (priv->netdev)
-    {
-      netdev_unregister(priv->netdev);
-      netdev_free(priv->netdev);
-      priv->netdev = NULL;
-    }
-
-  /* Clear wiphy reference */
-
-  priv->wiphy = NULL;
-  memset(&priv->wdev, 0, sizeof(priv->wdev));
-
-  esp32_wlaninfo("Interface deleted successfully\n");
-  return 0;
-}
-
-/****************************************************************************
- * Name: esp32_cfg80211_change_iface
- *
- * Description:
- *   Change the type of an interface.
- *
- ****************************************************************************/
-
-static int esp32_cfg80211_change_iface(struct wiphy *wiphy,
-                                      struct wireless_dev *wdev,
-                                      enum nl80211_iftype type,
-                                      struct vif_params *params)
-{
-  struct esp32_priv *priv = NULL;
-  int i;
-
-  esp32_wlaninfo("Changing interface type to: %d\n", type);
-
-  /* Find the corresponding private data */
-
-  for (i = 0; i < CONFIG_ESP32_WIFI_NINTERFACES; i++)
-    {
-      if (g_esp32_priv[i].wdev.netdev == wdev->netdev)
-        {
-          priv = &g_esp32_priv[i];
-          break;
-        }
-    }
-
-  if (!priv)
-    {
-      esp32_wlanerr("Private data not found\n");
-      return -ENOENT;
-    }
-
-  /* Update interface type */
-
-  priv->wdev.iftype = type;
-
-  esp32_wlaninfo("Interface type changed successfully\n");
-  return 0;
-}
-
-/****************************************************************************
- * Name: esp32_cfg80211_scan
- *
- * Description:
- *   Start a scan operation.
- *
- ****************************************************************************/
-
-static int esp32_cfg80211_scan(struct wiphy *wiphy,
-                              struct cfg80211_scan_request *request)
-{
-  esp32_wlaninfo("Starting scan operation\n");
-
-  /* In a real implementation, this would send a command to the ESP32
-   * to start scanning and eventually call cfg80211_scan_done() when
-   * the scan is complete.
-   */
-
-  /* For simulation purposes, complete the scan immediately */
-
-  cfg80211_scan_done(request, false);
-
-  esp32_wlaninfo("Scan operation initiated\n");
-  return 0;
-}
-
-/****************************************************************************
- * Name: esp32_cfg80211_connect
- *
- * Description:
- *   Connect to a WiFi network.
- *
- ****************************************************************************/
-
-static int esp32_cfg80211_connect(struct wiphy *wiphy,
-                                 struct net_device *dev,
-                                 struct cfg80211_connect_params *sme)
-{
-  struct esp32_priv *priv = netdev_priv(dev);
-  int ret;
-
-  esp32_wlaninfo("Connecting to SSID: %.*s\n",
-                  (int)sme->ssid_len, sme->ssid);
-
-  /* Store connection parameters */
-
-  if (sme->ssid_len > sizeof(priv->ssid))
-    {
-      return -EINVAL;
-    }
-
-  memcpy(priv->ssid, sme->ssid, sme->ssid_len);
-  priv->ssid_len = sme->ssid_len;
-
-  if (sme->bssid)
-    {
-      memcpy(priv->bssid, sme->bssid, 6);
-    }
-
-  /* In a real implementation, this would send connection parameters
-   * to the ESP32 chip and eventually call cfg80211_connect_result()
-   * when the connection is established.
-   */
-
-  /* For simulation, assume connection succeeds immediately */
-
-  priv->connected = true;
-  priv->rssi = -45; /* Simulated RSSI */
-
-  /* Notify connection result */
-
-  ret = cfg80211_connect_result(dev, sme->bssid, sme->ie, sme->ie_len,
-                               NULL, 0, 0, GFP_KERNEL);
-  if (ret < 0)
-    {
-      esp32_wlanerr("Failed to notify connection result: %d\n", ret);
-    }
-
-  esp32_wlaninfo("Connection initiated\n");
-  return 0;
-}
-
-/****************************************************************************
- * Name: esp32_cfg80211_disconnect
- *
- * Description:
- *   Disconnect from the current network.
- *
- ****************************************************************************/
-
-static int esp32_cfg80211_disconnect(struct wiphy *wiphy,
-                                    struct net_device *dev,
-                                    u16 reason_code)
-{
-  struct esp32_priv *priv = netdev_priv(dev);
-
-  esp32_wlaninfo("Disconnecting, reason: %d\n", reason_code);
-
-  /* In a real implementation, this would send a disconnect command
-   * to the ESP32 chip and eventually call cfg80211_disconnected()
-   */
-
-  priv->connected = false;
-  memset(priv->ssid, 0, sizeof(priv->ssid));
-  priv->ssid_len = 0;
-
-  /* Notify disconnection */
-
-  cfg80211_disconnected(dev, reason_code, NULL, 0, true, GFP_KERNEL);
-
-  esp32_wlaninfo("Disconnected\n");
-  return 0;
-}
-
-/****************************************************************************
- * Name: esp32_cfg80211_add_key
- *
- * Description:
- *   Add a security key.
- *
- ****************************************************************************/
-
-static int esp32_cfg80211_add_key(struct wiphy *wiphy,
-                                 struct net_device *netdev,
-                                 u8 key_index, bool pairwise,
-                                 const u8 *mac_addr,
-                                 struct key_params *params)
-{
-  esp32_wlaninfo("Adding key: index=%d, pairwise=%d\n", key_index, pairwise);
-
-  /* In a real implementation, this would send the key to the ESP32
-   * for security purposes.
-   */
-
-  return 0;
-}
-
-/****************************************************************************
- * Name: esp32_cfg80211_del_key
- *
- * Description:
- *   Delete a security key.
- *
- ****************************************************************************/
-
-static int esp32_cfg80211_del_key(struct wiphy *wiphy,
-                                 struct net_device *netdev,
-                                 u8 key_index, bool pairwise,
-                                 const u8 *mac_addr)
-{
-  esp32_wlaninfo("Deleting key: index=%d, pairwise=%d\n", key_index, pairwise);
-
-  /* In a real implementation, this would remove the key from the ESP32 */
-
-  return 0;
-}
-
-/****************************************************************************
- * Name: esp32_cfg80211_set_default_key
- *
- * Description:
- *   Set the default security key.
- *
- ****************************************************************************/
-
-static int esp32_cfg80211_set_default_key(struct wiphy *wiphy,
-                                         struct net_device *netdev,
-                                         u8 key_index)
-{
-  esp32_wlaninfo("Setting default key: index=%d\n", key_index);
-
-  /* In a real implementation, this would set the default key on the ESP32 */
-
-  return 0;
-}
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: esp32_cfg80211_register
- *
- * Description:
- *   Register the ESP32 with cfg80211 subsystem.
- *
- ****************************************************************************/
-
-int esp32_cfg80211_register(void)
-{
-  struct wiphy *wiphy;
-  int ret;
-  int i;
-
-  esp32_wlaninfo("Registering ESP32 with cfg80211\n");
-
-  /* Allocate wiphy structure */
-
-  wiphy = wiphy_new(&g_esp32_cfg80211_ops, sizeof(struct esp32_priv *));
-  if (!wiphy)
-    {
-      esp32_wlanerr("Failed to allocate wiphy\n");
-      return -ENOMEM;
-    }
-
-  /* Initialize wiphy */
-
-  wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION);
-#ifdef CONFIG_ESP32_AP_MODE
-  wiphy->interface_modes |= BIT(NL80211_IFTYPE_AP);
-#endif
-
-  /* Set supported bands */
-
-  wiphy->bands[IEEE80211_BAND_2GHZ] = &g_esp32_band_2ghz;
-
-  /* Set cipher suites */
-
-  wiphy->cipher_suites = g_esp32_cipher_suites;
-  wiphy->n_cipher_suites = ARRAY_SIZE(g_esp32_cipher_suites);
-
-  /* Set capabilities */
-
-  wiphy->max_scan_ssids = 4;
-  wiphy->max_scan_ie_len = 2304;
-  wiphy->signal_type = CFG80211_SIGNAL_TYPE_MBM;
-
-  /* Set wiphy features */
-
-  wiphy->flags |= WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL |
-                  WIPHY_FLAG_OFFCHAN_TX |
-                  WIPHY_FLAG_HAVE_AP_SME;
-
-  /* Register wiphy */
-
-  ret = wiphy_register(wiphy);
-  if (ret < 0)
-    {
-      esp32_wlanerr("Failed to register wiphy: %d\n", ret);
-      wiphy_free(wiphy);
-      return ret;
-    }
-
-  /* Initialize private data structures */
-
-  for (i = 0; i < CONFIG_ESP32_WIFI_NINTERFACES; i++)
-    {
-      memset(&g_esp32_priv[i], 0, sizeof(struct esp32_priv));
-      g_esp32_priv[i].wiphy = wiphy;
-    }
-
-  esp32_wlaninfo("ESP32 registered with cfg80211 successfully\n");
-  return 0;
-}
-
-/****************************************************************************
- * Name: esp32_cfg80211_unregister
- *
- * Description:
- *   Unregister the ESP32 from cfg80211 subsystem.
- *
- ****************************************************************************/
-
-void esp32_cfg80211_unregister(void)
-{
-  struct esp32_priv *priv;
-  int i;
-
-  esp32_wlaninfo("Unregistering ESP32 from cfg80211\n");
-
-  /* Find the wiphy and unregister it */
-
-  for (i = 0; i < CONFIG_ESP32_WIFI_NINTERFACES; i++)
-    {
-      priv = &g_esp32_priv[i];
-      if (priv->wiphy)
-        {
-          wiphy_unregister(priv->wiphy);
-          wiphy_free(priv->wiphy);
-          priv->wiphy = NULL;
-        }
-    }
-
-  esp32_wlaninfo("ESP32 unregistered from cfg80211\n");
+  return &g_esp_adapter;
 }

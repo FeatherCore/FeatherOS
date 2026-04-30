@@ -549,7 +549,10 @@ static int esp32_spi_interrupt_handler(int irq, void *context, void *arg)
     {
       /* New packet available - notify higher layer */
       esp32_spiinfo("New packet interrupt\n");
-      /* TODO: Call upper layer handler for packet processing */
+
+      /* Call upper layer handler for packet processing */
+      extern int esp32_netdev_receive(void *adapter);
+      esp32_netdev_receive(esp_get_adapter());
     }
 
   /* Clear interrupt */

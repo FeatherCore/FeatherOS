@@ -112,14 +112,66 @@ static const uint8_t g_esp_iftype_map[] =
  ****************************************************************************/
 
 #ifdef CONFIG_ESP32_WIFI_SDIO
+
+/****************************************************************************
+ * Name: esp_sdio_data_available
+ *
+ * Description:
+ *   Check if data is available for reading from SDIO interface.
+ *
+ ****************************************************************************/
+
+static int esp_sdio_data_available(void)
+{
+  uint32_t intr_status;
+  int ret;
+
+  ret = esp_sdio_get_intr_status(&intr_status);
+  if (ret < 0)
+    {
+      return 0;
+    }
+
+  return (intr_status & ESP_SLAVE_RX_NEW_PACKET_INT) ? 1 : 0;
+}
+
+/****************************************************************************
+ * Name: esp_sdio_reset
+ *
+ * Description:
+ *   Reset ESP32 via SDIO interface.
+ *
+ ****************************************************************************/
+
+static int esp_sdio_reset(void)
+{
+#ifdef CONFIG_ESP32_WIFI_RESET_GPIO
+  int reset_gpio = CONFIG_ESP32_WIFI_RESET_GPIO;
+
+  esp_main_info("Resetting ESP32 via GPIO %d\n", reset_gpio);
+
+  /* Toggle reset GPIO */
+  gpio_write(reset_gpio, 0);
+  usleep(100000);  /* 100ms low */
+  gpio_write(reset_gpio, 1);
+  usleep(100000);  /* 100ms high */
+
+  esp_main_info("ESP32 reset complete\n");
+  return OK;
+#else
+  esp_main_warn("No reset GPIO configured\n");
+  return -ENOSYS;
+#endif
+}
+
 static struct esp_if_ops g_esp_sdio_ops =
 {
   .init = esp_sdio_init,
   .deinit = esp_sdio_deinit,
   .send = esp_sdio_write_packet,
   .receive = esp_sdio_read_packet,
-  .data_available = NULL, /* TODO: Implement */
-  .reset = NULL, /* TODO: Implement */
+  .data_available = esp_sdio_data_available,
+  .reset = esp_sdio_reset,
 };
 #endif
 
@@ -132,14 +184,66 @@ static struct esp_if_ops g_esp_sdio_ops =
  ****************************************************************************/
 
 #ifdef CONFIG_ESP32_WIFI_SPI
+
+/****************************************************************************
+ * Name: esp_spi_data_available
+ *
+ * Description:
+ *   Check if data is available for reading from SPI interface.
+ *
+ ****************************************************************************/
+
+static int esp_spi_data_available(void)
+{
+  uint32_t intr_status;
+  int ret;
+
+  ret = esp_spi_get_intr_status(&intr_status);
+  if (ret < 0)
+    {
+      return 0;
+    }
+
+  return (intr_status & ESP_SPI_SLAVE_RX_NEW_PACKET_INT) ? 1 : 0;
+}
+
+/****************************************************************************
+ * Name: esp_spi_reset
+ *
+ * Description:
+ *   Reset ESP32 via SPI interface.
+ *
+ ****************************************************************************/
+
+static int esp_spi_reset(void)
+{
+#ifdef CONFIG_ESP32_WIFI_RESET_GPIO
+  int reset_gpio = CONFIG_ESP32_WIFI_RESET_GPIO;
+
+  esp_main_info("Resetting ESP32 via GPIO %d\n", reset_gpio);
+
+  /* Toggle reset GPIO */
+  gpio_write(reset_gpio, 0);
+  usleep(100000);  /* 100ms low */
+  gpio_write(reset_gpio, 1);
+  usleep(100000);  /* 100ms high */
+
+  esp_main_info("ESP32 reset complete\n");
+  return OK;
+#else
+  esp_main_warn("No reset GPIO configured\n");
+  return -ENOSYS;
+#endif
+}
+
 static struct esp_if_ops g_esp_spi_ops =
 {
   .init = esp_spi_init,
   .deinit = esp_spi_deinit,
   .send = esp_spi_write_packet,
   .receive = esp_spi_read_packet,
-  .data_available = NULL, /* TODO: Implement */
-  .reset = NULL, /* TODO: Implement */
+  .data_available = esp_spi_data_available,
+  .reset = esp_spi_reset,
 };
 #endif
 
@@ -384,8 +488,15 @@ void esp_wifi_driver_deinit(void)
   esp_event_stop_worker();
 
   /* Unregister interfaces */
-
-  /* TODO: Unregister interfaces */
+  /* Unregister netdevs for each interface */
+  for (int i = 0; i < ESP_MAX_INTERFACE; i++)
+    {
+      FAR struct esp_wifi_device *priv = g_esp_adapter.priv[i];
+      if (priv)
+        {
+          esp32_netdev_unregister(priv);
+        }
+    }
 
   /* Deinitialize event queue */
 

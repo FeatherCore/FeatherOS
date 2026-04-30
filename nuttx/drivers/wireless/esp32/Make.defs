@@ -5,13 +5,20 @@
 ifeq ($(CONFIG_ESP32_WIFI),y)
 
 CSRCS = esp32_main.c
+CSRCS += esp32_netdev.c
+CSRCS += esp32_boot.c
+CSRCS += esp_cmd.c
+CSRCS += esp_event.c
+CSRCS += esp32_cfg80211.c
 
 ifeq ($(CONFIG_ESP32_WIFI_SDIO),y)
 CSRCS += esp32_sdio.c
+CSRCS += esp32_sdio_ops.c
 endif
 
 ifeq ($(CONFIG_ESP32_WIFI_SPI),y)
 CSRCS += esp32_spi.c
+CSRCS += esp32_spi_ops.c
 endif
 
 CSRCS += esp_cfg80211.c

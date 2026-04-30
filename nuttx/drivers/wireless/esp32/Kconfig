@@ -27,6 +27,13 @@ config ESP32_WIFI_SPI
 	help
 	  Enable SPI interface for ESP32 WiFi chip communication.
 
+config ESP32_WIFI_RESET_GPIO
+	int "GPIO pin for ESP32 reset"
+	default -1
+	range -1 255
+	help
+	  GPIO pin number to control ESP32 reset pin (-1 for none).
+
 config ESP32_WIFI_STA
 	bool "Station mode support"
 	default y

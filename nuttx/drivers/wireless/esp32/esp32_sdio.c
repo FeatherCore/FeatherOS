@@ -339,7 +339,10 @@ static int esp32_sdio_interrupt_handler(int irq, void *context, void *arg)
     {
       /* New packet available - notify higher layer */
       sdioinfo("New packet interrupt\n");
-      /* TODO: Call upper layer handler for packet processing */
+
+      /* Call upper layer handler for packet processing */
+      extern int esp32_netdev_receive(void *adapter);
+      esp32_netdev_receive(esp_get_adapter());
     }
 
   ret = esp32_sdio_write_reg(priv, ESP32_SLCHOST_INT_CLR_REG,

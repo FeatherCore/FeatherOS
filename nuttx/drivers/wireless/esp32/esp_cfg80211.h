@@ -121,6 +121,17 @@
 
 #define ESP_SIZE_OF_CMD_NODE               2048
 
+/* ESP Capabilities flags */
+
+#define ESP_WLAN_SDIO_SUPPORT              (1 << 0)
+#define ESP_BT_UART_SUPPORT                (1 << 1)
+#define ESP_BT_SDIO_SUPPORT                (1 << 2)
+#define ESP_BLE_ONLY_SUPPORT               (1 << 3)
+#define ESP_BR_EDR_ONLY_SUPPORT            (1 << 4)
+#define ESP_WLAN_SPI_SUPPORT               (1 << 5)
+#define ESP_BT_SPI_SUPPORT                 (1 << 6)
+#define ESP_CHECKSUM_ENABLED               (1 << 7)
+
 /****************************************************************************
  * Enumerations
  ****************************************************************************/
@@ -674,6 +685,23 @@ int esp_power_to_dbm(int power);
 /* Get adapter */
 
 FAR struct esp_adapter *esp_get_adapter(void);
+
+/* Network device functions */
+
+int esp32_netdev_register(struct esp_wifi_device *priv);
+int esp32_netdev_unregister(struct esp_wifi_device *priv);
+int esp32_netdev_receive(struct esp_adapter *adapter);
+void esp_port_open(struct esp_wifi_device *priv);
+void esp_port_close(struct esp_wifi_device *priv);
+void esp_tx_pause(struct esp_wifi_device *priv);
+void esp_tx_resume(struct esp_wifi_device *priv);
+
+/* Boot and initialization functions */
+
+int esp32_boot_init(struct esp_adapter *adapter);
+int esp32_check_capabilities(struct esp_adapter *adapter);
+bool esp_checksum_enabled(struct esp_adapter *adapter);
+const char *esp_get_chipset_name(struct esp_adapter *adapter);
 
 #ifdef __cplusplus
 }

@@ -38,6 +38,8 @@
 #include <nuttx/wireless/esp32_wifi.h>
 #include <nuttx/wireless/cfg80211.h>
 
+#include "esp_cfg80211.h"
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -66,6 +68,7 @@ struct esp32_wifi_master_priv_s
 {
   bool initialized;                     /* Initialization state */
   bool communication_initialized;      /* Communication interface initialized */
+  bool cfg80211_initialized;           /* cfg80211 interface initialized */
   enum esp32_comm_mode_e comm_mode;    /* Communication mode (SDIO/SPI) */
   
   /* Communication interface handlers */
@@ -81,7 +84,7 @@ struct esp32_wifi_master_priv_s
   
   /* cfg80211 interface */
   struct wiphy *wiphy;
-  struct wireless_dev *wdev;
+  struct esp_adapter *adapter;
 };
 
 /****************************************************************************
@@ -111,8 +114,8 @@ static int esp32_wifi_init_communication(FAR struct esp32_wifi_master_priv_s *ma
 #ifdef CONFIG_ESP32_WIFI_SDIO
   if (master->comm_mode == ESP32_COMM_SDIO)
     {
-      ret = esp32_sdio_initialize(CONFIG_ESP32_SDIO_DEVMINOR,
-                                  CONFIG_ESP32_SDIO_FUNCTION);
+      ret = esp32_sdio_initialize(CONFIG_ESP32_WIFI_SDIO_DEVMINOR,
+                                  CONFIG_ESP32_WIFI_SDIO_FUNCTION);
       if (ret >= 0)
         {
           master->communication_initialized = true;
@@ -129,9 +132,9 @@ static int esp32_wifi_init_communication(FAR struct esp32_wifi_master_priv_s *ma
 #ifdef CONFIG_ESP32_WIFI_SPI
   if (master->comm_mode == ESP32_COMM_SPI)
     {
-      ret = esp32_spi_initialize(CONFIG_ESP32_SPI_DEVMINOR,
-                                 CONFIG_ESP32_SPI_INTR_PIN,
-                                 CONFIG_ESP32_SPI_CS_PIN);
+      ret = esp32_spi_initialize(CONFIG_ESP32_WIFI_SPI_DEVMINOR,
+                                 CONFIG_ESP32_WIFI_SPI_INTR_PIN,
+                                 CONFIG_ESP32_WIFI_SPI_CS_PIN);
       if (ret >= 0)
         {
           master->communication_initialized = true;
@@ -159,27 +162,90 @@ static int esp32_wifi_init_communication(FAR struct esp32_wifi_master_priv_s *ma
 static int esp32_wifi_init_cfg80211(FAR struct esp32_wifi_master_priv_s *master)
 {
   int ret;
+  struct esp_if_ops *if_ops = NULL;
 
   esp32_wlaninfo("Initializing cfg80211 interface\n");
 
-  /* Register with cfg80211 subsystem */
+#ifdef CONFIG_ESP32_WIFI_SDIO
+  if (master->comm_mode == ESP32_COMM_SDIO)
+    {
+      extern struct esp_if_ops g_esp32_sdio_ops;
+      if_ops = &g_esp32_sdio_ops;
+    }
+#endif
 
-  ret = esp32_cfg80211_register();
+#ifdef CONFIG_ESP32_WIFI_SPI
+  if (master->comm_mode == ESP32_COMM_SPI)
+    {
+      extern struct esp_if_ops g_esp32_spi_ops;
+      if_ops = &g_esp32_spi_ops;
+    }
+#endif
+
+  if (!if_ops)
+    {
+      esp32_wlanerr("No interface operations available\n");
+      return -ENODEV;
+    }
+
+  /* Initialize ESP32 boot sequence */
+  ret = esp32_boot_init(NULL);  /* We'll pass adapter later after registration */
+  if (ret < 0)
+    {
+      esp32_wlanerr("Failed to initialize ESP32 boot sequence: %d\n", ret);
+      return ret;
+    }
+
+  /* Register with cfg80211 subsystem */
+  ret = esp_cfg80211_init(if_ops, master->comm_mode == ESP32_COMM_SDIO ? 
+                          ESP_IF_TYPE_SDIO : ESP_IF_TYPE_SPI);
   if (ret < 0)
     {
       esp32_wlanerr("Failed to register with cfg80211: %d\n", ret);
       return ret;
     }
 
-  /* Store wiphy reference */
-  master->wiphy = esp32_cfg80211_get_wiphy();
+  /* Get adapter reference */
+  master->adapter = esp_get_adapter();
+  if (!master->adapter)
+    {
+      esp32_wlanerr("Failed to get adapter\n");
+      return -ENODEV;
+    }
+
+  /* Get wiphy reference */
+  master->wiphy = master->adapter->wiphy;
   if (!master->wiphy)
     {
       esp32_wlanerr("Failed to get wiphy\n");
       return -ENODEV;
     }
 
+  /* Check capabilities */
+  ret = esp32_check_capabilities(master->adapter);
+  if (ret < 0)
+    {
+      esp32_wlanerr("Capability check failed: %d\n", ret);
+      return ret;
+    }
+
+  /* Add initial interfaces */
+  ret = esp_add_interface(master->adapter, "wlan0", NL80211_IFTYPE_STATION);
+  if (ret < 0)
+    {
+      esp32_wlanerr("Failed to add initial station interface: %d\n", ret);
+    }
+  
+#ifdef CONFIG_ESP32_WIFI_AP
+  ret = esp_add_interface(master->adapter, "ap0", NL80211_IFTYPE_AP);
+  if (ret < 0)
+    {
+      esp32_wlanerr("Failed to add initial AP interface: %d\n", ret);
+    }
+#endif
+
   esp32_wlaninfo("cfg80211 interface initialized successfully\n");
+  master->cfg80211_initialized = true;
   return OK;
 }
 
@@ -228,16 +294,32 @@ int esp32_wifi_initialize(void)
   if (ret < 0)
     {
       esp32_wlanerr("Failed to initialize cfg80211: %d\n", ret);
-      return ret;
+      goto err_comm_deinit;
     }
-
-  /* Initialize ESP32 firmware */
-  /* TODO: Send initialization commands to ESP32 */
 
   master->initialized = true;
 
   esp32_wlaninfo("ESP32 WiFi driver initialized successfully\n");
   return OK;
+
+err_comm_deinit:
+#ifdef CONFIG_ESP32_WIFI_SDIO
+  if (master->comm_mode == ESP32_COMM_SDIO && master->comm.sdio.initialized)
+    {
+      esp32_sdio_uninitialize();
+      master->comm.sdio.initialized = false;
+    }
+#endif
+
+#ifdef CONFIG_ESP32_WIFI_SPI
+  if (master->comm_mode == ESP32_COMM_SPI && master->comm.spi.initialized)
+    {
+      esp32_spi_uninitialize();
+      master->comm.spi.initialized = false;
+    }
+#endif
+
+  return ret;
 }
 
 /****************************************************************************
@@ -260,7 +342,11 @@ int esp32_wifi_uninitialize(void)
   esp32_wlaninfo("Uninitializing ESP32 WiFi driver\n");
 
   /* Uninitialize cfg80211 interface */
-  esp32_cfg80211_unregister();
+  if (master->cfg80211_initialized)
+    {
+      esp_cfg80211_deinit();
+      master->cfg80211_initialized = false;
+    }
 
   /* Uninitialize communication interface */
   if (master->communication_initialized)
