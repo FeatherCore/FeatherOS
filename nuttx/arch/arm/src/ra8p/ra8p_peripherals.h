@@ -103,6 +103,18 @@
 #include "hardware/ra8p_eth.h"
 #endif
 
+#ifdef CONFIG_RA8P_ADC0
+#include "hardware/ra8p_adc.h"
+#endif
+
+#ifdef CONFIG_RA8P_DAC0
+#include "hardware/ra8p_dac.h"
+#endif
+
+#ifdef CONFIG_RA8P_MIPI_DSI
+#include "hardware/ra8p_mipi_dsi.h"
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/

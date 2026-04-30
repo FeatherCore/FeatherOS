@@ -110,6 +110,21 @@ ifeq ($(CONFIG_RA8P_ETHERNET),y)
   CHIP_SRCS += ra8p_ethernet.c
 endif
 
+# ADC support
+ifeq ($(CONFIG_RA8P_ADC0),y)
+  CHIP_SRCS += ra8p_adc.c
+endif
+
+# DAC support
+ifeq ($(CONFIG_RA8P_DAC0),y)
+  CHIP_SRCS += ra8p_dac.c
+endif
+
+# MIPI DSI support
+ifeq ($(CONFIG_RA8P_MIPI_DSI),y)
+  CHIP_SRCS += ra8p_mipi_dsi.c
+endif
+
 # RTC support
 ifeq ($(CONFIG_RA8P_RTC),y)
   CHIP_SRCS += ra8p_rtc.c

@@ -445,6 +445,49 @@ config RA8P_ETHERNET_RGMII
 	help
 	  Enable RGMII mode for gigabit Ethernet.
 
+comment "ADC Configuration"
+
+config RA8P_ADC0
+	bool "ADC Controller 0"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable ADC Controller 0 support.
+
+config RA8P_ADC_RESOLUTION
+	int "ADC Resolution"
+	default 12
+	range 12 16
+	depends on RA8P_ADC0
+	help
+	  ADC resolution in bits (12 or 16).
+
+comment "DAC Configuration"
+
+config RA8P_DAC0
+	bool "DAC Controller 0"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable DAC Controller 0 support.
+
+comment "MIPI DSI Configuration"
+
+config RA8P_MIPI_DSI
+	bool "MIPI DSI Controller"
+	default n
+	depends on RA8P_MIPI_DSI
+	help
+	  Enable MIPI DSI display interface support.
+
+config RA8P_MIPI_DSI_LANES
+	int "Number of DSI Lanes"
+	default 2
+	range 1 4
+	depends on RA8P_MIPI_DSI
+	help
+	  Number of MIPI DSI data lanes (1-4).
+
 comment "Power Management Configuration"
 
 config RA8P_POWER
