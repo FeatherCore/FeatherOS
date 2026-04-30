@@ -59,24 +59,23 @@
 
 /* LCD and LTDC Configuration ************************************************/
 
-/* STM32U5G9J-DK1 has a 5" LCD with MIPI DSI interface
- * Display: RK050HR18H-CTG (720x1280) or similar
- * For simplicity, we use 720x1280 as default
+/* STM32U5G9J-DK1 has a 4.5" LCD with MIPI DSI interface
+ * Display: 480x272 resolution
  */
 
 #ifdef CONFIG_STM32U5_LTDC
 
-/* LCD Timing Parameters (typical values, may need adjustment) */
+/* LCD Timing Parameters (typical values for 480x272 display) */
 
-#define BOARD_LTDC_WIDTH          720
-#define BOARD_LTDC_HEIGHT         1280
+#define BOARD_LTDC_WIDTH          480
+#define BOARD_LTDC_HEIGHT         272
 
-/* HSYNC and VSYNC timing (typical values) */
+/* HSYNC and VSYNC timing */
 
 #define BOARD_LTDC_HSYNC          5
 #define BOARD_LTDC_VSYNC          5
-#define BOARD_LTDC_HBP            10
-#define BOARD_LTDC_HFP            10
+#define BOARD_LTDC_HBP            20
+#define BOARD_LTDC_HFP            20
 #define BOARD_LTDC_VBP            10
 #define BOARD_LTDC_VFP            10
 
