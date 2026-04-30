@@ -125,6 +125,11 @@ ifeq ($(CONFIG_RA8P_MIPI_DSI),y)
   CHIP_SRCS += ra8p_mipi_dsi.c
 endif
 
+# GLCDC support
+ifeq ($(CONFIG_RA8P_GLCDC),y)
+  CHIP_SRCS += ra8p_glcdc.c
+endif
+
 # RTC support
 ifeq ($(CONFIG_RA8P_RTC),y)
   CHIP_SRCS += ra8p_rtc.c

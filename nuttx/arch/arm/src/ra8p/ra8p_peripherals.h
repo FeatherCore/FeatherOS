@@ -115,6 +115,10 @@
 #include "hardware/ra8p_mipi_dsi.h"
 #endif
 
+#ifdef CONFIG_RA8P_GLCDC
+#include "hardware/ra8p_glcdc.h"
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/

@@ -488,6 +488,37 @@ config RA8P_MIPI_DSI_LANES
 	help
 	  Number of MIPI DSI data lanes (1-4).
 
+comment "GLCDC Configuration"
+
+config RA8P_GLCDC
+	bool "GLCDC Display Controller"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable GLCDC (Graphics LCD Controller) support.
+
+config RA8P_GLCDC_WIDTH
+	int "Display Width"
+	default 800
+	depends on RA8P_GLCDC
+	help
+	  Display width in pixels.
+
+config RA8P_GLCDC_HEIGHT
+	int "Display Height"
+	default 480
+	depends on RA8P_GLCDC
+	help
+	  Display height in pixels.
+
+config RA8P_GLCDC_BPP
+	int "Bits Per Pixel"
+	default 16
+	range 16 32
+	depends on RA8P_GLCDC
+	help
+	  Color depth (16, 24, or 32 bits per pixel).
+
 comment "Power Management Configuration"
 
 config RA8P_POWER
