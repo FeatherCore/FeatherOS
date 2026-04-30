@@ -95,6 +95,21 @@ ifeq ($(CONFIG_RA8P_POWER),y)
   CHIP_SRCS += ra8p_power.c
 endif
 
+# I3C support
+ifeq ($(CONFIG_RA8P_I3C0),y)
+  CHIP_SRCS += ra8p_i3c.c
+endif
+
+# OSPI support
+ifneq ($(filter y,$(CONFIG_RA8P_OSPI0) $(CONFIG_RA8P_OSPI1)),)
+  CHIP_SRCS += ra8p_ospi.c
+endif
+
+# Ethernet support
+ifeq ($(CONFIG_RA8P_ETHERNET),y)
+  CHIP_SRCS += ra8p_ethernet.c
+endif
+
 # RTC support
 ifeq ($(CONFIG_RA8P_RTC),y)
   CHIP_SRCS += ra8p_rtc.c

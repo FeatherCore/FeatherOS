@@ -91,6 +91,18 @@
 #include "ra8p_pinctrl.h"
 #endif
 
+#ifdef CONFIG_RA8P_I3C0
+#include "hardware/ra8p_i3c.h"
+#endif
+
+#ifdef CONFIG_RA8P_OSPI0
+#include "hardware/ra8p_ospi.h"
+#endif
+
+#ifdef CONFIG_RA8P_ETHERNET
+#include "hardware/ra8p_eth.h"
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/

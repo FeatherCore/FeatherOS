@@ -397,6 +397,54 @@ config RA8P_ICU
 	help
 	  Enable ICU (External Interrupt Controller) support for GPIO interrupts.
 
+comment "I3C Configuration"
+
+config RA8P_I3C0
+	bool "I3C Controller 0"
+	default n
+	depends on RA8P_HAVE_I3C
+	help
+	  Enable I3C Controller 0 support.
+
+comment "OSPI (Octal SPI) Configuration"
+
+config RA8P_OSPI0
+	bool "OSPI Controller 0"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable OSPI (Octal SPI) Controller 0 support for external flash.
+
+config RA8P_OSPI1
+	bool "OSPI Controller 1"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable OSPI (Octal SPI) Controller 1 support for external flash.
+
+comment "Ethernet Configuration"
+
+config RA8P_ETHERNET
+	bool "Ethernet Controller (ETHERC/EDMAC)"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable Ethernet controller support (ETHERC + EDMAC).
+
+config RA8P_ETHERNET_PHY_ADDR
+	int "PHY Address"
+	default 0
+	depends on RA8P_ETHERNET
+	help
+	  PHY address for Ethernet.
+
+config RA8P_ETHERNET_RGMII
+	bool "RGMII Mode"
+	default n
+	depends on RA8P_ETHERNET
+	help
+	  Enable RGMII mode for gigabit Ethernet.
+
 comment "Power Management Configuration"
 
 config RA8P_POWER
