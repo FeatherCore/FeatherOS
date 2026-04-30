@@ -155,6 +155,11 @@ ifeq ($(CONFIG_RA8P_CEU),y)
   CHIP_SRCS += ra8p_ceu.c
 endif
 
+# MEMC (Memory Controller) support
+ifeq ($(CONFIG_RA8P_MEMC),y)
+  CHIP_SRCS += ra8p_memc.c
+endif
+
 # GLCDC support
 ifeq ($(CONFIG_RA8P_GLCDC),y)
   CHIP_SRCS += ra8p_glcdc.c

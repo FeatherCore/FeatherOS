@@ -508,8 +508,32 @@ config RA8P_CEU_HEIGHT
 	int "Capture Height"
 	default 480
 	depends on RA8P_CEU
-	help:
+	help
 	  Capture height in pixels.
+
+comment "MEMC (Memory Controller) Configuration"
+
+config RA8P_MEMC
+	bool "MEMC (Memory Controller)"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable MEMC (SDRAM Controller) support.
+
+config RA8P_MEMC_SIZE
+	int "SDRAM Size (MB)"
+	default 64
+	depends on RA8P_MEMC
+	help
+	  SDRAM size in megabytes.
+
+config RA8P_MEMC_BUS_WIDTH
+	int "Bus Width (bits)"
+	default 32
+	range 16 32
+	depends on RA8P_MEMC
+	help
+	  SDRAM bus width (16 or 32 bits).
 
 comment "GLCDC Configuration"
 
