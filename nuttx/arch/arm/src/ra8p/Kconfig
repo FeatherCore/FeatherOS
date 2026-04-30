@@ -537,6 +537,33 @@ config RA8P_ENTROPY
 	help
 	  Enable true random number generator (TRNG) support.
 
+comment "I2S/SSIE Configuration"
+
+config RA8P_I2S0
+	bool "I2S/SSIE Controller 0"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable I2S/SSIE audio interface controller 0.
+
+comment "Comparator Configuration"
+
+config RA8P_COMPARATOR
+	bool "Analog Comparator"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable analog comparator support.
+
+comment "Hardware Info Configuration"
+
+config RA8P_HWINFO
+	bool "Hardware Information"
+	default y
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help:
+	  Enable hardware information support (Unique ID, Product Number, etc.).
+
 comment "Power Management Configuration"
 
 config RA8P_POWER

@@ -125,6 +125,31 @@ ifeq ($(CONFIG_RA8P_MIPI_DSI),y)
   CHIP_SRCS += ra8p_mipi_dsi.c
 endif
 
+# CRC support
+ifeq ($(CONFIG_RA8P_CRC),y)
+  CHIP_SRCS += ra8p_crc.c
+endif
+
+# Entropy support
+ifeq ($(CONFIG_RA8P_ENTROPY),y)
+  CHIP_SRCS += ra8p_entropy.c
+endif
+
+# I2S support
+ifeq ($(CONFIG_RA8P_I2S0),y)
+  CHIP_SRCS += ra8p_i2s.c
+endif
+
+# Comparator support
+ifeq ($(CONFIG_RA8P_COMPARATOR),y)
+  CHIP_SRCS += ra8p_comparator.c
+endif
+
+# Hardware info support
+ifeq ($(CONFIG_RA8P_HWINFO),y)
+  CHIP_SRCS += ra8p_hwinfo.c
+endif
+
 # GLCDC support
 ifeq ($(CONFIG_RA8P_GLCDC),y)
   CHIP_SRCS += ra8p_glcdc.c
