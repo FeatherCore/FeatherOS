@@ -20,6 +20,18 @@ V3.10 继续保持 Wing 不扩页面/route 的边界，只把 FHRE 的 run 级�
 - `RenderStats` 中新增 run 级计数作为 shell 判断条件：有提交 run 时优先看 `draw_chain_hw_runs`，有回退 run 时优先检查对应命令区间是否是局部回退，避免把整帧当作整体硬件失败。
 - `wing_demo` 不持有私有 codec 或硬件 backend 接口，不新增 page，不私有 raster/mask/layer/framebuffer 解码路径；只验证 Home、AllApps、Settings、Notifications、AppSwitcher、FHRE Sample 在 FHRE 资源、draw chain、codec stats 框架下稳定运行。
 
+## V3.11 run 级链路与 codec 并行提示的适配边界
+
+V3.11 保持 V3.10 边界，但把可观测边界收紧为“只读观测 + 提示输入”，不把调度语义引入 Wing 页面层。
+
+- Wing 只消费 FHRE 的 run 结果与 pipeline 统计，不引入 page 侧 run 合并、资源并行或硬件 fallback 策略：
+  - `draw_chain_runs / draw_chain_hw_runs / draw_chain_sw_runs / draw_chain_splits / draw_chain_parallel_hints`
+  - `codec_pipeline_candidates / codec_pipeline_fallbacks / codec_pipeline_unsupported / codec_pipeline_overflows`
+  - `codec_prewarm_parallel_hints`
+- 仅作为建议：`parallel_hints`（run 级）与 `codec_prewarm_parallel_hints`（资源预热）不执行，不改动当前页面 draw 顺序，不参与命令重排。
+- `FHRE` 保持“复杂 decode 仅 prewarm/path cache”边界，Wing 继续不持有私有 PNG/JPEG/TTF/SVG 解析与 cache 管理。
+- `fhre_demo` 的 HUD/HW-accel/codec 可观测口径是 Wing 定位的主要输入：当出现回退时先看 run 区间与对应 `top chain task / top fallback`，再看 `cache / pipeline` 趋势。
+
 ## V3.9 对 FHRE 硬件可插手管线的适配边界
 
 V3.9 仍不扩 Wing route/page。Wing 只消费 FHRE 暴露的 draw/resource/cache/stats API，不拥有 DMA2D/GPU draw chain，也不拥有 PNG/JPEG/TTF/SVG 硬件 decoder stage。

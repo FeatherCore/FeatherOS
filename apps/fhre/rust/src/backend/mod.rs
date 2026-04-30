@@ -962,6 +962,7 @@ pub struct RenderStats {
     pub draw_chain_sw_runs: u32,
     pub draw_chain_splits: u32,
     pub draw_chain_parallel_hints: u32,
+    pub codec_prewarm_parallel_hints: u32,
     pub task_draw_chain_hits: DrawTaskCounters,
     pub codec_pipeline_candidates: u32,
     pub codec_pipeline_stages: u32,
@@ -1098,6 +1099,7 @@ impl RenderStats {
             draw_chain_sw_runs: 0,
             draw_chain_splits: 0,
             draw_chain_parallel_hints: 0,
+            codec_prewarm_parallel_hints: 0,
             task_draw_chain_hits: DrawTaskCounters::new(),
             codec_pipeline_candidates: 0,
             codec_pipeline_stages: 0,
@@ -1225,6 +1227,24 @@ impl RenderStats {
         self.svg_doc_cache_loads = cache.loads;
         self.svg_doc_cache_fallbacks = cache.fallbacks();
         self.svg_doc_cache_slots = cache.slots.min(u32::MAX as usize) as u32;
+        self.codec_pipeline_candidates = self
+            .codec_pipeline_candidates
+            .saturating_add(cache.pipeline_candidates);
+        self.codec_pipeline_stages = self
+            .codec_pipeline_stages
+            .saturating_add(cache.pipeline_stages);
+        self.codec_pipeline_hardware_candidates = self
+            .codec_pipeline_hardware_candidates
+            .saturating_add(cache.pipeline_hardware_candidates);
+        self.codec_pipeline_fallbacks = self
+            .codec_pipeline_fallbacks
+            .saturating_add(cache.pipeline_fallbacks);
+        self.codec_pipeline_unsupported = self
+            .codec_pipeline_unsupported
+            .saturating_add(cache.pipeline_unsupported);
+        self.codec_pipeline_overflows = self
+            .codec_pipeline_overflows
+            .saturating_add(cache.pipeline_overflows);
     }
 
     pub fn mark_codec_error(&mut self, kind: CodecErrorKind) {
@@ -1673,6 +1693,9 @@ impl RenderStats {
         self.draw_chain_parallel_hints = self
             .draw_chain_parallel_hints
             .saturating_add(other.draw_chain_parallel_hints);
+        self.codec_prewarm_parallel_hints = self
+            .codec_prewarm_parallel_hints
+            .saturating_add(other.codec_prewarm_parallel_hints);
         self.task_draw_chain_hits.merge(other.task_draw_chain_hits);
         self.codec_pipeline_candidates = self
             .codec_pipeline_candidates
@@ -1891,6 +1914,12 @@ impl RenderStats {
 
     pub fn mark_draw_chain_parallel_hint(&mut self) {
         self.draw_chain_parallel_hints = self.draw_chain_parallel_hints.saturating_add(1);
+    }
+
+    pub fn mark_codec_prewarm_parallel_hint(&mut self) {
+        self.codec_prewarm_parallel_hints = self
+            .codec_prewarm_parallel_hints
+            .saturating_add(1);
     }
 
     pub fn mark_draw_dispatch(&mut self, path: DrawPathKind) {

@@ -167,6 +167,7 @@ struct CodecFixtureStats {
     text_layout_overflows: u32,
     text_shaping_fallbacks: u32,
     svg_filter_budget_exceeded: u32,
+    codec_prewarm_parallel_hints: u32,
 }
 
 impl CodecFixtureStats {
@@ -200,6 +201,7 @@ impl CodecFixtureStats {
             text_layout_overflows: 0,
             text_shaping_fallbacks: 0,
             svg_filter_budget_exceeded: 0,
+            codec_prewarm_parallel_hints: 0,
         }
     }
 
@@ -328,6 +330,12 @@ impl CodecFixtureStats {
 
     fn mark_svg_filter_budget_exceeded(&mut self) {
         self.svg_filter_budget_exceeded = self.svg_filter_budget_exceeded.saturating_add(1);
+    }
+
+    fn mark_codec_prewarm_parallel_hints(&mut self, hints: u32) {
+        self.codec_prewarm_parallel_hints = self
+            .codec_prewarm_parallel_hints
+            .saturating_add(hints);
     }
 }
 
@@ -869,6 +877,13 @@ fn record_demo_codec_pipeline(stats: CodecPipelineStats) {
     }
 }
 
+fn record_demo_codec_prewarm_parallel_hint(hints: u32) {
+    unsafe {
+        (*core::ptr::addr_of_mut!(DEMO_FIXTURE_STATS))
+            .mark_codec_prewarm_parallel_hints(hints);
+    }
+}
+
 fn demo_codec_stats() -> CodecStats {
     unsafe { *core::ptr::addr_of!(DEMO_CODEC_STATS) }
 }
@@ -950,10 +965,16 @@ fn apply_fixture_feature_stats(stats: &mut RenderStats, fixtures: CodecFixtureSt
     stats.svg_filter_budget_exceeded = stats
         .svg_filter_budget_exceeded
         .saturating_add(fixtures.svg_filter_budget_exceeded);
+    stats.codec_prewarm_parallel_hints = stats
+        .codec_prewarm_parallel_hints
+        .saturating_add(fixtures.codec_prewarm_parallel_hints);
 }
 
 fn prewarm_demo_resources() {
     reset_demo_codec_stats();
+    let mut image_fixtures = 0u32;
+    let mut ttf_fixtures = 0u32;
+    let mut svg_fixtures = 0u32;
     unsafe {
         (*core::ptr::addr_of_mut!(DEMO_SVG_DOCUMENT_CACHE)).clear();
         let cache_slot = core::ptr::addr_of_mut!(DEMO_IMAGE_CACHE);
@@ -963,8 +984,27 @@ fn prewarm_demo_resources() {
     }
     let mut index = 0usize;
     while index < DEMO_CODEC_FIXTURES.len() {
+        match DEMO_CODEC_FIXTURES[index] {
+            CodecFixture::Image { .. } => {
+                image_fixtures = image_fixtures.saturating_add(1);
+            }
+            CodecFixture::Ttf { .. } => {
+                ttf_fixtures = ttf_fixtures.saturating_add(1);
+            }
+            CodecFixture::Svg { .. } => {
+                svg_fixtures = svg_fixtures.saturating_add(1);
+            }
+        }
         prewarm_codec_fixture(DEMO_CODEC_FIXTURES[index]);
         index += 1;
+    }
+    let prewarm_parallel_hints = image_fixtures / 2
+        + ttf_fixtures / 2
+        + svg_fixtures / 2;
+    record_demo_codec_prewarm_parallel_hint(prewarm_parallel_hints);
+    let mixed_leftover = (image_fixtures & 1) + (ttf_fixtures & 1) + (svg_fixtures & 1);
+    if mixed_leftover >= 2 {
+        record_demo_codec_prewarm_parallel_hint(1);
     }
     prewarm_demo_glyph_runs();
 }
@@ -1226,8 +1266,6 @@ fn prewarm_svg_fixture(id: SvgId, path: &'static [u8], slot: usize) -> Option<Co
     if slot >= DEMO_SVG_IDS.len() || DEMO_SVG_IDS[slot] != id {
         return Some(CodecErrorKind::Invalid);
     }
-    let plan = DefaultSvgDocument::plan_pipeline::<DEFAULT_CODEC_PIPELINE_STAGES>();
-    record_demo_codec_pipeline(plan.stats());
     let mut loader = NuttxResourceLoader::new(FHRE_RESOURCE_PREFIX);
     let view = unsafe {
         let cache = core::ptr::addr_of_mut!(DEMO_SVG_DOCUMENT_CACHE);
@@ -3227,6 +3265,24 @@ fn push_stats_commands(
         stats.draw_chain_parallel_hints.saturating_mul(12).min(w as u32),
         5,
         Color::rgba(80, 132, 248, 220),
+    );
+    push_text(
+        list,
+        x + 72,
+        y + 475,
+        "P/P",
+        Color::rgba(238, 250, 255, 170),
+    );
+    push_bar(
+        list,
+        x + 92,
+        y + 475,
+        stats
+            .codec_prewarm_parallel_hints
+            .saturating_mul(12)
+            .min(w as u32),
+        5,
+        Color::rgba(194, 92, 230, 220),
     );
 }
 

@@ -68,6 +68,27 @@ V3.10 在 V3.9 的基础上把绘制候选链升级为 **run 级编排器**：�
 
 V3.9 继续 FHRE-first，但不直接绑定 DMA2D、PXP、VG-Lite、OpenGL ES 或某个具体芯片。目标是先把 draw 与 codec 拆成硬件更容易接管的固定容量 descriptor/stage 边界：软件 `Surface` 渲染结果保持不变，真实硬件后端未来只需要覆写提交入口。
 
+## V3.11 硬件机会提取与统一可观测口径
+
+V3.11 把 V3.10 的 run 级执行策略收敛为“低打断 + 低风险并行提示”的稳定基线：`DrawList -> DrawChain -> run 规划 -> backend` 仍保持单向顺序输出，目标是把可被硬件接管的片段尽量提取出来，减少软件回退窗口，而不改变热渲染结果。
+
+- 运行策略：
+  - `compile_draw_chain()` 不改变输出语义，仅提供命令级链路骨架；
+  - `plan_draw_chain_runs()` 按 `max_chain_ops`、backend 能力、`Clip/Mask/Layer` 状态变化和候选一致性切分 run；
+  - 回退只处理当前 run 命令区间，不再回退整帧，减少重复绘制；
+  - `DrawBackendDispatch`、`BackendCapabilities`、`RenderBackend::submit_draw_chain()` 保持抽象分层，软件 backend 仍 `Unsupported`，默认行为不变。
+- codec pipeline 可观测化（标准化）：
+  - `plan_pipeline()` 继续作为 decode 前能力描述，不改变 decode 结果；
+  - `draw/demo` 侧仅从 `ImageCache/GlyphCache/SvgDocumentCache` 的 `prewarm` 路径发起复杂 decode；
+  - `ImageCache/GlyphCache/SvgDocumentCache` 继续记录 `pipeline_candidate / stages / hardware_candidate / fallback / unsupported / overflow`，并映射到 `RenderStats::codec_*` 统计；
+  - `fhre_demo` `codec_prewarm_parallel_hints` 作为“预热可并行建议”计数入口，供 HUD 展示；
+- 并行能力：
+  - 仅收集并行候选（非执行调度），用于下一轮 backend/队列策略提示，不打破当前顺序一致性；
+  - `draw_chain_parallel_hints` 与 `draw_chain_runs / draw_chain_hw_runs / draw_chain_sw_runs / run splits` 作为软/硬件接管倾向观察指标，作为 V3.11 HUD baseline。
+- 接口与 HUD：
+  - 维持兼容 API（`DrawList` / `DrawChain` / `DrawBackendDispatch` / `RenderBackend::submit_draw_chain` / `RenderStats`）。
+  - `fhre_demo` HUD 继续展示 run 提交/回退、split、parallel hint 与 codec pipeline 计数，便于判断“为何本帧回退”与“是否有候选可提速”。
+
 本轮新增和稳定的内容：
 
 - Draw chain descriptor：
