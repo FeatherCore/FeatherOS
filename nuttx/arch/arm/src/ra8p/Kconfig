@@ -488,6 +488,29 @@ config RA8P_MIPI_DSI_LANES
 	help
 	  Number of MIPI DSI data lanes (1-4).
 
+comment "CEU (Camera Engine Unit) Configuration"
+
+config RA8P_CEU
+	bool "CEU (Camera Engine Unit)"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable CEU camera interface support.
+
+config RA8P_CEU_WIDTH
+	int "Capture Width"
+	default 640
+	depends on RA8P_CEU
+	help
+	  Capture width in pixels.
+
+config RA8P_CEU_HEIGHT
+	int "Capture Height"
+	default 480
+	depends on RA8P_CEU
+	help:
+	  Capture height in pixels.
+
 comment "GLCDC Configuration"
 
 config RA8P_GLCDC

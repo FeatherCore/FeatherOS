@@ -150,6 +150,11 @@ ifeq ($(CONFIG_RA8P_HWINFO),y)
   CHIP_SRCS += ra8p_hwinfo.c
 endif
 
+# CEU (Camera Engine Unit) support
+ifeq ($(CONFIG_RA8P_CEU),y)
+  CHIP_SRCS += ra8p_ceu.c
+endif
+
 # GLCDC support
 ifeq ($(CONFIG_RA8P_GLCDC),y)
   CHIP_SRCS += ra8p_glcdc.c

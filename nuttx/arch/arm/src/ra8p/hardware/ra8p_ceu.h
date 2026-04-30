@@ -25,420 +25,166 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
+#include "chip.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* CEU Register Offsets - Based on RA8P Hardware Manual and Zephyr definitions */
-#define RA8P_CEU_CEUDLYC_OFFSET          0x0000  /* Data Delay Control Register */
-#define RA8P_CEU_CEUCTR_OFFSET           0x0004  /* CEU Control Register */
-#define RA8P_CEU_CEUICR_OFFSET           0x0008  /* Input Control Register */
-#define RA8P_CEU_CEUIDSR_OFFSET          0x000C  /* Input Data Swap Register */
-#define RA8P_CEU_CEUIWCR_OFFSET          0x0010  /* Input Window Clip Register */
-#define RA8P_CEU_CEUIHCR_OFFSET          0x0014  /* Input Horizontal Clip Register */
-#define RA8P_CEU_CEUIWC_OFFSET           0x0018  /* Input Window Clip Register */
-#define RA8P_CEU_CEUIVC_OFFSET           0x001C  /* Input Vertical Clip Register */
-#define RA8P_CEU_CEUIWCS_OFFSET          0x0020  /* Input Window Clip Start Register */
-#define RA8P_CEU_CEUIVCS_OFFSET          0x0024  /* Input Vertical Clip Start Register */
-#define RA8P_CEU_CEUIWCE_OFFSET          0x0028  /* Input Window Clip End Register */
-#define RA8P_CEU_CEUIVCE_OFFSET          0x002C  /* Input Vertical Clip End Register */
-#define RA8P_CEU_CEUISCR_OFFSET          0x0030  /* Input Size Control Register */
-#define RA8P_CEU_CEUICCR_OFFSET          0x0034  /* Input Color Compensation Register */
-#define RA8P_CEU_CEUICCR2_OFFSET         0x0038  /* Input Color Compensation Register 2 */
-#define RA8P_CEU_CEUFCR_OFFSET          0x0040  /* FIFO Control Register */
-#define RA8P_CEU_CEUFSR_OFFSET          0x0044  /* FIFO Status Register */
-#define RA8P_CEU_CEUFWCR_OFFSET          0x0048  /* FIFO Write Control Register */
-#define RA8P_CEU_CEUFVCR_OFFSET          0x004C  /* FIFO Valid Control Register */
-#define RA8P_CEU_CEUFDCA0_OFFSET         0x0050  /* FIFO Data Count Address 0 Register */
-#define RA8P_CEU_CEUFDCA1_OFFSET         0x0054  /* FIFO Data Count Address 1 Register */
-#define RA8P_CEU_CEUFWC_OFFSET           0x0060  /* FIFO Write Counter Register */
-#define RA8P_CEU_CEUVC_OFFSET            0x0064  /* Valid Counter Register */
-#define RA8P_CEU_CEUEIWF_OFFSET          0x0070  /* Even Input Field Write Flag Register */
-#define RA8P_CEU_CEUOIWF_OFFSET          0x0074  /* Odd Input Field Write Flag Register */
-#define RA8P_CEU_CEUFPF_OFFSET           0x0078  /* FIFO Pack Flag Register */
-#define RA8P_CEU_CEUDBR_OFFSET           0x007C  /* Debug Register */
-#define RA8P_CEU_CEUCRDR_OFFSET          0x0080  /* Capture Read Data Register */
-#define RA8P_CEU_CEUCCDR_OFFSET          0x0084  /* Capture Compare Data Register */
-#define RA8P_CEU_CEUCAFR_OFFSET          0x0088  /* Capture Alpha Blending Factor Register */
-#define RA8P_CEU_CEUCAFDR_OFFSET         0x008C  /* Capture Alpha Blending Factor Data Register */
-#define RA8P_CEU_CEUDBLCR_OFFSET         0x0090  /* Debug Luminance Control Register */
-#define RA8P_CEU_CEUDBLDR_OFFSET         0x0094  /* Debug Luminance Data Register */
-#define RA8P_CEU_CEUDBCCR_OFFSET         0x0098  /* Debug Chrominance Control Register */
-#define RA8P_CEU_CEUDBCDR_OFFSET         0x009C  /* Debug Chrominance Data Register */
-#define RA8P_CEU_CEUINTR_OFFSET          0x00A0  /* Interrupt Register */
-#define RA8P_CEU_CEUINTSR_OFFSET         0x00A4  /* Interrupt Status Register */
-#define RA8P_CEU_CEUINTRMSK_OFFSET       0x00A8  /* Interrupt Mask Register */
-
-/* CEUCTR - CEU Control Register */
-#define RA8P_CEU_CEUCTR_CEUEN            (1 << 0)   /* CEU Enable */
-#define RA8P_CEU_CEUCTR_IEN              (1 << 1)   /* Input Enable */
-#define RA8P_CEU_CEUCTR_OEN              (1 << 2)   /* Output Enable */
-#define RA8P_CEU_CEUCTR_CKEYEN           (1 << 3)   /* Color Key Enable */
-#define RA8P_CEU_CEUCTR_CKICEN           (1 << 4)   /* Color Key Input Change Enable */
-#define RA8P_CEU_CEUCTR_CKOCEN           (1 << 5)   /* Color Key Output Change Enable */
-#define RA8P_CEU_CEUCTR_RGBSFT           (1 << 8)   /* RGB Shift Enable */
-#define RA8P_CEU_CEUCTR_YCSWAP           (1 << 9)   /* YC Swap Enable */
-#define RA8P_CEU_CEUCTR_FIELDINV         (1 << 10)  /* Field Inversion */
-#define RA8P_CEU_CEUCTR_FLDINV           (1 << 11)  /* Field Inversion */
-#define RA8P_CEU_CEUCTR_HFLIP            (1 << 12)  /* Horizontal Flip */
-#define RA8P_CEU_CEUCTR_VFLIP            (1 << 13)  /* Vertical Flip */
-#define RA8P_CEU_CEUCTR_CIPRST           (1 << 16)  /* Capture Input Path Reset */
-#define RA8P_CEU_CEUCTR_COEFEN           (1 << 17)  /* Coefficient Enable */
-#define RA8P_CEU_CEUCTR_CIPRST2          (1 << 18)  /* Capture Input Path Reset 2 */
-#define RA8P_CEU_CEUCTR_FIFORST          (1 << 24)  /* FIFO Reset */
-
-/* CEUICR - Input Control Register */
-#define RA8P_CEU_CEUICR_HDPOS            (1 << 0)   /* HD Position */
-#define RA8P_CEU_CEUICR_VDPOS            (1 << 1)   /* VD Position */
-#define RA8P_CEU_CEUICR_FDPOS            (1 << 2)   /* FD Position */
-#define RA8P_CEU_CEUICR_CPTON            (1 << 4)   /* Capture On */
-#define RA8P_CEU_CEUICR_HDSEL            (1 << 8)   /* HD Select */
-#define RA8P_CEU_CEUICR_VDSEL            (1 << 9)   /* VD Select */
-#define RA8P_CEU_CEUICR_FDSEL            (1 << 10)  /* FD Select */
-#define RA8P_CEU_CEUICR_HDPOL            (1 << 12)  /* HD Polarity */
-#define RA8P_CEU_CEUICR_VDPOL            (1 << 13)  /* VD Polarity */
-#define RA8P_CEU_CEUICR_FDPOL            (1 << 14)  /* FD Polarity */
-
-/* CEUICSR - Input Data Swap Register */
-#define RA8P_CEU_CEUIDSR_INRGBSFT_MASK   (0x07 << 0)  /* Input RGB Shift Mask */
-#define RA8P_CEU_CEUIDSR_INRGBSFT_SHIFT  0
-#define RA8P_CEU_CEUIDSR_INYCSWAP        (1 << 4)    /* Input YC Swap */
-#define RA8P_CEU_CEUIDSR_INCDSWAP        (1 << 5)    /* Input CD Swap */
-#define RA8P_CEU_CEUIDSR_INCBYRVS        (1 << 6)    /* Input CB/CR Reverse */
-#define RA8P_CEU_CEUIDSR_INYCFE          (1 << 7)    /* Input YC Format Expansion */
-#define RA8P_CEU_CEUIDSR_OUTFORM_MASK    (0x0F << 8)  /* Output Format Mask */
-#define RA8P_CEU_CEUIDSR_OUTFORM_SHIFT   8
-#define RA8P_CEU_CEUIDSR_INDATM_MASK     (0x07 << 12) /* Input Data Mode Mask */
-#define RA8P_CEU_CEUIDSR_INDATM_SHIFT    12
-
-/* CEUFCR - FIFO Control Register */
-#define RA8P_CEU_CEUFCR_CU0              (1 << 0)   /* Capture Unit 0 Enable */
-#define RA8P_CEU_CEUFCR_CU1              (1 << 1)   /* Capture Unit 1 Enable */
-#define RA8P_CEU_CEUFCR_CU2              (1 << 2)   /* Capture Unit 2 Enable */
-#define RA8P_CEU_CEUFCR_CU3              (1 << 3)   /* Capture Unit 3 Enable */
-#define RA8P_CEU_CEUFCR_CU4              (1 << 4)   /* Capture Unit 4 Enable */
-#define RA8P_CEU_CEUFCR_CU5              (1 << 5)   /* Capture Unit 5 Enable */
-#define RA8P_CEU_CEUFCR_CU6              (1 << 6)   /* Capture Unit 6 Enable */
-#define RA8P_CEU_CEUFCR_CU7              (1 << 7)   /* Capture Unit 7 Enable */
-#define RA8P_CEU_CEUFCR_FIFORST0         (1 << 8)   /* FIFO Reset 0 */
-#define RA8P_CEU_CEUFCR_FIFORST1         (1 << 9)   /* FIFO Reset 1 */
-#define RA8P_CEU_CEUFCR_FIFORST2         (1 << 10)  /* FIFO Reset 2 */
-#define RA8P_CEU_CEUFCR_FIFORST3         (1 << 11)  /* FIFO Reset 3 */
-#define RA8P_CEU_CEUFCR_FIFORST4         (1 << 12)  /* FIFO Reset 4 */
-#define RA8P_CEU_CEUFCR_FIFORST5         (1 << 13)  /* FIFO Reset 5 */
-#define RA8P_CEU_CEUFCR_FIFORST6         (1 << 14)  /* FIFO Reset 6 */
-#define RA8P_CEU_CEUFCR_FIFORST7         (1 << 15)  /* FIFO Reset 7 */
-
-/* CEUINTSR - Interrupt Status Register */
-#define RA8P_CEU_CEUINTSR_CU0I           (1 << 0)   /* Capture Unit 0 Interrupt */
-#define RA8P_CEU_CEUINTSR_CU1I           (1 << 1)   /* Capture Unit 1 Interrupt */
-#define RA8P_CEU_CEUINTSR_CU2I           (1 << 2)   /* Capture Unit 2 Interrupt */
-#define RA8P_CEU_CEUINTSR_CU3I           (1 << 3)   /* Capture Unit 3 Interrupt */
-#define RA8P_CEU_CEUINTSR_CU4I           (1 << 4)   /* Capture Unit 4 Interrupt */
-#define RA8P_CEU_CEUINTSR_CU5I           (1 << 5)   /* Capture Unit 5 Interrupt */
-#define RA8P_CEU_CEUINTSR_CU6I           (1 << 6)   /* Capture Unit 6 Interrupt */
-#define RA8P_CEU_CEUINTSR_CU7I           (1 << 7)   /* Capture Unit 7 Interrupt */
-#define RA8P_CEU_CEUINTSR_FEOI           (1 << 8)   /* Field End Interrupt */
-#define RA8P_CEU_CEUINTSR_FEI            (1 << 9)   /* Field Interrupt */
-
 /* CEU Base Address */
-#define RA8P_CEU_BASE                    0x40348000
-#define RA8P_CEU_SIZE                    0x8000
 
-/* CEU Interrupt Numbers */
-#define RA8P_IRQ_CEU                     100
+#define RA8P_CEU_BASE                           (0x40330000)
 
-/* CEU Capture Units */
-#define RA8P_CEU_UNITS                   8         /* 8 capture units */
+/* CEU Register Offsets */
 
-/* Video formats supported by CEU */
-#define RA8P_CEU_FORMAT_RGB565           0x00      /* RGB 565 */
-#define RA8P_CEU_FORMAT_RGB888           0x01      /* RGB 888 */
-#define RA8P_CEU_FORMAT_YUV422           0x02      /* YUV 4:2:2 */
-#define RA8P_CEU_FORMAT_YUV444           0x03      /* YUV 4:4:4 */
-#define RA8P_CEU_FORMAT_Y_ONLY           0x04      /* Y-only */
+/* Capture Enable Register (CAPCR) */
 
-/* Input data modes */
-#define RA8P_CEU_INDATA_8BIT             0x00      /* 8-bit data */
-#define RA8P_CEU_INDATA_16BIT            0x01      /* 16-bit data */
-#define RA8P_CEU_INDATA_24BIT            0x02      /* 24-bit data */
-#define RA8P_CEU_INDATA_32BIT            0x03      /* 32-bit data */
+#define RA8P_CEU_CAPCR_OFFSET                   (0x000)
+#define RA8P_CEU_CAPCR_CE                       (1 << 0)    /* Bit 0: Capture Enable */
+#define RA8P_CEU_CAPCR_CTN                      (1 << 1)    /* Bit 1: Continuous Capture Mode */
+#define RA8P_CEU_CAPCR_VPOL                     (1 << 2)    /* Bit 2: VSYNC Polarity */
+#define RA8P_CEU_CAPCR_HPOL                     (1 << 3)    /* Bit 3: HSYNC Polarity */
+#define RA8P_CEU_CAPCR_DPOL                     (1 << 4)    /* Bit 4: Data Polarity */
+#define RA8P_CEU_CAPCR_FWR                      (1 << 5)    /* Bit 5: Field Write */
+#define RA8P_CEU_CAPCR_JDT                      (1 << 6)    /* Bit 6: JPEG Data Transfer */
+
+/* Capture Control Register (CSTCR) */
+
+#define RA8P_CEU_CSTCR_OFFSET                   (0x004)
+#define RA8P_CEU_CSTCR_CST                      (1 << 0)    /* Bit 0: Capture Start */
+#define RA8P_CEU_CSTCR_VCT                      (1 << 1)    /* Bit 1: VSYNC Count */
+#define RA8P_CEU_CSTCR_ICPF                     (1 << 2)    /* Bit 2: Image Capture Period Flag */
+
+/* Interrupt Enable Register (CEIER) */
+
+#define RA8P_CEU_CEIER_OFFSET                   (0x010)
+#define RA8P_CEU_CEIER_CEIE                     (1 << 0)    /* Bit 0: Capture End Interrupt Enable */
+#define RA8P_CEU_CEIER_CEFEIE                   (1 << 1)    /* Bit 1: Capture End Field Interrupt Enable */
+#define RA8P_CEU_CEIER_VBPRIE                   (1 << 2)    /* Bit 2: VBP Reception Interrupt Enable */
+#define RA8P_CEU_CEIER_VWBFIE                   (1 << 3)    /* Bit 3: VBW Full Interrupt Enable */
+#define RA8P_CEU_CEIER_OVRFIE                   (1 << 4)    /* Bit 4: Overflow Interrupt Enable */
+#define RA8P_CEU_CEIER_DMAEIE                   (1 << 5)    /* Bit 5: DMA Error Interrupt Enable */
+
+/* Interrupt Status Register (CEISR) */
+
+#define RA8P_CEU_CEISR_OFFSET                   (0x014)
+#define RA8P_CEU_CEISR_CEND                     (1 << 0)    /* Bit 0: Capture End */
+#define RA8P_CEU_CEISR_CEFE                     (1 << 1)    /* Bit 1: Capture End Field */
+#define RA8P_CEU_CEISR_VBPRI                    (1 << 2)    /* Bit 2: VBP Reception */
+#define RA8P_CEU_CEISR_VWBF                     (1 << 3)    /* Bit 3: VBW Full */
+#define RA8P_CEU_CEISR_OVRF                     (1 << 4)    /* Bit 4: Overflow */
+#define RA8P_CEU_CEISR_DMAE                     (1 << 5)    /* Bit 5: DMA Error */
+
+/* Data Sync Control Register (DSYCR) */
+
+#define RA8P_CEU_DSYCR_OFFSET                   (0x018)
+#define RA8P_CEU_DSYCR_DSY                      (1 << 0)    /* Bit 0: Data Sync */
+
+/* Clock Control Register (CKCR) */
+
+#define RA8P_CEU_CKCR_OFFSET                    (0x01C)
+#define RA8P_CEU_CKCR_CLKEN                     (1 << 0)    /* Bit 0: Clock Enable */
+
+/* Image Capture Register 1 (ICR1) */
+
+#define RA8P_CEU_ICR1_OFFSET                    (0x020)
+#define RA8P_CEU_ICR1_CAPW_MASK                 (0xFFFF)    /* Bits 0-15: Capture Width */
+#define RA8P_CEU_ICR1_CAPW_SHIFT                (0)
+#define RA8P_CEU_ICR1_CAPH_MASK                 (0xFFFF0000) /* Bits 16-31: Capture Height */
+#define RA8P_CEU_ICR1_CAPH_SHIFT                (16)
+
+/* Image Capture Register 2 (ICR2) */
+
+#define RA8P_CEU_ICR2_OFFSET                    (0x024)
+#define RA8P_CEU_ICR2_BSWP                      (1 << 0)    /* Bit 0: Byte Swap */
+#define RA8P_CEU_ICR2_YCBCR                     (1 << 1)    /* Bit 1: YCbCr Format */
+#define RA8P_CEU_ICR2_DT_FMT_MASK               (0x70)      /* Bits 4-6: Data Format */
+#define RA8P_CEU_ICR2_DT_FMT_SHIFT              (4)
+#define RA8P_CEU_ICR2_DT_FMT_YUV422            (0x0 << 4)  /* YUV422 */
+#define RA8P_CEU_ICR2_DT_FMT_RGB565            (0x1 << 4)  /* RGB565 */
+#define RA8P_CEU_ICR2_DT_FMT_RGB888            (0x2 << 4)  /* RGB888 */
+#define RA8P_CEU_ICR2_DT_FMT_JPEG              (0x3 << 4)  /* JPEG */
+
+/* Frame Start Address Register A (FSAA) */
+
+#define RA8P_CEU_FSAA_OFFSET                    (0x028)
+#define RA8P_CEU_FSAA_FSA_MASK                  (0xFFFFFFFF) /* Bits 0-31: Frame Start Address A */
+
+/* Frame Start Address Register B (FSAB) */
+
+#define RA8P_CEU_FSAB_OFFSET                    (0x02C)
+#define RA8P_CEU_FSAB_FSA_MASK                  (0xFFFFFFFF) /* Bits 0-31: Frame Start Address B */
+
+/* Frame End Address Register A (FEAA) */
+
+#define RA8P_CEU_FEAA_OFFSET                    (0x030)
+#define RA8P_CEU_FEAA_FEA_MASK                  (0xFFFFFFFF) /* Bits 0-31: Frame End Address A */
+
+/* Frame End Address Register B (FEAB) */
+
+#define RA8P_CEU_FEAB_OFFSET                    (0x034)
+#define RA8P_CEU_FEAB_FEA_MASK                  (0xFFFFFFFF) /* Bits 0-31: Frame End Address B */
+
+/* DMA Control Register (DMAOR) */
+
+#define RA8P_CEU_DMAOR_OFFSET                   (0x038)
+#define RA8P_CEU_DMAOR_DAE                      (1 << 0)    /* Bit 0: DMA Enable */
+#define RA8P_CEU_DMAOR_DDTGA                    (1 << 1)    /* Bit 1: DMA Transfer Group A */
+#define RA8P_CEU_DMAOR_DDTGB                    (1 << 2)    /* Bit 2: DMA Transfer Group B */
+
+/* Capture Line Count Register (CLCR) */
+
+#define RA8P_CEU_CLCR_OFFSET                    (0x03C)
+#define RA8P_CEU_CLCR_CLC_MASK                  (0xFFFF)    /* Bits 0-15: Capture Line Count */
+#define RA8P_CEU_CLCR_CLC_SHIFT                 (0)
+
+/* FIFO Status Register (FIFSR) */
+
+#define RA8P_CEU_FIFSR_OFFSET                   (0x040)
+#define RA8P_CEU_FIFSR_FIF_MASK                 (0x7)       /* Bits 0-2: FIFO Status */
+#define RA8P_CEU_FIFSR_FIF_SHIFT                (0)
+
+/* Frame Count Register (FCR) */
+
+#define RA8P_CEU_FCR_OFFSET                     (0x044)
+#define RA8P_CEU_FCR_FC_MASK                    (0xFFFF)    /* Bits 0-15: Frame Count */
+#define RA8P_CEU_FCR_FC_SHIFT                   (0)
 
 /****************************************************************************
  * Public Types
  ****************************************************************************/
 
-/* CEU video format structure */
-struct ra8p_ceu_format_s
+/* CEU data format */
+
+enum ra8p_ceu_format_e
 {
-  uint8_t format;                     /* Video format */
-  uint8_t bits_per_pixel;             /* Bits per pixel */
-  bool packed;                        /* True for packed format */
-  bool planar;                        /* True for planar format */
-  uint8_t yuv_planes;                 /* Number of YUV planes (0 for RGB) */
+  RA8P_CEU_FORMAT_YUV422 = 0,       /* YUV422 format */
+  RA8P_CEU_FORMAT_RGB565,           /* RGB565 format */
+  RA8P_CEU_FORMAT_RGB888,           /* RGB888 format */
+  RA8P_CEU_FORMAT_JPEG,             /* JPEG format */
 };
 
-/* CEU video frame structure */
-struct ra8p_ceu_frame_s
+/* CEU capture mode */
+
+enum ra8p_ceu_capture_mode_e
 {
-  uint32_t width;                     /* Image width in pixels */
-  uint32_t height;                    /* Image height in pixels */
-  struct ra8p_ceu_format_s format;    /* Pixel format */
-  uint32_t pitch;                     /* Bytes per line */
-  uint32_t size;                      /* Total frame size */
-  uint32_t addr;                      /* Physical address of buffer */
-  bool interlaced;                    /* True for interlaced video */
-  bool top_field_first;              /* Top field first for interlaced */
+  RA8P_CEU_CAPTURE_SINGLE = 0,      /* Single capture */
+  RA8P_CEU_CAPTURE_CONTINUOUS,      /* Continuous capture */
 };
 
-/* CEU capture unit configuration */
-struct ra8p_ceu_unit_config_s
-{
-  uint8_t unit_num;                   /* Capture unit number (0-7) */
-  struct ra8p_ceu_frame_s input_frame; /* Input frame format */
-  struct ra8p_ceu_frame_s output_frame; /* Output frame format */
-  uint32_t crop_left;                 /* Left crop offset */
-  uint32_t crop_top;                  /* Top crop offset */
-  uint32_t crop_right;                /* Right crop offset */
-  uint32_t crop_bottom;               /* Bottom crop offset */
-  bool color_key_enabled;             /* Color key enable */
-  uint32_t color_key_value;           /* Color key value */
-  uint8_t alpha;                      /* Alpha blending value (0-255) */
-};
+/* CEU configuration */
 
-/* CEU controller configuration */
 struct ra8p_ceu_config_s
 {
-  bool enabled;                       /* Enable CEU */
-  bool input_enabled;                 /* Enable input path */
-  bool output_enabled;                /* Enable output path */
-  bool field_inverse;                 /* Field inverse enable */
-  bool horizontal_flip;              /* Horizontal flip enable */
-  bool vertical_flip;                /* Vertical flip enable */
-  uint8_t data_swap;                  /* Data swap mode */
-  uint8_t input_format;              /* Input format */
-  uint8_t output_format;             /* Output format */
+  uint32_t base;                    /* CEU base address */
+  int irq;                          /* CEU interrupt number */
+  uint16_t width;                   /* Capture width */
+  uint16_t height;                  /* Capture height */
+  enum ra8p_ceu_format_e format;   /* Data format */
+  enum ra8p_ceu_capture_mode_e mode; /* Capture mode */
+  bool vsync_pol;                  /* VSYNC polarity (true = active high) */
+  bool hsync_pol;                  /* HSYNC polarity (true = active high) */
+  bool data_pol;                   /* Data polarity */
 };
-
-/****************************************************************************
- * Public Function Prototypes
- ****************************************************************************/
-
-/****************************************************************************
- * Name: ra8p_ceu_initialize
- *
- * Description:
- *   Initialize the CEU (Camera Engine Unit) based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   config - Pointer to CEU configuration structure
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_initialize(const struct ra8p_ceu_config_s *config);
-
-/****************************************************************************
- * Name: ra8p_ceu_set_input_format
- *
- * Description:
- *   Set input format for CEU based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   format - Pointer to input format structure
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_set_input_format(const struct ra8p_ceu_format_s *format);
-
-/****************************************************************************
- * Name: ra8p_ceu_set_output_format
- *
- * Description:
- *   Set output format for CEU based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   format - Pointer to output format structure
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_set_output_format(const struct ra8p_ceu_format_s *format);
-
-/****************************************************************************
- * Name: ra8p_ceu_capture_start
- *
- * Description:
- *   Start video capture based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   unit - Capture unit (0-7)
- *   frame - Pointer to frame structure
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_capture_start(uint8_t unit, const struct ra8p_ceu_frame_s *frame);
-
-/****************************************************************************
- * Name: ra8p_ceu_capture_stop
- *
- * Description:
- *   Stop video capture based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   unit - Capture unit (0-7)
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_capture_stop(uint8_t unit);
-
-/****************************************************************************
- * Name: ra8p_ceu_set_crop
- *
- * Description:
- *   Set crop window for CEU based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   left - Left crop coordinate
- *   top - Top crop coordinate
- *   right - Right crop coordinate
- *   bottom - Bottom crop coordinate
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_set_crop(uint16_t left, uint16_t top, uint16_t right, uint16_t bottom);
-
-/****************************************************************************
- * Name: ra8p_ceu_set_color_key
- *
- * Description:
- *   Set color key for CEU based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   enabled - True to enable color key
- *   color - Color key value
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_set_color_key(bool enabled, uint32_t color);
-
-/****************************************************************************
- * Name: ra8p_ceu_enable_alpha_blending
- *
- * Description:
- *   Enable alpha blending for CEU based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   alpha - Alpha value (0-255)
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_enable_alpha_blending(uint8_t alpha);
-
-/****************************************************************************
- * Name: ra8p_ceu_reset
- *
- * Description:
- *   Reset the CEU based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_reset(void);
-
-/****************************************************************************
- * Name: ra8p_ceu_is_running
- *
- * Description:
- *   Check if CEU is running based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   true if running, false otherwise
- *
- ****************************************************************************/
-
-bool ra8p_ceu_is_running(void);
-
-/****************************************************************************
- * Name: ra8p_ceu_get_frame
- *
- * Description:
- *   Get captured frame from CEU based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   unit - Capture unit (0-7)
- *   frame - Pointer to frame structure to fill
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_get_frame(uint8_t unit, struct ra8p_ceu_frame_s *frame);
-
-/****************************************************************************
- * Name: ra8p_ceu_set_flip
- *
- * Description:
- *   Set image flip for CEU based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   horizontal - True for horizontal flip
- *   vertical - True for vertical flip
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_set_flip(bool horizontal, bool vertical);
-
-/****************************************************************************
- * Name: ra8p_ceu_set_field_inverse
- *
- * Description:
- *   Set field inversion for interlaced video based on Zephyr video_renesas_ra_ceu.c implementation.
- *
- * Input Parameters:
- *   enable - True to enable field inversion
- *
- * Returned Value:
- *   OK on success, negated errno on failure
- *
- ****************************************************************************/
-
-int ra8p_ceu_set_field_inverse(bool enable);
 
 #endif /* __ARCH_ARM_SRC_RA8P_HARDWARE_RA8P_CEU_H */
