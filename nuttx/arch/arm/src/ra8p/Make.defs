@@ -165,4 +165,9 @@ ifeq ($(CONFIG_RA8P_WDT),y)
   CHIP_SRCS += ra8p_wdt.c
 endif
 
+# System initialization
+ifeq ($(CONFIG_ARCH_CHIP_RA8P),y)
+  CHIP_SRCS += ra8p_sysinit.c
+endif
+
 endif # CONFIG_ARCH_CHIP_RA8P
