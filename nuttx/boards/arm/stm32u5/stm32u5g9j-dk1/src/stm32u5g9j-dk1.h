@@ -20,8 +20,8 @@
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_STM32U5_NUCLEO_U5A5ZJ_Q_SRC_NUCLEO_U5A5ZJ_Q_H
-#define __BOARDS_ARM_STM32U5_NUCLEO_U5A5ZJ_Q_SRC_NUCLEO_U5A5ZJ_Q_H
+#ifndef __BOARDS_ARM_STM32U5_STM32U5G9J_DK1_SRC_STM32U5G9J_DK1_H
+#define __BOARDS_ARM_STM32U5_STM32U5G9J_DK1_SRC_STM32U5G9J_DK1_H
 
 /****************************************************************************
  * Included Files
@@ -57,6 +57,61 @@
 #  undef HAVE_RTC_DRIVER
 #endif
 
+/* LCD and LTDC Configuration ************************************************/
+
+/* STM32U5G9J-DK1 has a 5" LCD with MIPI DSI interface
+ * Display: RK050HR18H-CTG (720x1280) or similar
+ * For simplicity, we use 720x1280 as default
+ */
+
+#ifdef CONFIG_STM32U5_LTDC
+
+/* LCD Timing Parameters (typical values, may need adjustment) */
+
+#define BOARD_LTDC_WIDTH          720
+#define BOARD_LTDC_HEIGHT         1280
+
+/* HSYNC and VSYNC timing (typical values) */
+
+#define BOARD_LTDC_HSYNC          5
+#define BOARD_LTDC_VSYNC          5
+#define BOARD_LTDC_HBP            10
+#define BOARD_LTDC_HFP            10
+#define BOARD_LTDC_VBP            10
+#define BOARD_LTDC_VFP            10
+
+/* LCD Pixel Clock (in Hz) - adjust based on display requirements */
+
+#define BOARD_LTDC_PIXCLK         50000000
+
+/* Frame buffer configuration */
+
+#ifdef CONFIG_STM32U5_LTDC_FB_SIZE
+#  define STM32U5_LTDC_FBSIZE     CONFIG_STM32U5_LTDC_FB_SIZE
+#else
+#  define STM32U5_LTDC_FBSIZE     (BOARD_LTDC_WIDTH * BOARD_LTDC_HEIGHT * 2)
+#endif
+
+#ifdef CONFIG_STM32U5_LTDC_FB_BASE
+#  define STM32U5_LTDC_FBBASE     CONFIG_STM32U5_LTDC_FB_BASE
+#else
+/* Default to external SDRAM if available */
+#  define STM32U5_LTDC_FBBASE     0x90000000
+#endif
+
+#endif /* CONFIG_STM32U5_LTDC */
+
+/* Touchscreen Configuration *************************************************/
+
+#ifdef CONFIG_INPUT_FT5X06
+
+#define BOARD_FT5X06_I2C_BUS      5
+#define BOARD_FT5X06_I2C_ADDR     0x38
+#define BOARD_FT5X06_INT_PIN      (GPIO_PE8)
+#define BOARD_FT5X06_RST_PIN      (GPIO_PD5)
+
+#endif /* CONFIG_INPUT_FT5X06 */
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -87,5 +142,29 @@
 
 int stm32_bringup(void);
 
+/****************************************************************************
+ * Name: stm32_ltdcinitialize
+ *
+ * Description:
+ *   Initialize the LTDC and LCD display
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_STM32U5_LTDC
+int stm32_ltdcinitialize(void);
+#endif
+
+/****************************************************************************
+ * Name: stm32_touchscreen_initialize
+ *
+ * Description:
+ *   Initialize the touchscreen
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_INPUT_FT5X06
+int stm32_touchscreen_initialize(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
-#endif /* __BOARDS_ARM_STM32U5_NUCLEO_U5A5ZJ_Q_SRC_NUCLEO_U5A5ZJ_Q_H */
+#endif /* __BOARDS_ARM_STM32U5_STM32U5G9J_DK1_SRC_STM32U5G9J_DK1_H */

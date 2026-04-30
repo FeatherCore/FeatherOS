@@ -37,4 +37,12 @@ ifeq ($(CONFIG_USBDEV),y)
 CSRCS += stm32_usb.c
 endif
 
+ifeq ($(CONFIG_STM32U5_LTDC),y)
+CSRCS += stm32_lcd.c
+endif
+
+ifeq ($(CONFIG_INPUT_FT5X06),y)
+CSRCS += stm32_ft5x06.c
+endif
+
 include $(TOPDIR)/boards/Board.mk

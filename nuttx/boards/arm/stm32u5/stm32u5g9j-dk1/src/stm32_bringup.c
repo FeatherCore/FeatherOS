@@ -104,6 +104,26 @@ int stm32_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_STM32U5_LTDC
+  /* Initialize the LCD */
+
+  ret = stm32_ltdcinitialize();
+  if (ret < 0)
+    {
+      ferr("ERROR: Failed to initialize LCD: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_INPUT_FT5X06
+  /* Initialize the touchscreen */
+
+  ret = stm32_touchscreen_initialize();
+  if (ret < 0)
+    {
+      ferr("ERROR: Failed to initialize touchscreen: %d\n", ret);
+    }
+#endif
+
   UNUSED(ret);
   return OK;
 }
