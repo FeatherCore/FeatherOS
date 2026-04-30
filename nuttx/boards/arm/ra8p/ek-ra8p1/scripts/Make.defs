@@ -1,0 +1,44 @@
+#
+# boards/arm/ra8p/ek-ra8p1/scripts/Make.defs
+#
+
+LDSCRIPT = $(TOPDIR)/boards/$(CONFIG_ARCH)/$(CONFIG_ARCH_CHIP)/$(CONFIG_ARCH_BOARD)/scripts/$(CONFIG_ARCH_BOARD).ld
+
+ifeq ($(CONFIG_DEBUG_SYMBOLS),y)
+  LDFLAGS += -g
+endif
+
+ifeq ($(CONFIG_DEBUG_OPTIMIZE),y)
+  OPTIMIZATION += -O0
+else
+  OPTIMIZATION += -Os
+endif
+
+ARCHSCRIPT = -T$(LDSCRIPT)
+
+MAXOPTIMIZATION = -O2
+
+ifeq ($(CONFIG_FRAME_POINTER),y)
+  ARCHCPUFLAGS += -fomit-frame-pointer
+else
+  ARCHCPUFLAGS += -fno-omit-frame-pointer
+endif
+
+ARCHCPUFLAGS += -mcpu=cortex-m85 -mthumb -mfloat-abi=hard -mfpu=fpv5-sp-d16
+
+CFLAGS := $(ARCHCPUFLAGS) $(ARCHWARNINGS) $(ARCHOPTIMIZATION) $(ARCHDEBUGFLAGS) $(ARCHDEFINES) $(EXTRADEFINES) -pipe
+CPICFLAGS = $(ARCHCPUFLAGS) $(ARCHWARNINGS) $(ARCHOPTIMIZATION) $(ARCHDEBUGFLAGS) $(ARCHDEFINES) $(EXTRADEFINES) -pipe -fpic -msingle-pic-base -mpic-register=r9
+CXXFLAGS := $(ARCHCPUFLAGS) $(ARCHWARNINGSXX) $(ARCHOPTIMIZATION) $(ARCHDEBUGFLAGS) $(ARCHDEFINES) $(EXTRADEFINES) -pipe
+CXXPICFLAGS = $(ARCHCPUFLAGS) $(ARCHWARNINGSXX) $(ARCHOPTIMIZATION) $(ARCHDEBUGFLAGS) $(ARCHDEFINES) $(EXTRADEFINES) -pipe -fpic -msingle-pic-base -mpic-register=r9
+CPPFLAGS := $(ARCHINCLUDES) $(ARCHDEFINES) $(EXTRADEFINES)
+AFLAGS += $(CFLAGS) -D__ASSEMBLY__
+
+LDFLAGS += $(ARCHSCRIPT) -nostartfiles -nodefaultlibs
+
+ifeq ($(CONFIG_DEBUG_SYMBOLS),y)
+  LDFLAGS += -g
+endif
+
+HOSTCC = gcc
+HOSTCFLAGS = -Wall -Wstrict-prototypes -Wshadow -Wundef -g -pipe
+HOSTLDFLAGS =

@@ -26,10 +26,83 @@ ifeq ($(CONFIG_ARCH_CHIP_RA8P),y)
 CHIP_SRCS = ra8p_start.c
 CHIP_SRCS += ra8p_clockconfig.c
 CHIP_SRCS += ra8p_lowsetup.c
+CHIP_SRCS += ra8p_gpio.c
+CHIP_SRCS += ra8p_cgc.c
+CHIP_SRCS += ra8p_pinctrl.c
 
 # UART support
 ifneq ($(filter y,$(CONFIG_RA8P_SCI_B_UART0) $(CONFIG_RA8P_SCI_B_UART1) $(CONFIG_RA8P_SCI_B_UART2) $(CONFIG_RA8P_SCI_B_UART3) $(CONFIG_RA8P_SCI_B_UART4)),)
-  CHIP_SRCS += ra8p_serial.c
+  CHIP_SRCS += ra8p_sci_b.c
+endif
+
+# SPI support
+ifneq ($(filter y,$(CONFIG_RA8P_SPI_B0) $(CONFIG_RA8P_SPI_B1) $(CONFIG_RA8P_SPI_B2) $(CONFIG_RA8P_SPI_B3)),)
+  CHIP_SRCS += ra8p_spi_b.c
+endif
+
+# IIC support
+ifneq ($(filter y,$(CONFIG_RA8P_IIC0) $(CONFIG_RA8P_IIC1) $(CONFIG_RA8P_IIC2)),)
+  CHIP_SRCS += ra8p_iic.c
+endif
+
+# CANFD support
+ifneq ($(filter y,$(CONFIG_RA8P_CANFD0) $(CONFIG_RA8P_CANFD1)),)
+  CHIP_SRCS += ra8p_canfd.c
+endif
+
+# SDHC support
+ifneq ($(filter y,$(CONFIG_RA8P_SDHC0) $(CONFIG_RA8P_SDHC1)),)
+  CHIP_SRCS += ra8p_sdhc.c
+endif
+
+# USB support
+ifneq ($(filter y,$(CONFIG_RA8P_USBFS) $(CONFIG_RA8P_USBHS)),)
+  CHIP_SRCS += ra8p_usb.c
+endif
+
+# USBPHY support
+ifeq ($(CONFIG_RA8P_USBPHY),y)
+  CHIP_SRCS += ra8p_usbphy.c
+endif
+
+# RTC support
+ifeq ($(CONFIG_RA8P_RTC),y)
+  CHIP_SRCS += ra8p_rtc.c
+endif
+
+# WDT support
+ifeq ($(CONFIG_RA8P_WDT),y)
+  CHIP_SRCS += ra8p_wdt.c
+endif
+
+# GPT PWM support
+ifneq ($(filter y,$(CONFIG_RA8P_GPT_PWM0) $(CONFIG_RA8P_GPT_PWM1) $(CONFIG_RA8P_GPT_PWM2) $(CONFIG_RA8P_GPT_PWM3)),)
+  CHIP_SRCS += ra8p_gpt.c
+endif
+
+# ICU (External Interrupt) support
+ifeq ($(CONFIG_RA8P_ICU),y)
+  CHIP_SRCS += ra8p_icu.c
+endif
+
+# DMA support
+ifeq ($(CONFIG_RA8P_DMA),y)
+  CHIP_SRCS += ra8p_dmac.c
+endif
+
+# Power management support
+ifeq ($(CONFIG_RA8P_POWER),y)
+  CHIP_SRCS += ra8p_power.c
+endif
+
+# RTC support
+ifeq ($(CONFIG_RA8P_RTC),y)
+  CHIP_SRCS += ra8p_rtc.c
+endif
+
+# WDT support
+ifeq ($(CONFIG_RA8P_WDT),y)
+  CHIP_SRCS += ra8p_wdt.c
 endif
 
 endif # CONFIG_ARCH_CHIP_RA8P

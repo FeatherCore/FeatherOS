@@ -38,6 +38,10 @@
 - [ARM Cortex-M55 and Cortex-M85 Support](docs/arm_cortex_m55_m85.md) - Implementation details for ARMv8.1-M CPUs
 - [Renesas RA8P1 Porting Guide](docs/ra8p1_porting.md) - RA8P1 (Cortex-M85) porting documentation
 - [STM32N6 Porting Guide](docs/stm32n6_porting.md) - STM32N6 porting documentation
+- [RA8P1 Zephyr Reference](docs/ra8p1_zephyr_reference.md) - Zephyr to NuttX mapping reference
+- [RA8P1 Implementation Status](docs/ra8p1_implementation_status.md) - RA8P1 implementation progress tracking
+- [RA8P1 Implementation Status Update](docs/ra8p1_implementation_status_update.md) - RA8P1 latest implementation updates
+- [RA8P1 New Files List](docs/ra8p1_new_files.md) - New RA8P1 files added from Zephyr
 - [Architecture](docs/ARCHITECTURE.md) - System architecture overview
 - [FHRE Rendering Backend](docs/fhre_rendering_backend.md) - FHRE engine documentation
 - [nl80211/cfg80211 Implementation Plan](docs/nl80211_cfg80211_implementation.md) - WiFi nl80211/cfg80211 architecture implementation

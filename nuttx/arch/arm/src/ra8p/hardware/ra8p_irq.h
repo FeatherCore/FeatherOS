@@ -25,6 +25,11 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+/* RA8P1 Interrupt Numbers - Based on Zephyr RTOS RA8P1 implementation
+ * Total interrupts: 96 (0-95)
+ * Reference: Zephyr Kconfig SOC_RENESAS_RA with NUM_IRQS=96
+ */
+
 /* ARM Cortex-M85 core interrupts (0-15) */
 #define RA8P_IRQ_RESERVED      0
 #define RA8P_IRQ_RESET         1
@@ -43,7 +48,7 @@
 #define RA8P_IRQ_PENDSV        14
 #define RA8P_IRQ_SYSTICK       15
 
-/* RA8P peripheral interrupts (16-111) */
+/* RA8P peripheral interrupts (16-95) - 96 total interrupts */
 #define RA8P_IRQ_DMAC0         16
 #define RA8P_IRQ_DMAC1         17
 #define RA8P_IRQ_DMAC2         18
@@ -100,22 +105,64 @@
 #define RA8P_IRQ_SPI1          69
 #define RA8P_IRQ_SPI2          70
 #define RA8P_IRQ_SPI3          71
-#define RA8P_IRQ_I2C0          72
-#define RA8P_IRQ_I2C1          73
-#define RA8P_IRQ_I2C2          74
-#define RA8P_IRQ_I2C3          75
+#define RA8P_IRQ_IIC0          72
+#define RA8P_IRQ_IIC1          73
+#define RA8P_IRQ_IIC2          74
+#define RA8P_IRQ_USBFS_F      75
 #define RA8P_IRQ_USBFS         76
-#define RA8P_IRQ_USBHS         77
+#define RA8P_IRQ_USBHS        77
 #define RA8P_IRQ_GPT0          78
 #define RA8P_IRQ_GPT1          79
 #define RA8P_IRQ_GPT2          80
 #define RA8P_IRQ_GPT3          81
-#define RA8P_IRQ_ADC0          82
-#define RA8P_IRQ_ADC1          83
-#define RA8P_IRQ_DAC0          84
-#define RA8P_IRQ_DAC1          85
-#define RA8P_IRQ_SDHI0         86
-#define RA8P_IRQ_SDHI1         87
+#define RA8P_IRQ_GPT4          82
+#define RA8P_IRQ_GPT5          83
+#define RA8P_IRQ_GPT6          84
+#define RA8P_IRQ_GPT7          85
+#define RA8P_IRQ_GPT8          86
+#define RA8P_IRQ_GPT9          87
+#define RA8P_IRQ_GPT10         88
+#define RA8P_IRQ_GPT11         89
+#define RA8P_IRQ_GPT12         90
+#define RA8P_IRQ_GPT13         91
+#define RA8P_IRQ_SDHI0         92
+#define RA8P_IRQ_SDHI1         93
+#define RA8P_IRQ_CANFD         94
+#define RA8P_IRQ_I3C0          95
+
+/* Port Interrupt Numbers */
+#define RA8P_IRQ_PORT0         0
+#define RA8P_IRQ_PORT1         1
+#define RA8P_IRQ_PORT2         2
+#define RA8P_IRQ_PORT3         3
+#define RA8P_IRQ_PORT4         4
+#define RA8P_IRQ_PORT5         5
+#define RA8P_IRQ_PORT6         6
+#define RA8P_IRQ_PORT7         7
+#define RA8P_IRQ_PORT8         8
+#define RA8P_IRQ_PORT9         9
+#define RA8P_IRQ_PORT10        10
+#define RA8P_IRQ_PORT11        11
+#define RA8P_IRQ_PORT12        12
+#define RA8P_IRQ_PORT13        13
+#define RA8P_IRQ_PORT14        14
+#define RA8P_IRQ_PORT15        15
+#define RA8P_IRQ_PORT16        16
+#define RA8P_IRQ_PORT17        17
+#define RA8P_IRQ_PORT18        18
+#define RA8P_IRQ_PORT19        19
+#define RA8P_IRQ_PORT20        20
+#define RA8P_IRQ_PORT21        21
+#define RA8P_IRQ_PORT22        22
+#define RA8P_IRQ_PORT23        23
+#define RA8P_IRQ_PORT24        24
+#define RA8P_IRQ_PORT25        25
+#define RA8P_IRQ_PORT26        26
+#define RA8P_IRQ_PORT27        27
+#define RA8P_IRQ_PORT28        28
+#define RA8P_IRQ_PORT29        29
+#define RA8P_IRQ_PORT30        30
+#define RA8P_IRQ_PORT31        31
 
 /* Number of peripheral interrupts */
 #define NR_IRQS  CONFIG_RA8P_NR_IRQS

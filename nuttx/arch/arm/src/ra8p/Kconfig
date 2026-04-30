@@ -25,9 +25,32 @@ config ARCH_CHIP_R7KA8P1KFLCAC
 	  - Up to 1 GHz ARM Cortex-M85
 	  - ARMv8.1-M Mainline architecture
 	  - DSP, MVE-F, FPU, I/D Cache
+	  - Dual Core (CM85 + CM33)
 	  - Optional Ethos-U55 NPU
+	  - MIPI DSI/CSI support
 
 endchoice # RA8P Chip Selection
+
+config RA8P_DUAL_CORE
+	bool "Enable dual-core support"
+	default y if ARCH_CHIP_R7KA8P1KFLCAC
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable support for dual-core configuration (Cortex-M85 + Cortex-M33)
+
+config RA8P_MIPI_DSI
+	bool "Enable MIPI DSI support"
+	default y if ARCH_CHIP_R7KA8P1KFLCAC
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable MIPI DSI/CSI display interface support
+
+config RA8P_NPU_ETHOS_U55
+	bool "Enable Ethos-U55 NPU support"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable Arm Ethos-U55 NPU support for AI/ML operations
 
 menu "RA8P Peripheral Support"
 
@@ -37,41 +60,119 @@ config RA8P_HAVE_SCI_B_UART
 
 config RA8P_HAVE_SPI_B
 	bool
-	default n
+	default y
 
-config RA8P_HAVE_ETHERNET
+config RA8P_HAVE_IIC
 	bool
 	default y
+
+config RA8P_HAVE_GPT_PWM
+	bool
+	default y
+
+config RA8P_HAVE_USBFS
+	bool
+	default y
+
+config RA8P_HAVE_USBHS
+	bool
+	default y
+
+config RA8P_HAVE_CANFD
+	bool
+	default y
+
+config RA8P_HAVE_SDHC
+	bool
+	default y
+
+config RA8P_HAVE_RTC
+	bool
+	default y
+
+config RA8P_HAVE_WDT
+	bool
+	default y
+
+config RA8P_HAVE_GLCDC
+	bool
+	default y
+
+config RA8P_HAVE_MIPI_DSI
+	bool
+	default y if RA8P_MIPI_DSI
+	default n
+
+config RA8P_HAVE_I3C
+	bool
+	default y
+
+config RA8P_HAVE_SDRAMC
+	bool
+	default y
+
+config RA8P_HAVE_DMA
+	bool
+	default y
+
+config RA8P_HAVE_NPU
+	bool
+	default y if RA8P_NPU_ETHOS_U55
+	default n
+
+comment "SCI_B UART Configuration"
 
 config RA8P_SCI_B_UART0
 	bool "SCI_B UART 0"
 	default n
 	depends on RA8P_HAVE_SCI_B_UART
-	select SCI0_SERIALDRIVER
 
 config RA8P_SCI_B_UART1
 	bool "SCI_B UART 1"
 	default n
 	depends on RA8P_HAVE_SCI_B_UART
-	select SCI1_SERIALDRIVER
 
 config RA8P_SCI_B_UART2
-	bool "SCI_B UART 2"
+	bool "SCI_B UART 2 (Default Console)"
 	default y
 	depends on RA8P_HAVE_SCI_B_UART
-	select SCI2_SERIALDRIVER
 
 config RA8P_SCI_B_UART3
 	bool "SCI_B UART 3"
 	default n
 	depends on RA8P_HAVE_SCI_B_UART
-	select SCI3_SERIALDRIVER
 
 config RA8P_SCI_B_UART4
 	bool "SCI_B UART 4"
 	default n
 	depends on RA8P_HAVE_SCI_B_UART
-	select SCI4_SERIALDRIVER
+
+config RA8P_SCI_B_UART5
+	bool "SCI_B UART 5"
+	default n
+	depends on RA8P_HAVE_SCI_B_UART
+
+config RA8P_SCI_B_UART6
+	bool "SCI_B UART 6"
+	default n
+	depends on RA8P_HAVE_SCI_B_UART
+
+config RA8P_SCI_B_UART7
+	bool "SCI_B UART 7"
+	default n
+	depends on RA8P_HAVE_SCI_B_UART
+
+config RA8P_SCI_B_UART8
+	bool "SCI_B UART 8"
+	default n
+	depends on RA8P_HAVE_SCI_B_UART
+
+config RA8P_SCI_B_UART9
+	bool "SCI_B UART 9"
+	default n
+	depends on RA8P_HAVE_SCI_B_UART
+
+comment "SPI_B Configuration"
 
 config RA8P_SPI_B0
 	bool "SPI_B 0"
@@ -83,9 +184,256 @@ config RA8P_SPI_B1
 	default n
 	depends on RA8P_HAVE_SPI_B
 
+config RA8P_SPI_B2
+	bool "SPI_B 2"
+	default n
+	depends on RA8P_HAVE_SPI_B
+
+config RA8P_SPI_B3
+	bool "SPI_B 3"
+	default n
+	depends on RA8P_HAVE_SPI_B
+
+comment "IIC (I2C) Configuration"
+
+config RA8P_IIC0
+	bool "IIC 0"
+	default n
+	depends on RA8P_HAVE_IIC
+
+config RA8P_IIC1
+	bool "IIC 1"
+	default n
+	depends on RA8P_HAVE_IIC
+
+config RA8P_IIC2
+	bool "IIC 2"
+	default n
+	depends on RA8P_HAVE_IIC
+
+comment "GPT PWM Configuration"
+
+config RA8P_GPT_PWM0
+	bool "GPT PWM 0"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM1
+	bool "GPT PWM 1"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM2
+	bool "GPT PWM 2"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM3
+	bool "GPT PWM 3"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM4
+	bool "GPT PWM 4"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM5
+	bool "GPT PWM 5"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM6
+	bool "GPT PWM 6"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM7
+	bool "GPT PWM 7"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM8
+	bool "GPT PWM 8"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM9
+	bool "GPT PWM 9"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM10
+	bool "GPT PWM 10"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM11
+	bool "GPT PWM 11"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM12
+	bool "GPT PWM 12"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+config RA8P_GPT_PWM13
+	bool "GPT PWM 13"
+	default n
+	depends on RA8P_HAVE_GPT_PWM
+
+comment "USB Configuration"
+
+config RA8P_USBFS
+	bool "USB Full Speed"
+	default n
+	depends on RA8P_HAVE_USBFS
+
+config RA8P_USBHS
+	bool "USB High Speed"
+	default n
+	depends on RA8P_HAVE_USBHS
+
+config RA8P_USBPHY
+	bool "USBPHY Controller"
+	default n
+	help
+	  Enable USBPHY support for both USBFS and USBHS controllers.
+
+comment "CANFD Configuration"
+
+config RA8P_CANFD0
+	bool "CANFD 0"
+	default n
+	depends on RA8P_HAVE_CANFD
+
+config RA8P_CANFD1
+	bool "CANFD 1"
+	default n
+	depends on RA8P_HAVE_CANFD
+
+comment "SDHC Configuration"
+
+config RA8P_SDHC0
+	bool "SDHC 0"
+	default n
+	depends on RA8P_HAVE_SDHC
+
+config RA8P_SDHC1
+	bool "SDHC 1"
+	default n
+	depends on RA8P_HAVE_SDHC
+
+comment "CANFD Configuration"
+
+config RA8P_CANFD0
+	bool "CANFD 0"
+	default n
+	depends on RA8P_HAVE_CANFD
+
+config RA8P_CANFD1
+	bool "CANFD 1"
+	default n
+	depends on RA8P_HAVE_CANFD
+
+comment "I3C Configuration"
+
+config RA8P_I3C0
+	bool "I3C 0"
+	default n
+	depends on RA8P_HAVE_I3C
+
+comment "DMA Configuration"
+
+config RA8P_DMA
+	bool "DMA Controller"
+	default n
+	depends on RA8P_HAVE_DMA
+
+config RA8P_DMA_CHANNELS
+	int "Number of DMA channels"
+	default 8
+	depends on RA8P_DMA
+
+comment "Display Configuration"
+
+config RA8P_GLCDC
+	bool "GLCDC Display Controller"
+	default n
+	depends on RA8P_HAVE_GLCDC
+
+config RA8P_MIPI_DSI_DRIVER
+	bool "MIPI DSI Driver"
+	default n
+	depends on RA8P_HAVE_MIPI_DSI
+
+comment "RTC Configuration"
+
+config RA8P_RTC
+	bool "RTC"
+	default n
+	depends on RA8P_HAVE_RTC
+
+comment "WDT Configuration"
+
+config RA8P_WDT
+	bool "Watchdog Timer"
+	default n
+	depends on RA8P_HAVE_WDT
+
+comment "NPU Configuration"
+
+config RA8P_NPU
+	bool "Ethos-U55 NPU"
+	default n
+	depends on RA8P_HAVE_NPU
+
+comment "ICU (External Interrupt) Configuration"
+
+config RA8P_ICU
+	bool "ICU External Interrupt Controller"
+	default y
+	help
+	  Enable ICU (External Interrupt Controller) support for GPIO interrupts.
+
+comment "Power Management Configuration"
+
+config RA8P_POWER
+	bool "Power Management"
+	default y
+	help
+	  Enable power management support including sleep, standby, and deep standby modes.
+
 endmenu # RA8P Peripheral Support
 
 config RA8P_NR_IRQS
 	int "Number of peripheral interrupts"
 	default 96
 	depends on ARCH_CHIP_RA8P
+
+config RA8P_ROM_SIZE
+	hex "Code MRAM/Flash size"
+	default 0x100000
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Code MRAM and Flash size for RA8P1
+
+config RA8P_PACKAGE_TYPE
+	int "Package type"
+	range 1 3
+	default 2
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Package type:
+	  1 -> AB: LFBGA 224 pins
+	  2 -> AC: LFBGA 289 pins
+	  3 -> AJ: LFBGA 303 pins
+
+config RA8P_NUM_CORES
+	int "Number of cores"
+	range 1 2
+	default 2
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Number of SoC cores (CM85 + CM33)

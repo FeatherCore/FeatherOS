@@ -77,9 +77,9 @@ RA8P1 (R7KA8P1KFLCAC) 是 Renesas 基于 ARM Cortex-M85 的高性能微控制器
 
 | 特性 | 规格 |
 |------|------|
-| CPU | ARM Cortex-M85 |
+| CPU | ARM Cortex-M85 (主核) + ARM Cortex-M33 (副核) |
 | 架构 | ARMv8.1-M Mainline |
-| 最高频率 | 1 GHz |
+| 最高频率 | 1 GHz (CM85) / 250 MHz (CM33) |
 | DSP 扩展 | 是 |
 | MVE-F | 是 (M-Profile Vector Extension) |
 | FPU | FPv5-D16 (双精度浮点) |
@@ -87,9 +87,18 @@ RA8P1 (R7KA8P1KFLCAC) 是 Renesas 基于 ARM Cortex-M85 的高性能微控制器
 | D-Cache | 32 字节缓存行 |
 | TrustZone | 是 |
 | PMU | 8 事件计数器 |
-| MRAM | 768 KB |
-| SRAM | 1 MB |
+| MRAM | 768 KB (CM85) + 256 KB (CM33) |
+| SRAM | 1 MB (主SRAM) + 1404 KB (SRAM0) + 468 KB (SRAM1) |
 | NPU | Ethos-U55 (可选) |
+| GPIO | 14 个端口 (P0-PD) |
+| UART | 10 个 SCI_B 通道 |
+| SPI | 4 个 SPI_B 通道 |
+| I2C | 3 个 IIC 通道 |
+| PWM | 14 个 GPT 通道 |
+| USB | 1 个 FS + 1 个 HS |
+| CAN | 2 个 CANFD 通道 |
+| SDHC | 2 个 SDHC 通道 |
+| 显示 | GLCDC + MIPI DSI |
 
 ## 移植来源
 
@@ -467,6 +476,13 @@ arch/arm/src/ra8p/
 ├── ra8p_clockconfig.h         # 时钟配置 API
 ├── ra8p_lowsetup.c            # 底层初始化 (UART 引脚)
 ├── ra8p_lowsetup.h            # 底层初始化 API
+├── ra8p_gpio.c                # GPIO 驱动实现
+├── ra8p_gpio.h                # GPIO 驱动 API
+├── ra8p_sci_b.c               # SCI_B UART 驱动
+├── ra8p_spi_b.c               # SPI_B 驱动
+├── ra8p_icu.c                 # 中断控制器驱动
+├── ra8p_dmac.c                # DMA 控制器驱动
+├── ra8p_power.c               # 电源管理驱动
 └── hardware/
     ├── ra8p_memorymap.h       # 外设内存映射
     └── ra8p_irq.h             # 中断号定义
@@ -562,14 +578,15 @@ void __start(void)
 **`ra8p_clockconfig.c`**
 
 RA8P1 时钟系统：
-- 默认使用内部 RC 振荡器 (LOCO ~ 4 MHz)
-- 可配置 PLL 达到最高 1 GHz
-- 外设时钟：PCLKA (120 MHz), PCLKB (60 MHz)
+- 默认使用内部 RC 振荡器 (LOCO ~ 32.768 kHz)
+- 外部晶振 (XTAL) 24 MHz
+- PLL 配置可达 1 GHz (CM85) / 250 MHz (CM33)
+- 外设时钟：PCLKA (125 MHz), PCLKB (62.5 MHz), PCLKC (125 MHz), PCLKD (250 MHz)
 
 ```c
 void ra8p_clockconfig(void)
 {
-  /* RA8P starts with internal RC oscillator (LOCO ~ 4 MHz).
+  /* RA8P starts with internal RC oscillator (LOCO ~ 32.768 kHz).
    * For now, keep default configuration set by boot ROM.
    */
 
@@ -586,22 +603,33 @@ void ra8p_clockconfig(void)
 
 **`hardware/ra8p_memorymap.h`**
 
+基于 Zephyr 设备树定义的外设内存映射：
+
 | 外设 | 基地址 | 描述 |
 |------|--------|------|
 | Code Flash | 0x00000000 | 4 MB |
 | SRAM | 0x20000000 | 2 MB |
-| CCM SRAM | 0x21000000 | 16 KB |
-| SCI_B0 | 0x40070000 | UART 0 |
-| SCI_B1 | 0x40071000 | UART 1 |
-| SCI_B2 | 0x40072000 | UART 2 (默认控制台) |
-| SPI_B0 | 0x40080000 | SPI 0 |
-| I2C_B0 | 0x40050000 | I2C 0 |
-| Ethernet | 0x40110000 | RMAC |
-| USB FS | 0x40090000 | USB Full Speed |
-| USB HS | 0x40091000 | USB High Speed |
-| LCD | 0x400cc000 | GLCDC |
-| GPT0 | 0x40038000 | 通用 PWM 定时器 |
-| OSTM0 | 0x40040000 | OS 定时器 |
+| SRAM0 | 0x22000000 | 1404 KB |
+| SRAM1 | 0x2215F000 | 468 KB |
+| SDRAM | 0x68000000 | 64 MB (外部) |
+| GPIO0-9 | 0x40400000+ | 14 个 GPIO 端口 |
+| GPIOA-D | 0x40400140+ | 扩展 GPIO 端口 |
+| SCI0-9 | 0x40358000+ | 10 个 UART 通道 |
+| SPI0-3 | 0x4035C000+ | 4 个 SPI 通道 |
+| IIC0-2 | 0x4025E000+ | 3 个 I2C 通道 |
+| GPT0-13 | 0x40322000+ | 14 个 PWM 定时器 |
+| USB FS | 0x40250000 | USB Full Speed |
+| USB HS | 0x40351000 | USB High Speed |
+| CANFD | 0x40380000 | CAN FD 控制器 |
+| SDHC0-1 | 0x40252000+ | SD/SDIO 控制器 |
+| GLCDC | 0x40342000 | 显示控制器 |
+| MIPI DSI | 0x40346000 | MIPI DSI 接口 |
+| NPU | 0x40140000 | Ethos-U55 NPU |
+| I3C0 | 0x4035F000 | I3C 控制器 |
+| RTC | 0x40202000 | 实时时钟 |
+| WDT | 0x40202600 | 看门狗定时器 |
+| DMAC | 0x4000A000 | DMA 控制器 |
+| ICU | 0x40024000 | 中断控制器 |
 
 ### 5. 中断定义
 
@@ -617,7 +645,7 @@ void ra8p_clockconfig(void)
 #define RA8P_IRQ_SYSTICK       15   /* SysTick */
 ```
 
-外设中断 (16-111)：
+外设中断 (16-95)：
 ```c
 #define RA8P_IRQ_DMAC0         16   /* DMA Controller 0 */
 #define RA8P_IRQ_SCI0_TXI0     28   /* SCI0 TX Interrupt */
@@ -625,26 +653,102 @@ void ra8p_clockconfig(void)
 #define RA8P_IRQ_SCI2_TXI2     36   /* SCI2 TX Interrupt */
 #define RA8P_IRQ_SCI2_RXI2     37   /* SCI2 RX Interrupt */
 #define RA8P_IRQ_SPI0          68   /* SPI0 */
-#define RA8P_IRQ_I2C0          72   /* I2C0 */
+#define RA8P_IRQ_IIC0          72   /* IIC0 */
+#define RA8P_IRQ_USBFS         76   /* USB Full Speed */
+#define RA8P_IRQ_USBHS         77   /* USB High Speed */
 #define RA8P_IRQ_GPT0          78   /* GPT0 */
+#define RA8P_IRQ_CANFD         94   /* CANFD */
+#define RA8P_IRQ_I3C0          95   /* I3C0 */
 ```
 
-### 6. 底层初始化
+端口中断 (0-31)：
+```c
+#define RA8P_IRQ_PORT0         0    /* Port IRQ 0 */
+#define RA8P_IRQ_PORT1         1    /* Port IRQ 1 */
+...
+#define RA8P_IRQ_PORT31        31   /* Port IRQ 31 */
+```
 
-**`ra8p_lowsetup.c`**
+### 6. GPIO 实现
 
-配置 SCI_B UART 引脚：
-- SCI_B2: P110 (TX), P111 (RX) - 默认控制台
+**`ra8p_gpio.c`**
+
+支持 14 个 GPIO 端口 (P0-PD)，每个端口最多 16 个引脚：
 
 ```c
-void ra8p_lowsetup(void)
+/* GPIO 端口基地址 */
+static const uintptr_t g_port_bases[] =
 {
-#ifdef CONFIG_RA8P_SCI_B_UART2
-  /* SCI_B2 is typically used as console on RA8P EK boards */
-  /* Pin configuration via port multiplexer registers */
-#endif
-}
+  RA8P_GPIO0_BASE,   /* Port 0 */
+  RA8P_GPIO1_BASE,   /* Port 1 */
+  ...
+  RA8P_GPIOD_BASE,   /* Port D (13) */
+};
+
+/* GPIO 配置 API */
+int ra8p_gpio_config(gpio_pinset_t pinset);
+void ra8p_gpio_write(gpio_pinset_t pinset, bool value);
+bool ra8p_gpio_read(gpio_pinset_t pinset);
 ```
+
+### 7. 外设支持
+
+#### 7.1 SCI_B UART
+
+支持 10 个 SCI_B UART 通道 (SCI0-SCI9)，每个通道支持：
+- 异步串行通信
+- 可配置波特率
+- 中断驱动传输
+
+#### 7.2 SPI_B
+
+支持 4 个 SPI_B 通道 (SPI0-SPI3)，特性：
+- 主/从模式
+- 可配置时钟极性和相位
+- DMA 支持
+
+#### 7.3 IIC (I2C)
+
+支持 3 个 IIC 通道 (IIC0-IIC2)，特性：
+- 主/从模式
+- 7位/10位地址
+- 高速模式 (400 kHz)
+
+#### 7.4 GPT PWM
+
+支持 14 个 GPT PWM 通道 (GPT0-GPT13)，特性：
+- 32位定时器
+- 可配置频率和占空比
+- 多种计数模式
+
+#### 7.5 USB
+
+支持 USB FS 和 USB HS：
+- USB FS: 全速 (12 Mbps)
+- USB HS: 高速 (480 Mbps)
+- Device 和 Host 模式
+
+#### 7.6 CANFD
+
+支持 2 个 CANFD 通道：
+- CAN 2.0 和 CAN FD 协议
+- 高达 8 Mbps 数据速率
+
+#### 7.7 SDHC
+
+支持 2 个 SDHC 通道：
+- SD/SDIO/SDHC 卡支持
+- 4位数据总线
+- 高达 52 MHz 时钟
+
+#### 7.8 显示
+
+- GLCDC: 图形显示控制器
+- MIPI DSI: 高速显示接口
+
+#### 7.9 NPU
+
+- Ethos-U55: AI/ML 加速器 (可选)
 
 ## Zephyr 到 NuttX 映射
 
@@ -683,17 +787,25 @@ void ra8p_lowsetup(void)
 
 | 外设 | 状态 | 备注 |
 |------|------|------|
-| SCI_B UART | ✅ 基础支持 | SCI_B2 默认控制台 |
-| SPI_B | 🔄 待实现 | |
-| I2C_B | 🔄 待实现 | |
+| GPIO | ✅ 完成 | 14 个端口 (P0-PD) |
+| SCI_B UART | ✅ 基础支持 | 10 个通道，SCI2 默认控制台 |
+| SPI_B | 🔄 待完善 | 4 个通道 |
+| IIC (I2C) | 🔄 待完善 | 3 个通道 |
+| GPT PWM | 🔄 待实现 | 14 个通道 |
+| USB FS/HS | 🔄 待实现 | Device/Host 模式 |
+| CANFD | 🔄 待实现 | 2 个通道 |
+| SDHC | 🔄 待实现 | 2 个通道 |
+| I3C | 🔄 待实现 | 1 个通道 |
 | Ethernet (RMAC) | 🔄 待实现 | |
-| USB FS/HS | 🔄 待实现 | |
-| GPT (PWM) | 🔄 待实现 | |
-| GPIO | 🔄 待实现 | |
+| GLCDC | 🔄 待实现 | 显示控制器 |
+| MIPI DSI | 🔄 待实现 | 显示接口 |
+| RTC | 🔄 待实现 | 实时时钟 |
+| WDT | 🔄 待实现 | 看门狗定时器 |
 | ADC | 🔄 待实现 | |
 | DAC | 🔄 待实现 | |
-| LCD (GLCDC) | 🔄 待实现 | |
-| Ethos-U55 NPU | 🔄 待实现 | |
+| DMAC | 🔄 待完善 | 8 通道 DMA |
+| NPU (Ethos-U55) | 🔄 待实现 | AI/ML 加速器 |
+| SDRAMC | 🔄 待实现 | SDRAM 控制器 |
 
 ## 使用方法
 
@@ -713,6 +825,10 @@ make menuconfig
 #       R7KA8P1KFLCAC (RA8P1)
 #     RA8P Peripheral Support ->
 #       SCI_B UART 2 (控制台)
+#       GPIO Support
+#       SPI_B Support
+#       IIC Support
+#       ...
 
 # 编译
 make
@@ -733,7 +849,10 @@ boards/arm/ra8p/
     │       └── defconfig      # 默认配置
     └── src/
         ├── CMakeLists.txt
-        └── ek_ra8p1_bringup.c
+        ├── ek_ra8p1_bringup.c
+        ├── ek_ra8p1_boot.c
+        ├── ek_ra8p1_leds.c
+        └── ek_ra8p1_buttons.c
 ```
 
 ## 测试计划
@@ -754,12 +873,16 @@ boards/arm/ra8p/
    - UART 收发测试
    - GPIO 测试
    - SPI/I2C 测试
+   - PWM 输出测试
+   - USB 设备测试
+   - SD 卡读写测试
 
 ## 已知问题
 
 1. **时钟配置**: 当前使用默认配置，需要添加 PLL 配置支持
 2. **引脚配置**: 需要完善端口复用器配置
 3. **中断处理**: 需要添加完整的中断处理程序
+4. **双核支持**: 需要添加 CM33 核心的启动和通信支持
 
 ## 参考资料
 
@@ -768,636 +891,7 @@ boards/arm/ra8p/
 3. [ARMv8-M 架构参考手册](https://developer.arm.com/documentation/ddi0553/latest)
 4. [Zephyr RA8P1 实现](https://github.com/zephyrproject-rtos/zephyr/tree/main/soc/renesas/ra/ra8p1)
 5. [NuttX ARMv8-M 架构](https://nuttx.apache.org/docs/latest/)
-
-## 变更历史
-
-| 日期 | 描述 |
-|------|------|
-| 2026-04-23 | 初始移植，基于 Zephyr RA8P1 实现 |
-| 2026-04-23 | 添加启动代码、时钟配置、内存映射、中断定义 |
-| 2026-04-24 | 补充 Zephyr RA8P1 实现细节（设备树、Kconfig、电源管理） |
-
-## Zephyr 参考文件清单
-
-以下是从 Zephyr 移植到 NuttX 的文件对应关系：
-
-### 配置文件
-
-| Zephyr 文件 | NuttX 文件 | 说明 |
-|------------|-----------|------|
-| `soc/renesas/ra/ra8p1/Kconfig` | `arch/arm/src/ra8p/Kconfig` | SOC 芯片选择 |
-| `soc/renesas/ra/ra8p1/Kconfig.soc` | - | 已在 NuttX Kconfig 中合并 |
-| `soc/renesas/ra/ra8p1/Kconfig.defconfig` | - | 运行时配置，需后续支持 |
-| `boards/renesas/ek_ra8p1/ek_ra8p1_r7ka8p1kflcac_cm85_defconfig` | `boards/` | 开发板默认配置 |
-
-### 设备树定义
-
-| Zephyr 文件 | NuttX 说明 |
-|------------|-----------|
-| `dts/arm/renesas/ra/ra8/r7ka8p1kflcac.dtsi` | 内存映射参考 |
-| `dts/arm/renesas/ra/ra8/r7ka8p1kflcac_cm85.dtsi` | CM85 核心定义 |
-| `dts/arm/renesas/ra/ra8/r7ka8p1xf.dtsi` | 时钟配置参考 |
-| `boards/renesas/ek_ra8p1/ek_ra8p1.dtsi` | 开发板外设定义 |
-
-### 源代码
-
-| Zephyr 文件 | NuttX 文件 | 说明 |
-|------------|-----------|------|
-| `soc/renesas/ra/ra8p1/power.c` | - | 电源管理，待实现 |
-| `soc/renesas/ra/ra8p1/sections.ld` | - | 链接脚本，待适配 |
-
-### 待移植功能
-
-以下 Zephyr 功能尚未移植到 NuttX：
-
-1. **电源管理** (`power.c`)
-   - 低功耗模式 (Sleep/Standby)
-   - TCM/SRAM 保持配置
-
-2. **时钟详细配置**
-   - PLL1/PLL2 配置
-   - 外设时钟分频器
-
-3. **外设驱动**
-   - SCI_UART 完整驱动
-   - I2C/SPI 驱动
-   - Ethernet RMAC 驱动
-   - USB HS/FS 驱动
-   - LCD/DSI 显示驱动
-
-4. **开发板支持**
-   - EK-RA8P1 完整板级支持
-   - 引脚复用配置
-   - GPIO 中断支持
-
-## Zephyr RA8P1 外设定义
-
-### CPU 和电源状态
-
-**`dts/arm/renesas/ra/ra8/ra8x2.dtsi`** - CPU 定义:
-
-```dts
-cpus {
-    #address-cells = <1>;
-    #size-cells = <0>;
-
-    /* CM85 核心 - 主 CPU */
-    cpu0: cpu@0 {
-        device_type = "cpu";
-        compatible = "arm,cortex-m85";
-        reg = <0>;
-        cpu-power-states = <&stop0 &stop1>;
-
-        mpu: mpu@e000ed90 {
-            compatible = "arm,armv8.1m-mpu";
-            reg = <0xe000ed90 0x40>;
-        };
-    };
-
-    /* CM33 核心 - 协处理器 */
-    cpu1: cpu@1 {
-        device_type = "cpu";
-        compatible = "arm,cortex-m33";
-        reg = <1>;
-
-        mpu: mpu@e000ed90 {
-            compatible = "arm,armv8m-mpu";
-            reg = <0xe000ed90 0x40>;
-        };
-    };
-
-    power-states {
-        stop0: state0 {
-            compatible = "zephyr,power-state";
-            power-state-name = "runtime-idle";
-            min-residency-us = <100>;
-        };
-
-        stop1: state1 {
-            compatible = "zephyr,power-state";
-            power-state-name = "standby";
-            min-residency-us = <5000>;
-            exit-latency-us = <3000>;
-        };
-    };
-};
-```
-
-### GPIO 端口定义
-
-```dts
-/* GPIO 端口 0-13 + A-D */
-ioport0: gpio@40400000 {
-    compatible = "renesas,ra-gpio-ioport";
-    reg = <0x40400000 0x20>;
-    port = <0>;
-    gpio-controller;
-    #gpio-cells = <2>;
-    ngpios = <16>;
-};
-
-ioport1: gpio@40400020 { port = <1>; ngpios = <16>; };
-ioport2: gpio@40400040 { port = <2>; ngpios = <16>; };
-ioport3: gpio@40400060 { port = <3>; ngpios = <16>; };
-ioport4: gpio@40400080 { port = <4>; ngpios = <16>; vbatts-pins = <2 3 4>; };
-ioport5: gpio@404000a0 { port = <5>; ngpios = <16>; };
-ioport6: gpio@404000c0 { port = <6>; ngpios = <16>; };
-ioport7: gpio@404000e0 { port = <7>; ngpios = <16>; };
-ioport8: gpio@40400100 { port = <8>; ngpios = <16>; };
-ioport9: gpio@40400120 { port = <9>; ngpios = <16>; };
-ioporta: gpio@40400140 { port = <10>; ngpios = <16>; };
-ioportb: gpio@40400160 { port = <11>; ngpios = <8>; };
-ioportc: gpio@40400180 { port = <12>; ngpios = <16>; };
-ioportd: gpio@404001a0 { port = <13>; ngpios = <8>; };
-```
-
-### SCI (Serial Communication Interface) 定义
-
-RA8P1 有 10 个 SCI 通道 (SCI0-SCI9)，每个支持 UART/I2C/SPI 模式：
-
-```dts
-/* SCI0 - 支持 UART/I2C/SPI */
-sci0: sci0@40358000 {
-    compatible = "renesas,ra-sci";
-    reg = <0x40358000 0x100>;
-    clocks = <&sciclk MSTPB 31>;
-
-    uart {
-        compatible = "renesas,ra8-uart-sci-b";
-        channel = <0>;
-    };
-
-    i2c {
-        compatible = "renesas,ra-i2c-sci-b";
-        #address-cells = <1>;
-        #size-cells = <0>;
-        channel = <0>;
-    };
-
-    spi {
-        compatible = "renesas,ra-spi-sci-b";
-        #address-cells = <1>;
-        #size-cells = <0>;
-        channel = <0>;
-        overrun-character = <0x00>;
-    };
-};
-
-/* SCI1-SCI9 类似结构，地址递增 0x100 */
-sci1: sci1@40358100 { ... };
-sci2: sci2@40358200 { ... };
-/* ... */
-sci8: sci8@40358800 { ... };  /* EK-RA8P1 控制台 */
-sci9: sci9@40358900 { ... };
-```
-
-### SPI 控制器定义
-
-```dts
-/* 独立 SPI 控制器 (非 SCI) */
-spi0: spi@4035c000 {
-    compatible = "renesas,ra8-spi-b";
-    #address-cells = <1>;
-    #size-cells = <0>;
-    channel = <0>;
-    clocks = <&pclka MSTPB 19>;
-    reg = <0x4035c000 0x100>;
-};
-
-spi1: spi@4035c100 {
-    compatible = "renesas,ra8-spi-b";
-    channel = <1>;
-    clocks = <&pclka MSTPB 18>;
-    reg = <0x4035c100 0x100>;
-};
-```
-
-### PWM (GPT) 定义
-
-```dts
-/* PWM0-13 - 通用 PWM 定时器 */
-pwm0: pwm0@40322000 {
-    compatible = "renesas,ra-pwm";
-    divider = <RA_PWM_SOURCE_DIV_1>;
-    channel = <RA_PWM_CHANNEL_0>;
-    clocks = <&gptclk MSTPE 31>;
-    reg = <0x40322000 0x100>;
-    #pwm-cells = <3>;
-};
-
-/* PWM1-13 类似，地址递增 0x100 */
-pwm1: pwm1@40322100 { channel = <RA_PWM_CHANNEL_1>; };
-/* ... */
-pwm12: pwm12@40322c00 { channel = <RA_PWM_CHANNEL_12>; };
-pwm13: pwm13@40322d00 { channel = <RA_PWM_CHANNEL_13>; };
-```
-
-### Ethernet (RMAC) 定义
-
-```dts
-/* Ethernet Switch Module */
-eswm: eswm@403c8000 {
-    compatible = "renesas,ra-eswm";
-    reg = <0x403c8000 0x19424>;
-    clocks = <&iclk 0 0>,
-             <&pclka MSTPC 30>,
-             <&eswclk 0 0>,
-             <&eswphyclk 0 0>,
-             <&ethphyclk MSTPC 28>;
-    clock-names = "gwcaclk", "pclk", "eswclk", "eswphyclk", "ethphyclk";
-
-    /* Ethernet MAC 0 */
-    eth0: ethernet_mac@403cb000 {
-        compatible = "renesas,ra-ethernet-rmac";
-        reg = <0x403cb000 0x530>;
-        channel = <0>;
-    };
-
-    /* Ethernet MAC 1 */
-    eth1: ethernet_mac@403cd000 {
-        compatible = "renesas,ra-ethernet-rmac";
-        reg = <0x403cd000 0x530>;
-        channel = <1>;
-    };
-
-    /* MDIO 0/1 */
-    mdio0: mdio@403cb000 {
-        compatible = "renesas,ra-mdio-rmac";
-        reg = <0x403cb000 0x4>, <0x403cb004 0x4>;
-        reg-names = "mpsm", "mpic";
-        #address-cells = <1>;
-        #size-cells = <0>;
-        channel = <0>;
-    };
-
-    mdio1: mdio@403cd000 {
-        compatible = "renesas,ra-mdio-rmac";
-        channel = <1>;
-    };
-};
-```
-
-### CAN-FD 定义
-
-```dts
-canfd_global: canfd_global@40380000 {
-    compatible = "renesas,ra-canfd-global";
-    clocks = <&pclka 0 0>, <&pclke 0 0>;
-    clock-names = "opclk", "ramclk";
-    dll-min-freq = <DT_FREQ_M(8)>;
-    dll-max-freq = <DT_FREQ_M(80)>;
-    reg = <0x40380000 0x4000>;
-
-    canfd0: canfd0 {
-        compatible = "renesas,ra-canfd";
-        channel = <0>;
-        clocks = <&canfdclk MSTPC 27>;
-    };
-
-    canfd1: canfd1 {
-        compatible = "renesas,ra-canfd";
-        channel = <1>;
-        clocks = <&canfdclk MSTPC 26>;
-    };
-};
-```
-
-### 其他外设
-
-```dts
-/* I2C 控制器 (非 SCI) */
-iic0: iic0@4025e000 {
-    compatible = "renesas,ra-iic";
-    channel = <0>;
-    reg = <0x4025e000 0x100>;
-    clocks = <&pclkb MSTPB 9>;
-};
-
-iic1: iic1@4025e100 { channel = <1>; };
-iic2: iic2@4025e200 { channel = <2>; };
-
-/* AGT - 异步通用定时器 */
-agt0: agt@40221000 {
-    compatible = "renesas,ra-agt";
-    channel = <0>;
-    reg = <0x40221000 0x100>;
-    renesas,count-source = "AGT_CLOCK_LOCO";
-    renesas,prescaler = <0>;
-    renesas,resolution = <16>;
-};
-
-/* ULPT - 超低功耗定时器 */
-ulpt0: ulpt@40220000 {
-    compatible = "renesas,ra-ulpt";
-    reg = <0x40220000 0x100>;
-    channel = <0>;
-
-    timer {
-        compatible = "renesas,ra-ulpt-timer";
-    };
-};
-
-/* I3C 控制器 */
-i3c0: i3c@4035f000 {
-    compatible = "renesas,ra-i3c";
-    #address-cells = <3>;
-    #size-cells = <0>;
-    reg = <0x4035f000 0x3e8>;
-    channel = <0>;
-    clocks = <&pclka MSTPB 4>, <&i3cclk 0 0>;
-};
-
-/* I2S/SSIE 音频接口 */
-i2s0: ssie@4025d000 {
-    compatible = "renesas,ra-i2s-ssie";
-    channel = <0>;
-    reg = <0x4025d000 0x28>;
-    clocks = <&pclkb MSTPC 8>;
-    full-duplex;
-};
-
-/* SDRAM 控制器 */
-sdram: sdram-controller@40003c00 {
-    compatible = "renesas,ra-sdram";
-    #address-cells = <1>;
-    #size-cells = <0>;
-    reg = <0x40003c00 0x54>;
-};
-
-/* TRNG - 真随机数生成器 */
-trng: trng {
-    compatible = "renesas,ra-rsip-e50d-trng";
-};
-```
-
-## EK-RA8P1 引脚配置
-
-**`boards/renesas/ek_ra8p1/ek_ra8p1-pinctrl.dtsi`**:
-
-### UART 引脚配置
-
-```dts
-&pinctrl {
-    /* SCI8 - 控制台 UART */
-    sci8_default: sci8_default {
-        group1 {
-            /* TX - P13_2 */
-            psels = <RA_PSEL(RA_PSEL_SCI_8, 13, 2)>;
-            drive-strength = "medium";
-        };
-
-        group2 {
-            /* RX - P13_3 */
-            psels = <RA_PSEL(RA_PSEL_SCI_8, 13, 3)>;
-        };
-    };
-
-    /* SCI9 - 备用 UART */
-    sci9_default: sci9_default {
-        group1 {
-            /* TX - P2_9 */
-            psels = <RA_PSEL(RA_PSEL_SCI_9, 2, 9)>;
-            drive-strength = "medium";
-        };
-
-        group2 {
-            /* RX - P2_8 */
-            psels = <RA_PSEL(RA_PSEL_SCI_9, 2, 8)>;
-        };
-    };
-};
-```
-
-### I2C 引脚配置
-
-```dts
-    /* SCI1 - I2C 模式 */
-    sci1_default: sci1_default {
-        group1 {
-            /* SDA - P4_0, SCL - P4_1 */
-            psels = <RA_PSEL(RA_PSEL_SCI_1, 4, 0)>,
-                    <RA_PSEL(RA_PSEL_SCI_1, 4, 1)>;
-            drive-strength = "medium";
-            drive-open-drain;
-        };
-    };
-
-    /* IIC1 - 独立 I2C */
-    iic1_default: iic1_default {
-        group1 {
-            /* SCL1 - P5_12, SDA1 - P5_11 */
-            psels = <RA_PSEL(RA_PSEL_I2C, 5, 12)>,
-                    <RA_PSEL(RA_PSEL_I2C, 5, 11)>;
-            drive-strength = "medium";
-        };
-    };
-```
-
-### SPI 引脚配置
-
-```dts
-    /* SPI1 */
-    spi1_default: spi1_default {
-        group1 {
-            /* MISO - P1_0, MOSI - P1_1, RSPCK - P1_2, SSL - P1_3 */
-            psels = <RA_PSEL(RA_PSEL_SPI, 1, 0)>,
-                    <RA_PSEL(RA_PSEL_SPI, 1, 1)>,
-                    <RA_PSEL(RA_PSEL_SPI, 1, 2)>,
-                    <RA_PSEL(RA_PSEL_SPI, 1, 3)>;
-        };
-    };
-```
-
-### PWM 引脚配置
-
-```dts
-    /* PWM1 - GTIOC1A/B */
-    pwm1_default: pwm1_default {
-        group1 {
-            /* GTIOC1A - P1_5 */
-            psels = <RA_PSEL(RA_PSEL_GPT1, 1, 5)>;
-        };
-
-        group2 {
-            /* GTIOC1B - P1_4 */
-            psels = <RA_PSEL(RA_PSEL_GPT1, 1, 4)>;
-        };
-    };
-
-    /* PWM12 - 摄像头时钟 */
-    pwm12_default: pwm12_default {
-        group1 {
-            /* GTIOC12A - P5_1 */
-            psels = <RA_PSEL(RA_PSEL_GPT1, 5, 1)>;
-            drive-strength = "medium";
-        };
-    };
-```
-
-### Ethernet 引脚配置
-
-```dts
-    /* MDIO1 */
-    mdio1_default: mdio1_default {
-        group1 {
-            /* MDC - P4_15, MDIO - P4_14 */
-            psels = <RA_PSEL(RA_PSEL_ETH_MII, 4, 15)>,
-                    <RA_PSEL(RA_PSEL_ETH_MII, 4, 14)>;
-            drive-strength = "medium";
-        };
-    };
-
-    /* ETH1 - RGMII 模式 */
-    eth1_default: eth1_default {
-        group1 {
-            /* RGMII_TXD0-3, TX_CTL, TX_CLK */
-            psels = <RA_PSEL(RA_PSEL_ETH_RGMII, 3, 7)>,  /* TXD0 */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 3, 6)>,  /* TXD1 */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 3, 5)>,  /* TXD2 */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 3, 4)>,  /* TXD3 */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 3, 10)>, /* TX_CTL */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 3, 9)>,  /* TX_CLK */
-                    /* RGMII_RXD0-3, RX_CTL, RX_CLK */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 9, 6)>,  /* RXD0 */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 9, 7)>,  /* RXD1 */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 9, 8)>,  /* RXD2 */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 9, 9)>,  /* RXD3 */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 2, 6)>,  /* RX_CTL */
-                    <RA_PSEL(RA_PSEL_ETH_RGMII, 9, 5)>;  /* RX_CLK */
-            drive-strength = "high";
-        };
-    };
-```
-
-### USB 引脚配置
-
-```dts
-    /* USB HS */
-    usbhs_default: usbhs_default {
-        group1 {
-            /* VBUS - P4_8 */
-            psels = <RA_PSEL(RA_PSEL_USBHS, 4, 8)>;
-            drive-strength = "high";
-        };
-    };
-
-    /* USB FS */
-    usbfs_default: usbfs_default {
-        group1 {
-            /* USB_DM - P8_15, USB_DP - P8_14, VBUS - P4_7 */
-            psels = <RA_PSEL(RA_PSEL_USBFS, 8, 15)>,
-                    <RA_PSEL(RA_PSEL_USBFS, 8, 14)>,
-                    <RA_PSEL(RA_PSEL_USBFS, 4, 7)>;
-            drive-strength = "high";
-        };
-    };
-```
-
-### SDRAM 引脚配置
-
-```dts
-    /* SDRAM - 32 位数据总线 */
-    sdram_default: sdram_default {
-        group1 {
-            /* 地址线 A2-A16 */
-            psels = <RA_PSEL(RA_PSEL_BUS, 10, 3)>,  /* A2 */
-                    <RA_PSEL(RA_PSEL_BUS, 10, 2)>,  /* A3 */
-                    /* ... 更多地址线 ... */
-                    <RA_PSEL(RA_PSEL_BUS, 12, 15)>; /* A16 */
-            drive-strength = "high";
-        };
-
-        group2 {
-            /* SDRAM_SDCLK */
-            psels = <RA_PSEL(RA_PSEL_BUS, 10, 15)>;
-            drive-strength = "highspeed-high";
-        };
-    ```
-
-## Zephyr 源码参考路径
-
-```
-zephyr/                                    # Zephyr RTOS 根目录
-├── soc/renesas/ra/ra8p1/                    # RA8P1 SOC 实现
-│   ├── Kconfig                           # SOC Kconfig (select CPU_CORTEX_M85)
-│   ├── Kconfig.soc                       # SOC 系列选择
-│   ├── Kconfig.defconfig                 # 默认配置
-│   ├── CMakeLists.txt                     # CMake 构建
-│   ├── power.c                          # 电源管理 (Sleep/Standby)
-│   └── sections.ld                       # 链接段 (Option Setting OFS)
-├── soc/renesas/ra/common/                   # RA 系列通用代码
-│   ├── soc.c                            # soc_early_init_hook, soc_late_init_hook
-│   ├── pinctrl_soc.h                    # 引脚控制定义
-│   └── ram_sections.ld                   # RAM 段链接脚本
-├── dts/arm/renesas/ra/ra8/               # RA8 设备树
-│   ├── r7ka8p1kflcac.dtsi               # RA8P1 设备树 (MRAM, SRAM)
-│   ├── r7ka8p1kflcac_cm85.dtsi          # CM85 核心配置
-│   ├── r7ka8p1xf.dtsi                 # RA8P1 时钟定义
-│   └── ra8x2.dtsi                       # 通用外设定义 (SCI, GPIO, SPI, I2C...)
-├── boards/renesas/ek_ra8p1/                # EK-RA8P1 开发板
-│   ├── ek_ra8p1.dtsi                  # 板级设备树
-│   ├── ek_ra8p1-pinctrl.dtsi          # 引脚配置
-│   ├── ek_ra8p1_r7ka8p1kflcac_cm85.dts # CM85 配置
-│   └── ek_ra8p1_r7ka8p1kflcac_cm85_defconfig # 默认配置
-└── drivers/                            # 驱动代码
-    └── (具体外设驱动)
-```
-
-### Zephyr SoC 初始化代码参考
-
-**`soc/renesas/ra/common/soc.c`**:
-
-```c
-void soc_early_init_hook(void)
-{
-  /* NMI handler setup */
-  z_arm_nmi_set_handler(NMI_Handler);
-
-  /* DCache enable */
-  sys_cache_data_enable();
-
-  /* ICache invalidate after .ram_from_flash init */
-  sys_cache_instr_invd_all();
-}
-
-void soc_late_init_hook(void)
-{
-  /* Secondary core start if enabled */
-  R_BSP_SecondaryCoreStart();
-}
-```
-
-### Zephyr 电源管理参考
-
-**`soc/renesas/ra/ra8p1/power.c`**:
-
-```c
-/* Sleep mode entry */
-void pm_state_set(enum pm_state state, uint8_t substate_id)
-{
-  switch (state) {
-  case PM_STATE_RUNTIME_IDLE:
-    R_LPM_Open(&pm_state_ctrl, &pm_state_runtime_idle_cfg);
-    __disable_irq();
-    __set_BASEPRI(0);
-    __ISB();
-    R_LPM_LowPowerModeEnter(&pm_state_ctrl);
-    __enable_irq();
-    __ISB();
-    break;
-
-  case PM_STATE_STANDBY:
-    R_LPM_Open(&pm_state_ctrl, &pm_state_standby_cfg);
-    __disable_irq();
-    __set_BASEPRI(0);
-    __ISB();
-    R_LPM_LowPowerModeEnter(&pm_state_ctrl);
-    __enable_irq();
-    __ISB();
-    break;
-  }
-}
-```
+6. [EK-RA8P1 开发板用户手册](https://www.renesas.com/ek-ra8p1)
 
 ## 变更历史
 
@@ -1409,5 +903,53 @@ void pm_state_set(enum pm_state state, uint8_t substate_id)
 | 2026-04-24 | 更新 NuttX 代码风格示例（Apache 2.0 许可证头、函数注释、寄存器访问宏） |
 | 2026-04-24 | 添加 Zephyr 源码参考路径清单 |
 | 2026-04-24 | 添加 NuttX 风格的电源管理代码示例 |
-    };
-```
+| 2026-04-29 | 完善内存映射，添加更多外设支持 |
+| 2026-04-29 | 更新 GPIO 实现，支持 14 个端口 |
+| 2026-04-29 | 添加完整的 Kconfig 配置选项 |
+| 2026-04-29 | 添加双核、MIPI DSI、NPU 支持 |
+| 2026-04-29 | 添加 pinctrl 驱动、CGC 时钟控制、GPT PWM 驱动 |
+| 2026-05-01 | 添加 ICU 外部中断、RTC、USB、WDT、CANFD、SDHC 驱动框架 |
+
+## 新增文件清单
+
+基于 Zephyr RTOS RA8P1 实现，以下是新增的文件：
+
+### 硬件抽象层 (HAL)
+
+| 文件 | 描述 |
+|------|------|
+| `arch/arm/src/ra8p/hardware/ra8p_cgc.h` | CGC (时钟生成控制) 寄存器定义 |
+| `arch/arm/src/ra8p/hardware/ra8p_pinctrl.h` | PFS (端口功能选择) 寄存器定义 |
+| `arch/arm/src/ra8p/hardware/ra8p_gpt.h` | GPT (通用 PWM 定时器) 寄存器定义 |
+| `arch/arm/src/ra8p/hardware/ra8p_iic.h` | IIC (I2C) 寄存器定义 |
+| `arch/arm/src/ra8p/hardware/ra8p_icu.h` | ICU (外部中断控制器) 寄存器定义 |
+| `arch/arm/src/ra8p/hardware/ra8p_rtc.h` | RTC (实时时钟) 寄存器定义 |
+| `arch/arm/src/ra8p/hardware/ra8p_usb.h` | USB 控制器寄存器定义 |
+| `arch/arm/src/ra8p/hardware/ra8p_wdt.h` | WDT (看门狗定时器) 寄存器定义 |
+| `arch/arm/src/ra8p/hardware/ra8p_canfd.h` | CANFD (CAN FD) 寄存器定义 |
+| `arch/arm/src/ra8p/hardware/ra8p_sdhc.h` | SDHC (SD卡控制器) 寄存器定义 |
+
+### 驱动实现
+
+| 文件 | 描述 |
+|------|------|
+| `arch/arm/src/ra8p/ra8p_cgc.c` | CGC 时钟控制驱动 |
+| `arch/arm/src/ra8p/ra8p_pinctrl.c` | Pinmux/PFS 驱动 |
+| `arch/arm/src/ra8p/ra8p_gpt.c` | GPT PWM 驱动 |
+| `arch/arm/src/ra8p/ra8p_icu.c` | ICU 外部中断驱动 |
+| `arch/arm/src/ra8p/ra8p_power.c` | 电源管理驱动 |
+
+### Zephyr 到 NuttX 映射 (新增)
+
+| Zephyr 路径 | NuttX 文件 | 描述 |
+|--------------|-----------|------|
+| `dts/arm/renesas/ra/ra8/ra8x2.dtsi` | `hardware/ra8p_memorymap.h` | 双核设备树映射 |
+| `dts/arm/renesas/ra/ra8/r7ka8p1xf.dtsi` | `hardware/ra8p_cgc.h` | 时钟定义映射 |
+| `boards/renesas/ek_ra8p1/ek_ra8p1-pinctrl.dtsi` | `ra8p_pinctrl.c` | 引脚配置映射 |
+| `dts/arm/renesas/ra/ra8/ra8x1.dtsi` (GPT) | `ra8p_gpt.c` | GPT PWM 映射 |
+| `drivers/misc/renesas_ra_external_interrupt/` | `ra8p_icu.c` | ICU 外部中断映射 |
+| `drivers/rtc/rtc_renesas_ra.c` | `ra8p_rtc.h` | RTC 驱动框架映射 |
+| `drivers/usb/usb_dc_ra.c` | `ra8p_usb.h` | USB 驱动框架映射 |
+| `drivers/watchdog/wdt_renesas_ra.c` | `ra8p_wdt.h` | WDT 驱动框架映射 |
+| `drivers/can/can_renesas_ra.c` | `ra8p_canfd.h` | CANFD 驱动框架映射 |
+| `drivers/sdhc/sdhc_renesas_ra.c` | `ra8p_sdhc.h` | SDHC 驱动框架映射 |

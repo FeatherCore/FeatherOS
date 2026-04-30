@@ -1,0 +1,7 @@
+#
+# boards/arm/ra8p/ek-ra8p1/Kconfig
+#
+
+if ARCH_BOARD_EK_RA8P1
+
+endif
