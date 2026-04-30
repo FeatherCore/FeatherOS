@@ -52,11 +52,11 @@
 /* Display settings for typical MIPI DSI LCD panels on STM32U5G9J-DK1 */
 
 #ifndef BOARD_LTDC_WIDTH
-#  define BOARD_LTDC_WIDTH          720
+#  define BOARD_LTDC_WIDTH          480
 #endif
 
 #ifndef BOARD_LTDC_HEIGHT
-#  define BOARD_LTDC_HEIGHT         1280
+#  define BOARD_LTDC_HEIGHT         480
 #endif
 
 #ifndef BOARD_LTDC_HSYNC

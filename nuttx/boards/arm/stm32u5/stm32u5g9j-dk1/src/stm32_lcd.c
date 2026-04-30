@@ -49,30 +49,30 @@
 
 #ifdef CONFIG_STM32U5_LTDC
 
-/* Display settings for typical MIPI DSI LCD panels on STM32U5G9J-DK1 */
+/* Display settings for typical MIPI DSI LCD panels on STM32U5G9J-DK1 (480x480) */
 
 #ifndef BOARD_LTDC_WIDTH
-#  define BOARD_LTDC_WIDTH          720
+#  define BOARD_LTDC_WIDTH          480
 #endif
 
 #ifndef BOARD_LTDC_HEIGHT
-#  define BOARD_LTDC_HEIGHT         1280
+#  define BOARD_LTDC_HEIGHT         480
 #endif
 
 #ifndef BOARD_LTDC_HSYNC
-#  define BOARD_LTDC_HSYNC          5
+#  define BOARD_LTDC_HSYNC          10
 #endif
 
 #ifndef BOARD_LTDC_VSYNC
-#  define BOARD_LTDC_VSYNC          5
+#  define BOARD_LTDC_VSYNC          2
 #endif
 
 #ifndef BOARD_LTDC_HBP
-#  define BOARD_LTDC_HBP            10
+#  define BOARD_LTDC_HBP            20
 #endif
 
 #ifndef BOARD_LTDC_HFP
-#  define BOARD_LTDC_HFP            10
+#  define BOARD_LTDC_HFP            20
 #endif
 
 #ifndef BOARD_LTDC_VBP

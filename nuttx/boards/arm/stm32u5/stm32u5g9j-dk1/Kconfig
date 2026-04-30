@@ -39,7 +39,7 @@ config STM32U5G9J_DK1_LCD_WIDTH
 
 config STM32U5G9J_DK1_LCD_HEIGHT
 	int "LCD Height"
-	default 272
+	default 480
 	---help---
 		LCD panel height in pixels.
 
@@ -47,13 +47,13 @@ config STM32U5_LTDC_FB_BASE
 	hex "LTDC Frame Buffer Base Address"
 	default 0x90000000
 	---help---
-		Base address of the frame buffer in external memory (SDRAM).
+		Base address of the frame buffer in external memory (SDR).
 
 config STM32U5_LTDC_FB_SIZE
 	int "LTDC Frame Buffer Size"
-	default 261120
+	default 460800
 	---help---
-		Size of the frame buffer in bytes (width * height * 2 for RGB565 = 480 * 272 * 2 = 261120).
+		Size of the frame buffer in bytes (480 * 480 * 2 for RGB565 = 460800).
 
 choice
 	prompt "LTDC Pixel Format"
