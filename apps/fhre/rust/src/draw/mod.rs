@@ -1,7 +1,8 @@
 use crate::{
     backend::{
-        DrawBackendDispatch, DrawChain, DrawChainOp, DrawChainOpKind, DrawTaskKind,
-        RenderBackend, RenderStats, DEFAULT_DRAW_CHAIN_OPS,
+        BackendCapabilities, DrawBackendDispatch, DrawChain, DrawChainOp, DrawChainOpKind,
+        DrawChainSubmitResult, DrawTaskKind, RenderBackend, RenderStats,
+        DEFAULT_DRAW_CHAIN_OPS,
     },
     dirty::DirtyRegion,
     surface::Surface,
@@ -1254,6 +1255,66 @@ pub struct DrawList<const N: usize> {
     overflowed: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DrawChainRun {
+    op_start: u16,
+    op_end: u16,
+    command_start: u16,
+    command_end: u16,
+    candidate: bool,
+    bounds: Rect,
+}
+
+impl DrawChainRun {
+    const EMPTY: Self = Self {
+        op_start: 0,
+        op_end: 0,
+        command_start: 0,
+        command_end: 0,
+        candidate: false,
+        bounds: Rect::EMPTY,
+    };
+
+    const fn len_ops(self) -> usize {
+        self.op_end as usize - self.op_start as usize
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DrawChainRunPlan<const OPS: usize> {
+    runs: [DrawChainRun; OPS],
+    len: usize,
+    splits: u32,
+    parallel_hints: u32,
+    chain_ops: u32,
+    candidate_ops: u32,
+}
+
+impl<const OPS: usize> DrawChainRunPlan<OPS> {
+    const fn new() -> Self {
+        Self {
+            runs: [DrawChainRun::EMPTY; OPS],
+            len: 0,
+            splits: 0,
+            parallel_hints: 0,
+            chain_ops: 0,
+            candidate_ops: 0,
+        }
+    }
+
+    fn push(&mut self, run: DrawChainRun) {
+        if self.len >= OPS {
+            return;
+        }
+        self.runs[self.len] = run;
+        self.len = self.len.saturating_add(1);
+        self.chain_ops = self.chain_ops.saturating_add(run.len_ops() as u32);
+        if run.candidate {
+            self.candidate_ops = self.candidate_ops.saturating_add(run.len_ops() as u32);
+        }
+    }
+}
+
 impl<const N: usize> DrawList<N> {
     pub const fn new() -> Self {
         Self {
@@ -1393,101 +1454,7 @@ impl<const N: usize> DrawList<N> {
         stats.clear();
         stats.mark_overflowed(self.overflowed);
         let dispatch = DrawBackendDispatch::from_capabilities(backend.capabilities());
-        let chain = self.compile_draw_chain::<DEFAULT_DRAW_CHAIN_OPS>(None);
-        let _ = backend.submit_draw_chain(&chain, stats);
-        let mut active_clip = None;
-        let mut i = 0;
-        while i < self.len {
-            let cmd = self.cmds[i];
-            let clip = self.clips[i];
-            stats.command_seen();
-            if clip != active_clip {
-                backend.set_clip(clip);
-                stats.clip_changed();
-                active_clip = clip;
-            }
-            if let DrawCommand::BeginLayer { rect, spec, .. } = cmd {
-                let end = self.find_layer_end(i + 1);
-                if let Some(kind) = cmd.task_kind() {
-                    let _ = backend.draw_dispatched_layer_commands(
-                        rect,
-                        spec,
-                        &self.cmds[i + 1..end],
-                        &self.clips[i + 1..end],
-                        dispatch.classify(kind),
-                        stats,
-                    );
-                } else {
-                    let _ = backend.draw_layer_commands(
-                        rect,
-                        spec,
-                        &self.cmds[i + 1..end],
-                        &self.clips[i + 1..end],
-                        stats,
-                    );
-                }
-                stats.mark_command_kind(cmd);
-                stats.command_drawn(cmd.clipped_bounds(clip));
-                i = end.saturating_add(1);
-                continue;
-            }
-            match cmd {
-                DrawCommand::EndLayer => {
-                    i += 1;
-                    continue;
-                }
-                DrawCommand::PushMask { spec, .. } => {
-                    if !backend.push_mask(spec) {
-                        stats.mark_mask_stack_overflow();
-                    }
-                    if let Some(kind) = cmd.task_kind() {
-                        stats.mark_draw_dispatch_for(kind, dispatch.classify(kind));
-                    }
-                    stats.mark_command_kind(cmd);
-                    i += 1;
-                    continue;
-                }
-                DrawCommand::PushBitmapMask {
-                    rect,
-                    image,
-                    inverted,
-                    opacity,
-                    ..
-                } => {
-                    let spec = MaskSpec::bitmap(rect, image)
-                        .inverted(inverted)
-                        .opacity(opacity);
-                    if !backend.push_mask(spec) {
-                        stats.mark_mask_stack_overflow();
-                    }
-                    if let Some(kind) = cmd.task_kind() {
-                        stats.mark_draw_dispatch_for(kind, dispatch.classify(kind));
-                    }
-                    stats.mark_command_kind(cmd);
-                    i += 1;
-                    continue;
-                }
-                DrawCommand::PopMask => {
-                    let _ = backend.pop_mask();
-                    i += 1;
-                    continue;
-                }
-                _ => {}
-            }
-            if let Some(kind) = cmd.task_kind() {
-                backend.draw_dispatched_command(cmd, dispatch.classify(kind), stats);
-            } else {
-                backend.draw_command(cmd);
-            }
-            stats.mark_command_kind(cmd);
-            stats.command_drawn(cmd.clipped_bounds(clip));
-            i += 1;
-        }
-        if active_clip.is_some() {
-            backend.set_clip(None);
-            stats.clip_changed();
-        }
-        backend.clear_masks();
+        self.execute_run_planner::<B, DEFAULT_DRAW_CHAIN_OPS>(backend, None, dispatch, stats);
     }
 
     pub fn execute_dirty_on<B: RenderBackend, const D: usize>(
@@ -1510,7 +1477,6 @@ impl<const N: usize> DrawList<N> {
         stats.mark_overflowed(self.overflowed || dirty.overflowed());
         let dispatch = DrawBackendDispatch::from_capabilities(backend.capabilities());
         let mut dirty_index = 0;
-        let mut active_clip = None;
         while dirty_index < dirty.len() {
             let Some(dirty_rect) = dirty.rect(dirty_index) else {
                 dirty_index += 1;
@@ -1522,34 +1488,260 @@ impl<const N: usize> DrawList<N> {
             }
 
             stats.dirty_pass_started();
-            let chain = self.compile_draw_chain::<DEFAULT_DRAW_CHAIN_OPS>(Some(dirty_rect));
-            let _ = backend.submit_draw_chain(&chain, stats);
-            let mut i = 0;
-            while i < self.len {
-                let cmd = self.cmds[i];
-                let command_clip = self.clips[i];
-                let effective_clip = match command_clip {
-                    Some(clip) => clip.clipped_to(dirty_rect),
-                    None => dirty_rect,
-                };
-                stats.command_seen();
+            self.execute_run_planner::<B, DEFAULT_DRAW_CHAIN_OPS>(
+                backend,
+                Some(dirty_rect),
+                dispatch,
+                stats,
+            );
+            dirty_index += 1;
+        }
+    }
 
-                if let DrawCommand::BeginLayer { rect, spec, .. } = cmd {
+    fn plan_draw_chain_runs<const OPS: usize>(
+        &self,
+        chain: &DrawChain<OPS>,
+        capabilities: BackendCapabilities,
+    ) -> DrawChainRunPlan<OPS> {
+        let mut plan = DrawChainRunPlan::new();
+        let ops = chain.ops();
+        if ops.is_empty() {
+            return plan;
+        }
+
+        let supports_chain = capabilities.draw_chain && capabilities.max_chain_ops > 0;
+        let mut max_ops = capabilities.max_chain_ops.max(1).min(ops.len().max(1));
+        if !supports_chain {
+            max_ops = ops.len().max(1);
+        }
+
+        let mut current = DrawChainRun::EMPTY;
+        let mut started = false;
+        let mut run_len = 0usize;
+        let mut run_has_render = false;
+        let mut run_candidate = false;
+        let mut run_index = 0usize;
+
+        while run_index < ops.len() {
+            let op = ops[run_index];
+            let op_candidate = supports_chain && op.kind.supports(capabilities);
+            let split_by_state = started && run_has_render && op.kind.is_stateful();
+            let split_by_candidate = started && run_candidate != op_candidate;
+            let split_by_capacity = supports_chain && started && run_len >= max_ops;
+            let split = split_by_state || split_by_candidate || split_by_capacity;
+
+            if split {
+                plan.push(current);
+                plan.splits = plan.splits.saturating_add(1);
+                current = DrawChainRun::EMPTY;
+                started = false;
+                run_len = 0;
+                run_has_render = false;
+                run_candidate = false;
+            }
+
+            if !started {
+                current = DrawChainRun {
+                    op_start: saturating_u16(run_index),
+                    op_end: saturating_u16(run_index.saturating_add(1)),
+                    command_start: op.command_start,
+                    command_end: op.command_start.saturating_add(op.command_len),
+                    candidate: op_candidate,
+                    bounds: op.bounds,
+                };
+                run_candidate = op_candidate;
+                run_has_render = op.command_len > 0;
+                run_len = 1;
+                started = true;
+            } else {
+                current.op_end = saturating_u16(run_index.saturating_add(1));
+                current.candidate = current.candidate && op_candidate;
+                if op.command_len > 0 {
+                    run_has_render = true;
+                    let command_start = op.command_start as usize;
+                    let command_end = command_start
+                        .saturating_add(op.command_len as usize);
+                    if command_start < current.command_start as usize {
+                        current.command_start = saturating_u16(command_start);
+                    }
+                    if command_end > current.command_end as usize {
+                        current.command_end = saturating_u16(command_end);
+                    }
+                }
+                current.bounds = current.bounds.union(op.bounds);
+                run_len = run_len.saturating_add(1);
+            }
+
+            run_index += 1;
+        }
+
+        if started {
+            plan.push(current);
+        }
+
+        let mut index = 1usize;
+        while index < plan.len {
+            let previous = plan.runs[index - 1];
+            let current = plan.runs[index];
+            if previous.candidate && current.candidate && !previous.bounds.intersects(current.bounds) {
+                plan.parallel_hints = plan.parallel_hints.saturating_add(1);
+            }
+            index += 1;
+        }
+        plan
+    }
+
+    fn execute_run_planner<B: RenderBackend, const OPS: usize>(
+        &self,
+        backend: &mut B,
+        dirty_clip: Option<Rect>,
+        dispatch: DrawBackendDispatch,
+        stats: &mut RenderStats,
+    ) {
+        let capabilities = backend.capabilities();
+        let chain = self.compile_draw_chain::<OPS>(dirty_clip);
+        let run_plan = self.plan_draw_chain_runs::<OPS>(&chain, capabilities);
+        let mut split_hints = run_plan.splits;
+        while split_hints > 0 {
+            stats.mark_draw_chain_split();
+            split_hints -= 1;
+        }
+        let mut parallel_hints = run_plan.parallel_hints;
+        while parallel_hints > 0 {
+            stats.mark_draw_chain_parallel_hint();
+            parallel_hints -= 1;
+        }
+
+        let mut active_clip = None;
+        let mut run_index = 0usize;
+        while run_index < run_plan.len {
+            let run = run_plan.runs[run_index];
+            let mut run_chain: DrawChain<OPS> = DrawChain::new();
+            let mut op_index = run.op_start as usize;
+            while op_index < run.op_end as usize {
+                let _ = run_chain.push(chain.ops()[op_index]);
+                op_index += 1;
+            }
+            if run_chain.is_empty() {
+                run_index += 1;
+                continue;
+            }
+
+            let result = if run.candidate {
+                backend.submit_draw_chain(&run_chain, stats)
+            } else {
+                DrawChainSubmitResult::Fallback
+            };
+            if run.candidate {
+                stats.mark_draw_chain_submit(run_chain.stats(), result);
+            } else {
+                stats.mark_draw_chain_submit(run_chain.stats(), DrawChainSubmitResult::Fallback);
+            }
+            stats.mark_draw_chain_run_result(result);
+            if result != DrawChainSubmitResult::Submitted {
+                self.execute_command_range(
+                    backend,
+                    run.command_start as usize,
+                    run.command_end as usize,
+                    dirty_clip,
+                    dispatch,
+                    &mut active_clip,
+                    stats,
+                );
+                if !run.candidate {
+                    active_clip = None;
+                }
+            } else {
+                active_clip = None;
+            }
+            run_index += 1;
+        }
+
+        if active_clip.is_some() {
+            backend.set_clip(None);
+            stats.clip_changed();
+        }
+        backend.clear_masks();
+    }
+
+    fn execute_command_range<B: RenderBackend>(
+        &self,
+        backend: &mut B,
+        start: usize,
+        end: usize,
+        dirty_clip: Option<Rect>,
+        dispatch: DrawBackendDispatch,
+        active_clip: &mut Option<Rect>,
+        stats: &mut RenderStats,
+    ) {
+        if start >= end {
+            return;
+        }
+
+        let mut i = start;
+        while i < end {
+            let cmd = self.cmds[i];
+            let command_clip = self.clips[i];
+            let effective_clip = match dirty_clip {
+                Some(dirty) => match command_clip {
+                    Some(clip) => Some(clip.clipped_to(dirty)),
+                    None => Some(dirty),
+                },
+                None => command_clip,
+            };
+            stats.command_seen();
+
+            match cmd {
+                DrawCommand::BeginLayer { rect, spec, .. } => {
                     let end = self.find_layer_end(i + 1);
                     let Some(layer_bounds) = cmd.bounds() else {
                         i = end.saturating_add(1);
                         continue;
                     };
-                    if !layer_bounds.intersects(effective_clip) {
-                        stats.command_clipped();
+                    if let Some(dirty) = dirty_clip {
+                        let Some(effective_clip) = effective_clip else {
+                            i = end.saturating_add(1);
+                            continue;
+                        };
+                        if effective_clip.is_empty() || !layer_bounds.intersects(dirty) {
+                            stats.command_clipped();
+                            i = end.saturating_add(1);
+                            continue;
+                        }
+                        let layer_clip = Some(effective_clip);
+                        if layer_clip != *active_clip {
+                            backend.set_clip(layer_clip);
+                            stats.effective_clip_changed();
+                            *active_clip = layer_clip;
+                        }
+                        if let Some(kind) = cmd.task_kind() {
+                            let _ = backend.draw_dispatched_layer_commands(
+                                rect,
+                                spec,
+                                &self.cmds[i + 1..end],
+                                &self.clips[i + 1..end],
+                                dispatch.classify(kind),
+                                stats,
+                            );
+                        } else {
+                            let _ = backend.draw_layer_commands(
+                                rect,
+                                spec,
+                                &self.cmds[i + 1..end],
+                                &self.clips[i + 1..end],
+                                stats,
+                            );
+                        }
+                        stats.mark_command_kind(cmd);
+                        stats.command_drawn(Some(layer_bounds.clipped_to(effective_clip)));
                         i = end.saturating_add(1);
                         continue;
                     }
-                    let clip = Some(effective_clip);
-                    if clip != active_clip {
-                        backend.set_clip(clip);
-                        stats.effective_clip_changed();
-                        active_clip = clip;
+                    let layer_clip = command_clip;
+                    if layer_clip != *active_clip {
+                        backend.set_clip(layer_clip);
+                        stats.clip_changed();
+                        *active_clip = layer_clip;
                     }
                     if let Some(kind) = cmd.task_kind() {
                         let _ = backend.draw_dispatched_layer_commands(
@@ -1570,95 +1762,110 @@ impl<const N: usize> DrawList<N> {
                         );
                     }
                     stats.mark_command_kind(cmd);
-                    stats.command_drawn(Some(layer_bounds.clipped_to(effective_clip)));
+                    stats.command_drawn(cmd.clipped_bounds(layer_clip));
                     i = end.saturating_add(1);
                     continue;
                 }
-
-                match cmd {
-                    DrawCommand::EndLayer => {
-                        i += 1;
-                        continue;
-                    }
-                    DrawCommand::PushMask { spec, .. } => {
-                        if !backend.push_mask(spec) {
-                            stats.mark_mask_stack_overflow();
-                        }
-                        if let Some(kind) = cmd.task_kind() {
-                            stats.mark_draw_dispatch_for(kind, dispatch.classify(kind));
-                        }
-                        stats.mark_command_kind(cmd);
-                        i += 1;
-                        continue;
-                    }
-                    DrawCommand::PushBitmapMask {
-                        rect,
-                        image,
-                        inverted,
-                        opacity,
-                        ..
-                    } => {
-                        let spec = MaskSpec::bitmap(rect, image)
-                            .inverted(inverted)
-                            .opacity(opacity);
-                        if !backend.push_mask(spec) {
-                            stats.mark_mask_stack_overflow();
-                        }
-                        if let Some(kind) = cmd.task_kind() {
-                            stats.mark_draw_dispatch_for(kind, dispatch.classify(kind));
-                        }
-                        stats.mark_command_kind(cmd);
-                        i += 1;
-                        continue;
-                    }
-                    DrawCommand::PopMask => {
-                        let _ = backend.pop_mask();
-                        i += 1;
-                        continue;
-                    }
-                    _ => {}
-                }
-
-                if effective_clip.is_empty() {
-                    stats.command_clipped();
+                DrawCommand::EndLayer => {
                     i += 1;
                     continue;
                 }
+                DrawCommand::PushMask { spec, .. } => {
+                    if !backend.push_mask(spec) {
+                        stats.mark_mask_stack_overflow();
+                    }
+                    if let Some(kind) = cmd.task_kind() {
+                        if dirty_clip.is_some() {
+                            stats.effective_clip_changed();
+                        }
+                        stats.mark_draw_dispatch_for(kind, dispatch.classify(kind));
+                    }
+                    stats.mark_command_kind(cmd);
+                    i += 1;
+                    continue;
+                }
+                DrawCommand::PushBitmapMask {
+                    rect,
+                    image,
+                    inverted,
+                    opacity,
+                    ..
+                } => {
+                    let spec = MaskSpec::bitmap(rect, image)
+                        .inverted(inverted)
+                        .opacity(opacity);
+                    if !backend.push_mask(spec) {
+                        stats.mark_mask_stack_overflow();
+                    }
+                    if let Some(kind) = cmd.task_kind() {
+                        if dirty_clip.is_some() {
+                            stats.effective_clip_changed();
+                        }
+                        stats.mark_draw_dispatch_for(kind, dispatch.classify(kind));
+                    }
+                    stats.mark_command_kind(cmd);
+                    i += 1;
+                    continue;
+                }
+                DrawCommand::PopMask => {
+                    let _ = backend.pop_mask();
+                    i += 1;
+                    continue;
+                }
+                _ => {}
+            }
 
-                let bounds = cmd.bounds();
+            if dirty_clip.is_some() && effective_clip.is_none_or(|clip| clip.is_empty()) {
+                stats.command_clipped();
+                i += 1;
+                continue;
+            }
+
+            let bounds = cmd.bounds();
+            if let Some(dirty) = dirty_clip {
                 if let Some(bounds) = bounds {
-                    if !bounds.intersects(effective_clip) {
+                    if !bounds.intersects(dirty) {
                         stats.command_clipped();
                         i += 1;
                         continue;
                     }
                 }
-
-                let clip = Some(effective_clip);
-                if clip != active_clip {
-                    backend.set_clip(clip);
-                    stats.effective_clip_changed();
-                    active_clip = clip;
-                }
-                if let Some(kind) = cmd.task_kind() {
-                    backend.draw_dispatched_command(cmd, dispatch.classify(kind), stats);
-                } else {
-                    backend.draw_command(cmd);
-                }
-                stats.mark_command_kind(cmd);
-                stats.command_drawn(match bounds {
-                    Some(bounds) => Some(bounds.clipped_to(effective_clip)),
-                    None => Some(effective_clip),
-                });
-                i += 1;
+            } else if let Some(bounds) = bounds {
+                let _ = bounds;
             }
-            dirty_index += 1;
+
+            let clip = if dirty_clip.is_some() {
+                effective_clip
+            } else {
+                command_clip
+            };
+            if clip != *active_clip {
+                backend.set_clip(clip);
+                if dirty_clip.is_some() {
+                    stats.effective_clip_changed();
+                } else {
+                    stats.clip_changed();
+                }
+                *active_clip = clip;
+            }
+
+            if let Some(kind) = cmd.task_kind() {
+                backend.draw_dispatched_command(cmd, dispatch.classify(kind), stats);
+            } else {
+                backend.draw_command(cmd);
+            }
+            stats.mark_command_kind(cmd);
+            stats.command_drawn(if dirty_clip.is_some() {
+                match (bounds, effective_clip) {
+                    (Some(bounds), Some(effective_clip)) => Some(bounds.clipped_to(effective_clip)),
+                    (None, Some(effective_clip)) => Some(effective_clip),
+                    _ => None,
+                }
+            } else {
+                cmd.clipped_bounds(command_clip)
+            });
+            i += 1;
         }
-        if active_clip.is_some() {
-            backend.set_clip(None);
-            stats.clip_changed();
-        }
-        backend.clear_masks();
     }
 
     fn find_layer_end(&self, start: usize) -> usize {

@@ -3181,6 +3181,53 @@ fn push_stats_commands(
         5,
         Color::rgba(255, 170, 80, 220),
     );
+    push_text(
+        list,
+        x,
+        y + 456,
+        "V310 RUN/HW/SW/SPL/PAR",
+        Color::rgba(238, 250, 255, 210),
+    );
+    push_bar(
+        list,
+        x,
+        y + 469,
+        stats.draw_chain_runs.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(82, 214, 232, 220),
+    );
+    push_bar(
+        list,
+        x + 46,
+        y + 469,
+        stats.draw_chain_hw_runs.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(0, 150, 136, 220),
+    );
+    push_bar(
+        list,
+        x + 92,
+        y + 469,
+        stats.draw_chain_sw_runs.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(255, 170, 80, 220),
+    );
+    push_bar(
+        list,
+        x + 138,
+        y + 469,
+        stats.draw_chain_splits.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(255, 96, 96, 220),
+    );
+    push_bar(
+        list,
+        x,
+        y + 475,
+        stats.draw_chain_parallel_hints.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(80, 132, 248, 220),
+    );
 }
 
 fn task_dispatch_hits(stats: RenderStats, kind: DrawTaskKind) -> u32 {

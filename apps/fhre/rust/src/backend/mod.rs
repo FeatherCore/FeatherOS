@@ -194,6 +194,54 @@ pub enum DrawChainOpKind {
     FallbackRange,
 }
 
+impl DrawChainOpKind {
+    pub(crate) const fn is_fallback(self) -> bool {
+        matches!(self, Self::FallbackRange)
+    }
+
+    pub(crate) const fn is_stateful(self) -> bool {
+        matches!(
+            self,
+            Self::Clip | Self::MaskEnter | Self::MaskExit | Self::LayerEnter | Self::LayerExit
+        )
+    }
+
+    pub(crate) const fn required_feature(self) -> DrawFeatureFlags {
+        match self {
+            Self::SolidFill | Self::AlphaFill => DrawFeatureFlags::FILL,
+            Self::ImageBlit | Self::ImageBlend => DrawFeatureFlags::IMAGE,
+            Self::MaskEnter | Self::MaskExit => DrawFeatureFlags::MASK_RECT,
+            Self::LayerEnter | Self::LayerExit => DrawFeatureFlags::LAYER,
+            Self::Clip | Self::FallbackRange => DrawFeatureFlags::NONE,
+        }
+    }
+
+    pub(crate) const fn supports(self, capabilities: BackendCapabilities) -> bool {
+        if !capabilities.draw_chain {
+            return false;
+        }
+        if self.is_fallback() {
+            return false;
+        }
+        if capabilities.chain_draw_features.bits() == DrawFeatureFlags::NONE.bits() {
+            return false;
+        }
+        if !capabilities.chain_draw_features.contains(self.required_feature()) {
+            return false;
+        }
+        match self {
+            Self::Clip => capabilities.clip_rect,
+            Self::MaskEnter | Self::MaskExit => capabilities.mask,
+            Self::LayerEnter | Self::LayerExit => capabilities.layers,
+            Self::SolidFill
+            | Self::AlphaFill
+            | Self::ImageBlit
+            | Self::ImageBlend => capabilities.chain_draw_features.contains(self.required_feature()),
+            Self::FallbackRange => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DrawChainOp {
     pub kind: DrawChainOpKind,
@@ -909,6 +957,11 @@ pub struct RenderStats {
     pub draw_chain_fallbacks: u32,
     pub draw_chain_unsupported: u32,
     pub draw_chain_overflows: u32,
+    pub draw_chain_runs: u32,
+    pub draw_chain_hw_runs: u32,
+    pub draw_chain_sw_runs: u32,
+    pub draw_chain_splits: u32,
+    pub draw_chain_parallel_hints: u32,
     pub task_draw_chain_hits: DrawTaskCounters,
     pub codec_pipeline_candidates: u32,
     pub codec_pipeline_stages: u32,
@@ -1040,6 +1093,11 @@ impl RenderStats {
             draw_chain_fallbacks: 0,
             draw_chain_unsupported: 0,
             draw_chain_overflows: 0,
+            draw_chain_runs: 0,
+            draw_chain_hw_runs: 0,
+            draw_chain_sw_runs: 0,
+            draw_chain_splits: 0,
+            draw_chain_parallel_hints: 0,
             task_draw_chain_hits: DrawTaskCounters::new(),
             codec_pipeline_candidates: 0,
             codec_pipeline_stages: 0,
@@ -1604,6 +1662,17 @@ impl RenderStats {
         self.draw_chain_overflows = self
             .draw_chain_overflows
             .saturating_add(other.draw_chain_overflows);
+        self.draw_chain_runs = self.draw_chain_runs.saturating_add(other.draw_chain_runs);
+        self.draw_chain_hw_runs = self
+            .draw_chain_hw_runs
+            .saturating_add(other.draw_chain_hw_runs);
+        self.draw_chain_sw_runs = self
+            .draw_chain_sw_runs
+            .saturating_add(other.draw_chain_sw_runs);
+        self.draw_chain_splits = self.draw_chain_splits.saturating_add(other.draw_chain_splits);
+        self.draw_chain_parallel_hints = self
+            .draw_chain_parallel_hints
+            .saturating_add(other.draw_chain_parallel_hints);
         self.task_draw_chain_hits.merge(other.task_draw_chain_hits);
         self.codec_pipeline_candidates = self
             .codec_pipeline_candidates
@@ -1802,6 +1871,26 @@ impl RenderStats {
             }
         }
         self.mark_draw_chain_stats(chain);
+    }
+
+    pub fn mark_draw_chain_run_result(&mut self, result: DrawChainSubmitResult) {
+        self.draw_chain_runs = self.draw_chain_runs.saturating_add(1);
+        match result {
+            DrawChainSubmitResult::Submitted => {
+                self.draw_chain_hw_runs = self.draw_chain_hw_runs.saturating_add(1);
+            }
+            DrawChainSubmitResult::Unsupported | DrawChainSubmitResult::Fallback => {
+                self.draw_chain_sw_runs = self.draw_chain_sw_runs.saturating_add(1);
+            }
+        }
+    }
+
+    pub fn mark_draw_chain_split(&mut self) {
+        self.draw_chain_splits = self.draw_chain_splits.saturating_add(1);
+    }
+
+    pub fn mark_draw_chain_parallel_hint(&mut self) {
+        self.draw_chain_parallel_hints = self.draw_chain_parallel_hints.saturating_add(1);
     }
 
     pub fn mark_draw_dispatch(&mut self, path: DrawPathKind) {

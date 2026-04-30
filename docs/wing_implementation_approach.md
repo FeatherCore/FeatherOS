@@ -11,6 +11,15 @@ FHRE = no_std Rust 纯 3D 轻量游戏/图形引擎核心 + 绘制后端抽象 +
 
 FHRE 的“纯 3D 世界模型”不是历史参考，而是底层主线：Wing 的 UI 节点也应该是 FHRE 3D 世界中位于默认 Screen Canvas 平面 `z=0` 的对象。Wing 第一版不需要做复杂 3D UI，但它不能绕过 `Transform3D + Camera + Screen Canvas` 这套模型。FHRE 本身仍然要具备游戏运行时能力，后续 Wing 内的游戏应用可以直接基于 FHRE 开发。
 
+## V3.10 对 FHRE run 级链路调度的适配边界
+
+V3.10 继续保持 Wing 不扩页面/route 的边界，只把 FHRE 的 run 级链路调度能力纳入 shell 观测和适配：
+
+- Wing 不生成私有 draw chain，不关心如何拼接 Layer/Mask/Clip；页面层只输出 `UiBuilder -> UiTree -> FHRE DrawCommand`。
+- `DrawList` 仍由 FHRE 生成 draw commands/chain。Wing 只消费 `DrawChain` run 统计（run/hw run/sw run/split/parallel hint）与现有 `RenderStats`（top chain task / chain fallback），用于定位卡顿来源。
+- `RenderStats` 中新增 run 级计数作为 shell 判断条件：有提交 run 时优先看 `draw_chain_hw_runs`，有回退 run 时优先检查对应命令区间是否是局部回退，避免把整帧当作整体硬件失败。
+- `wing_demo` 不持有私有 codec 或硬件 backend 接口，不新增 page，不私有 raster/mask/layer/framebuffer 解码路径；只验证 Home、AllApps、Settings、Notifications、AppSwitcher、FHRE Sample 在 FHRE 资源、draw chain、codec stats 框架下稳定运行。
+
 ## V3.9 对 FHRE 硬件可插手管线的适配边界
 
 V3.9 仍不扩 Wing route/page。Wing 只消费 FHRE 暴露的 draw/resource/cache/stats API，不拥有 DMA2D/GPU draw chain，也不拥有 PNG/JPEG/TTF/SVG 硬件 decoder stage。

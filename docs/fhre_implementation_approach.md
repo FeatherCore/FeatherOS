@@ -44,6 +44,26 @@ Wing 游戏应用 = 基于 FHRE 的 game loop、输入、scene 和渲染能力�
 - `fhre_build.sh` 必须能独立构建 `fhre_demo`。
 - `wing_build.sh` 必须也能编入 `fhre_demo`，用于 Wing 调试时确认 FHRE 正常。
 
+## V3.10 运行链路可串接编排
+
+V3.10 在 V3.9 的基础上把绘制候选链升级为 **run 级编排器**：在顺序不变前提下，尽量把可加速操作拼成长片段提交，减少硬件/软件切换次数；无法提交的部分仅以局部回退方式执行，避免重绘整帧。
+
+- `DrawList` 在 full 或 dirty pass 里：
+  - 先按 dirty clip 编译 `DrawChain`；
+  - 根据 backend 能力、`max_chain_ops`、状态切换边界、候选能力一致性切成 run；
+  - 每个 run 独立尝试 `submit_draw_chain()`。
+- 回退策略（最小打断）：
+  - `submit_draw_chain()` 返回 `Unsupported/Fallback` 时，只回退执行当前 run 对应命令区间。
+  - clip/layer/mask 状态变化会作为 run 边界候选，保持命令语义并减少无效回退。
+- 并行能力：
+  - 编排阶段仅采集 `parallel hints`（非重叠候选 run）作为下一步调度提示，不在本阶段执行并行绘制。
+- 统计与观测：
+  - `RenderStats` 增加 `draw_chain_runs`、`draw_chain_hw_runs`、`draw_chain_sw_runs`、`draw_chain_splits`、`draw_chain_parallel_hints`；
+  - run 级计数与 existing `top chain task/fallback` 一起保留，`fhre_demo` HUD 继续展示 V3.10 行。
+- 接口兼容：`DrawChain`、`DrawBackendDispatch`、`BackendCapabilities` 及 `RenderBackend::submit_draw_chain()` 保持接口稳定扩展；默认软件 backend 仍返回 `Unsupported` 并走原软件渲染结果。
+
+本阶段不改变 FHRE 软件像素输出，只增强“软硬兼容调度”能力，为后续 DMA2D/GPU backend 提供更少打断、可直接下发的 run 边界。
+
 ## V3.9 硬件可插手绘制/资源管线
 
 V3.9 继续 FHRE-first，但不直接绑定 DMA2D、PXP、VG-Lite、OpenGL ES 或某个具体芯片。目标是先把 draw 与 codec 拆成硬件更容易接管的固定容量 descriptor/stage 边界：软件 `Surface` 渲染结果保持不变，真实硬件后端未来只需要覆写提交入口。
