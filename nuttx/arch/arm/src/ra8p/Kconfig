@@ -519,6 +519,24 @@ config RA8P_GLCDC_BPP
 	help
 	  Color depth (16, 24, or 32 bits per pixel).
 
+comment "CRC Configuration"
+
+config RA8P_CRC
+	bool "CRC (Cyclic Redundancy Check)"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable CRC hardware acceleration support.
+
+comment "Entropy Configuration"
+
+config RA8P_ENTROPY
+	bool "Entropy (True Random Number Generator)"
+	default n
+	depends on ARCH_CHIP_R7KA8P1KFLCAC
+	help
+	  Enable true random number generator (TRNG) support.
+
 comment "Power Management Configuration"
 
 config RA8P_POWER
