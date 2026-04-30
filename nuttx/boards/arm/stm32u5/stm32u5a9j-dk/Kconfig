@@ -5,4 +5,77 @@
 
 if ARCH_BOARD_STM32U5A9J_DK
 
+comment "STM32U5A9J-DK LCD Configuration"
+
+choice
+	prompt "LCD Interface"
+	default STM32U5A9J_DK_LCD_MIPI_DSI
+
+config STM32U5A9J_DK_LCD_MIPI_DSI
+	bool "MIPI DSI LCD"
+	select STM32U5_LTDC
+	select STM32U5_DSI
+	---help---
+		Enable support for the MIPI DSI LCD panel on the STM32U5A9J-DK.
+
+config STM32U5A9J_DK_LCD_NONE
+	bool "No LCD"
+	---help---
+		No LCD support.
+
+endchoice
+
+config STM32U5A9J_DK_LCD
+	bool
+	default y if STM32U5A9J_DK_LCD_MIPI_DSI
+
+if STM32U5A9J_DK_LCD
+
+config STM32U5A9J_DK_LCD_WIDTH
+	int "LCD Width"
+	default 720
+	---help---
+		LCD panel width in pixels.
+
+config STM32U5A9J_DK_LCD_HEIGHT
+	int "LCD Height"
+	default 1280
+	---help---
+		LCD panel height in pixels.
+
+config STM32U5_LTDC_FB_BASE
+	hex "LTDC Frame Buffer Base Address"
+	default 0x90000000
+	---help---
+		Base address of the frame buffer in external memory (SDRAM).
+
+config STM32U5_LTDC_FB_SIZE
+	int "LTDC Frame Buffer Size"
+	default 1843200
+	---help---
+		Size of the frame buffer in bytes (width * height * 2 for RGB565).
+
+choice
+	prompt "LTDC Pixel Format"
+	default STM32U5_LTDC_FMT_16RGB
+
+config STM32U5_LTDC_FMT_16RGB
+	bool "RGB565 (16-bit)"
+
+config STM32U5_LTDC_FMT_24RGB
+	bool "RGB888 (24-bit)"
+
+endchoice
+
+endif # STM32U5A9J_DK_LCD
+
+comment "STM32U5A9J-DK Touchscreen Configuration"
+
+config STM32U5A9J_DK_TOUCHSCREEN
+	bool "Enable touchscreen support"
+	default y if STM32U5A9J_DK_LCD
+	select INPUT_FT5X06
+	---help---
+		Enable support for the FT5X06 touchscreen controller.
+
 endif
