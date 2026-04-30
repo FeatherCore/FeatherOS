@@ -539,17 +539,34 @@ comment "NPU (Neural Processing Unit) Configuration"
 
 config RA8P_NPU
 	bool "NPU (Ethos-U55)"
-	default n
-	depends on ARCH_CHIP_R7KA8P1KFLCAC && RA8P_NPU_ETHOS_U55
-	help
-	  Enable Ethos-U55 NPU support for AI/ML operations.
+	default n"
+	depends on ARCH_CHIP_R7KA8P1KFLCAC && RA8P_NPU_ETHOS_U55"
+	help:
+	  Enable Ethos-U55 NPU support for AI/ML operations."
 
-config RA8P_NPU_MACS
+config RA8P_NPU_MACS"
 	int "Number of MAC Units"
-	default 512
-	depends on RA8P_NPU
-	help
-	  Number of MAC (Multiply-Accumulate) units (256, 512, or 1024).
+	default 512"
+	depends on RA8P_NPU"
+	help:
+	  Number of MAC (Multiply-Accumulate) units (256, 512, or 1024)."
+
+comment "MBox (Mailbox) Configuration"
+
+config RA8P_MBOX"
+	bool "MBox (Mailbox)"
+	default n"
+	depends on ARCH_CHIP_R7KA8P1KFLCAC"
+	help:
+	  Enable MBox (Mailbox) for inter-processor communication."
+
+config RA8P_MBOX_CHANNELS"
+	int "Number of Channels"
+	default 8"
+	range 1 8"
+	depends on RA8P_MBOX"
+	help:
+	  Number of mailbox channels (1-8)."
 
 comment "GLCDC Configuration"
 
