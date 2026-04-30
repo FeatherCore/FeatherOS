@@ -61,4 +61,35 @@ if(CONFIG_USBDEV)
   list(APPEND SRCS stm32_otgdev.c)
 endif()
 
+if(CONFIG_STM32U5_RNG)
+  if(CONFIG_DEV_RANDOM OR CONFIG_DEV_URANDOM_ARCH)
+    list(APPEND SRCS stm32u5_rng.c)
+  endif()
+endif()
+
+if(CONFIG_RTC)
+  list(APPEND SRCS stm32u5_rtc.c)
+endif()
+
+if(CONFIG_STM32U5_IWDG)
+  if(CONFIG_WATCHDOG)
+    list(APPEND SRCS stm32u5_iwdg.c)
+  endif()
+endif()
+
+if(CONFIG_STM32U5_WWDG)
+  if(CONFIG_WATCHDOG)
+    list(APPEND SRCS stm32u5_wwdg.c)
+  endif()
+endif()
+
+if(CONFIG_STM32U5_LPTIM1 OR CONFIG_STM32U5_LPTIM2 OR
+   CONFIG_STM32U5_LPTIM3 OR CONFIG_STM32U5_LPTIM4)
+  list(APPEND SRCS stm32u5_lptim.c)
+endif()
+
+if(CONFIG_STM32U5_GPDMA1 OR CONFIG_STM32U5_LPDMA1)
+  list(APPEND SRCS stm32u5_dma.c)
+endif()
+
 target_sources(arch PRIVATE ${SRCS})

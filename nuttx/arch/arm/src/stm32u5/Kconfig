@@ -3634,4 +3634,120 @@ endchoice # SAI2 synchronization enable
 
 endmenu
 
+menu "Random Number Generator (RNG)"
+
+config STM32U5_RNG
+	bool "RNG support"
+	default n
+	---help---
+		Enable the Random Number Generator (RNG) peripheral.
+
+if STM32U5_RNG
+
+config STM32U5_RNG_CED
+	bool "Clock error detection"
+	default y
+	---help---
+		Enable clock error detection. When enabled, the RNG will detect
+		and report clock errors.
+
+endif # STM32U5_RNG
+
+endmenu
+
+menu "Real-Time Clock (RTC)"
+
+config STM32U5_RTC
+	bool "RTC support"
+	default n
+	select RTC
+	---help---
+		Enable the Real-Time Clock (RTC) peripheral.
+
+if STM32U5_RTC
+
+config STM32U5_RTC_HSECLOCK
+	bool "Use HSE as RTC clock"
+	default n
+	---help---
+		Use HSE (divided by 32) as the RTC clock source instead of LSE.
+
+config STM32U5_RTC_LSICLOCK
+	bool "Use LSI as RTC clock"
+	default n
+	---help---
+		Use LSI as the RTC clock source instead of LSE.
+
+config STM32U5_HAVE_RTC_SUBSECONDS
+	bool "RTC sub-second support"
+	default y
+	---help---
+		Enable sub-second precision for RTC time readings.
+
+endif # STM32U5_RTC
+
+endmenu
+
+menu "Low-Power Timer (LPTIM)"
+
+config STM32U5_LPTIM1
+	bool "LPTIM1 support"
+	default n
+	---help---
+		Enable Low-Power Timer 1.
+
+config STM32U5_LPTIM2
+	bool "LPTIM2 support"
+	default n
+	---help---
+		Enable Low-Power Timer 2.
+
+config STM32U5_LPTIM3
+	bool "LPTIM3 support"
+	default n
+	---help---
+		Enable Low-Power Timer 3.
+
+config STM32U5_LPTIM4
+	bool "LPTIM4 support"
+	default n
+	---help---
+		Enable Low-Power Timer 4.
+
+endmenu
+
+menu "Watchdog Timer (WDT)"
+
+config STM32U5_IWDG
+	bool "IWDG support"
+	default n
+	select WATCHDOG
+	---help---
+		Enable Independent Watchdog (IWDG) support.
+
+config STM32U5_WWDG
+	bool "WWDG support"
+	default n
+	select WATCHDOG
+	---help---
+		Enable Window Watchdog (WWDG) support.
+
+endmenu
+
+menu "DMA Configuration"
+
+config STM32U5_GPDMA1
+	bool "GPDMA1 support"
+	default n
+	---help---
+		Enable General Purpose DMA 1 controller.
+
+config STM32U5_LPDMA1
+	bool "LPDMA1 support"
+	default n
+	---help---
+		Enable Low-Power DMA 1 controller.
+
+endmenu
+
 endif # ARCH_CHIP_STM32U5

@@ -195,6 +195,7 @@
 #define STM32_AES_BASE          (STM32_AHB2_BASE + 0x000a0000)
 #define STM32_HASH_BASE         (STM32_AHB2_BASE + 0x000a0400)
 #define STM32_RNG_BASE          (STM32_AHB2_BASE + 0x000a0800)
+#define STM32U5_RNG_BASE        STM32_RNG_BASE
 #define STM32_SAES_BASE         (STM32_AHB2_BASE + 0x000a0c00)
 #define STM32_PKA_BASE          (STM32_AHB2_BASE + 0x000a2000)
 #define STM32_OCTOSPIM_BASE     (STM32_AHB2_BASE + 0x000a4000)
@@ -228,6 +229,7 @@
 #define STM32_COMP_BASE         (STM32_APB3_BASE + 0x00005400)
 #define STM32_VREFBUF_BASE      (STM32_APB3_BASE + 0x00007400)
 #define STM32_RTC_BASE          (STM32_APB3_BASE + 0x00007800)
+#define STM32U5_RTC_BASE        STM32_RTC_BASE
 #define STM32_TAMP_BASE         (STM32_APB3_BASE + 0x00007c00)
 
 /* AHB3 Base Addresses ******************************************************/
