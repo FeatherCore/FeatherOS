@@ -1,0 +1,26 @@
+[package]
+name = "wing"
+version = "0.3.0"
+edition = "2021"
+authors = ["FeatherOS Team"]
+description = "Clean Wing shell kernel demo for NuttX + Rust"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "wing"
+path = "src/lib.rs"
+crate-type = ["staticlib", "rlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+opt-level = "z"
+
+[dependencies]
+
+[features]
+default = []

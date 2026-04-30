@@ -1,0 +1,9 @@
+config WING_CLANG
+	bool "Wing clang implementation"
+	default n
+	depends on WING
+	select FHRE_CLANG
+	---help---
+		Reserved for the parallel clang/C implementation of Wing.  The Rust
+		implementation is currently the default path.
+

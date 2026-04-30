@@ -1,11 +1,8 @@
-#
-# For a description of the syntax of this configuration file,
-# see the file kconfig-language.txt in the NuttX tools repository.
-#
-
 config WING_RUST
-	bool "Wing desktop environment (Rust version)"
-	default n
-	depends on FHRE_RUST
+	bool "Wing Rust implementation"
+	default y if WING
+	depends on WING
+	select FHRE_RUST
 	---help---
-		Enable the Wing desktop environment library built on FHRE
+		Build the primary Wing implementation as no_std Rust.  This is the
+		current mainline implementation.

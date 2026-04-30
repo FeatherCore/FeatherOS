@@ -38,7 +38,7 @@ endif
 builtin_list.c: builtin_list.h builtin_proto.h
 
 registry$(DELIM).updated:
-	$(Q) touch registry$(DELIM).updated
+	$(Q) touch -d '2 seconds ago' registry$(DELIM).updated 2>/dev/null || touch registry$(DELIM).updated
 
 define CONFILE
     if [ -n "$(strip $(2))" ]; then cat $(2) >> $1; fi

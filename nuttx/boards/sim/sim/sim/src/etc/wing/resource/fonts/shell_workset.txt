@@ -1,0 +1,4 @@
+# Wing shell glyph working set v1
+time=0108:
+scale1= 0123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,./+-<>
+scale2= 24ACEFGHIMNOPRSTWY

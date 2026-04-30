@@ -1,0 +1,6 @@
+############################################################################
+# apps/wing_old/Make.defs
+############################################################################
+
+# Historical reference only. The active Wing implementation lives in
+# apps/wing and is the only Wing directory that participates in builds.

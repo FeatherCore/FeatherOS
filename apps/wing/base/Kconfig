@@ -1,0 +1,9 @@
+config WING
+	bool "Wing lightweight UI shell"
+	default n
+	select FHRE
+	---help---
+		Wing is the declarative shell/UI layer that sits above FHRE.  The
+		project keeps parallel Rust and clang implementations.  The Rust
+		implementation is the primary path for now.
+

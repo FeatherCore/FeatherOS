@@ -36,9 +36,10 @@ if [ -f "nuttx" ]; then
     echo "可执行文件: ./nuttx"
     echo "文件大小: $(ls -lh nuttx | awk '{print $5}')"
     echo ""
-    echo "运行命令:"
-    echo "  ./nuttx"
-    echo ""
+echo "运行命令:"
+echo "  ./nuttx"
+echo "  fhre_demo"
+echo ""
 else
     echo "=========================================="
     echo "构建失败!"

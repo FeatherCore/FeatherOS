@@ -1,0 +1,7 @@
+############################################################################
+# apps/examples/lvgl_window10/Make.defs
+############################################################################
+
+ifneq ($(CONFIG_EXAMPLES_LVGL_WINDOW10),)
+CONFIGURED_APPS += $(APPDIR)/examples/lvgl_window10
+endif

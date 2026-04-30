@@ -1,0 +1,9 @@
+config FHRE
+	bool "FHRE lightweight rendering engine"
+	default n
+	---help---
+		FHRE is the low-level drawing and render-engine layer used by Wing.
+		The project keeps parallel Rust and clang implementations.  The Rust
+		implementation is the primary path for now and is designed to stay
+		no_std with no external Rust crate dependencies.
+

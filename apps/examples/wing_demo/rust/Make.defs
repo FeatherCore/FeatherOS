@@ -1,0 +1,17 @@
+############################################################################
+# apps/examples/wing_demo/rust/Make.defs
+############################################################################
+
+ifneq ($(CONFIG_EXAMPLES_WING_DEMO_RUST),)
+CONFIGURED_APPS += $(APPDIR)/examples/wing_demo/rust
+
+include $(APPDIR)/tools/Rust.mk
+RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
+
+ifeq ($(CONFIG_ARCH_SIM),y)
+EXTRA_LIBS += $(APPDIR)/examples/wing_demo/rust/target/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libwing_demo.a
+else
+EXTRA_LIBS += $(APPDIR)/examples/wing_demo/rust/target/$(RUST_TARGET)/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libwing_demo.a
+endif
+endif
+

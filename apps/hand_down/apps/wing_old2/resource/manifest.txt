@@ -1,0 +1,16 @@
+# Wing shell resource manifest v1.
+#
+# These assets are the concrete runtime resources used by the Wing shell.
+# The Cargo build script packs them into generated/wing_manifest.bin and
+# generated/wing_payload.bin, then the NuttX sim ROMFS copies those binaries
+# to /etc/wing.
+#
+# Runtime SVG icons live under fs/icons/shell/*.svg and are copied to
+# /etc/wing/resource/icons/shell/*.svg. icons/bootstrap/*.svg remains the
+# built-in fallback source. Icons are parsed by Wing's SVG store/cache and are
+# not packed as bitmap resources.
+
+wallpaper 1 portrait fs/images/shell/wallpaper_aurora_portrait.png generated/shell/wallpaper_aurora_portrait.rgb565
+wallpaper 2 portrait fs/images/shell/wallpaper_dusk_portrait.png generated/shell/wallpaper_dusk_portrait.rgb565
+wallpaper 3 landscape fs/images/shell/wallpaper_aurora_landscape.png generated/shell/wallpaper_aurora_landscape.rgb565
+wallpaper 4 landscape fs/images/shell/wallpaper_dusk_landscape.png generated/shell/wallpaper_dusk_landscape.rgb565

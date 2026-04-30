@@ -21,23 +21,13 @@ CONFIG_START_MONTH=11
 CONFIG_START_YEAR=2008
 
 # FHRE Configuration
-# Default to Rust version
-# CONFIG_FHRE=y
-# CONFIG_FHRE_CLANG=y
-# Uncomment the following line to use Rust version instead
+CONFIG_FHRE=y
 CONFIG_FHRE_RUST=y
-
-# FHRE Example Configuration
-# CONFIG_EXAMPLES_FHRE=y
-# CONFIG_EXAMPLES_FHRE_CLANG=y
-# Uncomment the following line to use Rust example instead
-CONFIG_EXAMPLES_FHRE_RUST=y
+CONFIG_EXAMPLES_FHRE_DEMO=y
+CONFIG_EXAMPLES_FHRE_DEMO_RUST=y
 
 # Set entry point to NSH shell
 CONFIG_INIT_ENTRYPOINT="nsh_main"
-# Uncomment the following line if using Rust version as entry point
-# CONFIG_INIT_ENTRYPOINT="fhre_rust_main"
-
 # Builtin Applications
 CONFIG_BUILTIN=y
 
@@ -48,7 +38,7 @@ CONFIG_NSH_READLINE=y
 CONFIG_READLINE_TABCOMPLETION=y
 CONFIG_NSH_FILE_APPS=y
 CONFIG_NSH_MOTD=y
-CONFIG_NSH_MOTD_STRING="MOTD: Feather Hybrid Render Engine Demo"
+CONFIG_NSH_MOTD_STRING="MOTD: Feather FHRE Demo"
 CONFIG_NSH_ARCHINIT=y
 CONFIG_PATH_INITIAL="/bin"
 

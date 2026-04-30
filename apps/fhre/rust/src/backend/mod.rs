@@ -1,0 +1,1357 @@
+use crate::{
+    DrawCommand, FrameStats, GlyphRunCacheStats, ImageCacheStats, LayerSpec, MaskSpec,
+    PixelFormat, PresentStats, Rect,
+};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DrawTaskKind {
+    Fill,
+    Border,
+    BoxShadow,
+    Letter,
+    Label,
+    Image,
+    Layer,
+    Line,
+    Arc,
+    Triangle,
+    MaskRect,
+    MaskBitmap,
+    Blur,
+    Vector,
+    ThreeD,
+}
+
+impl DrawTaskKind {
+    pub const COUNT: usize = 15;
+
+    pub const fn from_index(index: usize) -> Option<Self> {
+        match index {
+            0 => Some(Self::Fill),
+            1 => Some(Self::Border),
+            2 => Some(Self::BoxShadow),
+            3 => Some(Self::Letter),
+            4 => Some(Self::Label),
+            5 => Some(Self::Image),
+            6 => Some(Self::Layer),
+            7 => Some(Self::Line),
+            8 => Some(Self::Arc),
+            9 => Some(Self::Triangle),
+            10 => Some(Self::MaskRect),
+            11 => Some(Self::MaskBitmap),
+            12 => Some(Self::Blur),
+            13 => Some(Self::Vector),
+            14 => Some(Self::ThreeD),
+            _ => None,
+        }
+    }
+
+    pub const fn short_label(self) -> &'static str {
+        match self {
+            Self::Fill => "FILL",
+            Self::Border => "BORDER",
+            Self::BoxShadow => "SHADOW",
+            Self::Letter => "LETTER",
+            Self::Label => "LABEL",
+            Self::Image => "IMAGE",
+            Self::Layer => "LAYER",
+            Self::Line => "LINE",
+            Self::Arc => "ARC",
+            Self::Triangle => "TRI",
+            Self::MaskRect => "MASK",
+            Self::MaskBitmap => "BMASK",
+            Self::Blur => "BLUR",
+            Self::Vector => "VECTOR",
+            Self::ThreeD => "3D",
+        }
+    }
+
+    pub const fn as_index(self) -> usize {
+        match self {
+            Self::Fill => 0,
+            Self::Border => 1,
+            Self::BoxShadow => 2,
+            Self::Letter => 3,
+            Self::Label => 4,
+            Self::Image => 5,
+            Self::Layer => 6,
+            Self::Line => 7,
+            Self::Arc => 8,
+            Self::Triangle => 9,
+            Self::MaskRect => 10,
+            Self::MaskBitmap => 11,
+            Self::Blur => 12,
+            Self::Vector => 13,
+            Self::ThreeD => 14,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawFeatureFlags {
+    bits: u32,
+}
+
+impl DrawFeatureFlags {
+    pub const NONE: Self = Self { bits: 0 };
+    pub const FILL: Self = Self { bits: 1 << 0 };
+    pub const BORDER: Self = Self { bits: 1 << 1 };
+    pub const BOX_SHADOW: Self = Self { bits: 1 << 2 };
+    pub const LETTER: Self = Self { bits: 1 << 3 };
+    pub const LABEL: Self = Self { bits: 1 << 4 };
+    pub const IMAGE: Self = Self { bits: 1 << 5 };
+    pub const LAYER: Self = Self { bits: 1 << 6 };
+    pub const LINE: Self = Self { bits: 1 << 7 };
+    pub const ARC: Self = Self { bits: 1 << 8 };
+    pub const TRIANGLE: Self = Self { bits: 1 << 9 };
+    pub const MASK_RECT: Self = Self { bits: 1 << 10 };
+    pub const MASK_BITMAP: Self = Self { bits: 1 << 11 };
+    pub const BLUR: Self = Self { bits: 1 << 12 };
+    pub const VECTOR: Self = Self { bits: 1 << 13 };
+    pub const THREE_D: Self = Self { bits: 1 << 14 };
+    pub const ALL_SOFTWARE: Self = Self { bits: (1 << 15) - 1 };
+
+    pub const fn bits(self) -> u32 {
+        self.bits
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        (self.bits & other.bits) == other.bits
+    }
+
+    pub const fn supports(self, kind: DrawTaskKind) -> bool {
+        self.contains(Self::for_kind(kind))
+    }
+
+    pub const fn for_kind(kind: DrawTaskKind) -> Self {
+        match kind {
+            DrawTaskKind::Fill => Self::FILL,
+            DrawTaskKind::Border => Self::BORDER,
+            DrawTaskKind::BoxShadow => Self::BOX_SHADOW,
+            DrawTaskKind::Letter => Self::LETTER,
+            DrawTaskKind::Label => Self::LABEL,
+            DrawTaskKind::Image => Self::IMAGE,
+            DrawTaskKind::Layer => Self::LAYER,
+            DrawTaskKind::Line => Self::LINE,
+            DrawTaskKind::Arc => Self::ARC,
+            DrawTaskKind::Triangle => Self::TRIANGLE,
+            DrawTaskKind::MaskRect => Self::MASK_RECT,
+            DrawTaskKind::MaskBitmap => Self::MASK_BITMAP,
+            DrawTaskKind::Blur => Self::BLUR,
+            DrawTaskKind::Vector => Self::VECTOR,
+            DrawTaskKind::ThreeD => Self::THREE_D,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawTaskCounters {
+    pub counts: [u32; DrawTaskKind::COUNT],
+}
+
+impl DrawTaskCounters {
+    pub const fn new() -> Self {
+        Self {
+            counts: [0; DrawTaskKind::COUNT],
+        }
+    }
+
+    pub fn increment(&mut self, kind: DrawTaskKind) {
+        let index = kind.as_index();
+        self.counts[index] = self.counts[index].saturating_add(1);
+    }
+
+    pub const fn get(&self, kind: DrawTaskKind) -> u32 {
+        self.counts[kind.as_index()]
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        let mut index = 0usize;
+        while index < DrawTaskKind::COUNT {
+            self.counts[index] = self.counts[index].saturating_add(other.counts[index]);
+            index += 1;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BackendCapabilities {
+    pub pixel_format: PixelFormat,
+    pub software: bool,
+    pub accelerated_2d: bool,
+    pub accelerated_3d: bool,
+    pub clip_rect: bool,
+    pub alpha_blend: bool,
+    pub blend_modes: bool,
+    pub gradients: bool,
+    pub mask: bool,
+    pub layers: bool,
+    pub blur: bool,
+    pub arc: bool,
+    pub vector_icons: bool,
+    pub vector_fill: bool,
+    pub image_transform: bool,
+    pub text_layout: bool,
+    pub triangles: bool,
+    pub draw_fill: bool,
+    pub draw_border: bool,
+    pub draw_box_shadow: bool,
+    pub draw_letter: bool,
+    pub draw_label: bool,
+    pub draw_image: bool,
+    pub draw_layer: bool,
+    pub draw_line: bool,
+    pub draw_arc: bool,
+    pub draw_triangle: bool,
+    pub draw_mask_rect: bool,
+    pub draw_mask_bitmap: bool,
+    pub draw_blur: bool,
+    pub draw_vector: bool,
+    pub draw_3d: bool,
+    pub software_draw_features: DrawFeatureFlags,
+    pub accelerated_draw_features: DrawFeatureFlags,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DrawPathKind {
+    Software,
+    Accelerated,
+    Fallback,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawBackendDispatch {
+    pub software_features: DrawFeatureFlags,
+    pub accelerated_features: DrawFeatureFlags,
+}
+
+impl DrawBackendDispatch {
+    pub const fn from_capabilities(capabilities: BackendCapabilities) -> Self {
+        Self {
+            software_features: capabilities.software_draw_features,
+            accelerated_features: capabilities.accelerated_draw_features,
+        }
+    }
+
+    pub const fn classify(self, kind: DrawTaskKind) -> DrawPathKind {
+        if self.accelerated_features.supports(kind) {
+            DrawPathKind::Accelerated
+        } else if self.software_features.supports(kind) {
+            DrawPathKind::Software
+        } else {
+            DrawPathKind::Fallback
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RenderBenchmarkSummary {
+    pub draw_us: u32,
+    pub present_us: u32,
+    pub dirty_passes: u32,
+    pub dirty_copy_bytes: u32,
+    pub present_bytes: u32,
+    pub top_dispatch_task: Option<DrawTaskKind>,
+    pub top_dispatch_hits: u32,
+    pub top_fallback_task: Option<DrawTaskKind>,
+    pub top_fallback_hits: u32,
+}
+
+impl RenderBenchmarkSummary {
+    pub const fn new() -> Self {
+        Self {
+            draw_us: 0,
+            present_us: 0,
+            dirty_passes: 0,
+            dirty_copy_bytes: 0,
+            present_bytes: 0,
+            top_dispatch_task: None,
+            top_dispatch_hits: 0,
+            top_fallback_task: None,
+            top_fallback_hits: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CodecErrorKind {
+    MissingResource,
+    Invalid,
+    Truncated,
+    Unsupported,
+    Overflow,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CodecStats {
+    pub missing_resources: u32,
+    pub invalid: u32,
+    pub truncated: u32,
+    pub unsupported: u32,
+    pub overflow: u32,
+}
+
+impl CodecStats {
+    pub const fn new() -> Self {
+        Self {
+            missing_resources: 0,
+            invalid: 0,
+            truncated: 0,
+            unsupported: 0,
+            overflow: 0,
+        }
+    }
+
+    pub const fn total_failures(self) -> u32 {
+        self.missing_resources
+            .saturating_add(self.invalid)
+            .saturating_add(self.truncated)
+            .saturating_add(self.unsupported)
+            .saturating_add(self.overflow)
+    }
+
+    pub fn record(&mut self, kind: CodecErrorKind) {
+        match kind {
+            CodecErrorKind::MissingResource => {
+                self.missing_resources = self.missing_resources.saturating_add(1);
+            }
+            CodecErrorKind::Invalid => {
+                self.invalid = self.invalid.saturating_add(1);
+            }
+            CodecErrorKind::Truncated => {
+                self.truncated = self.truncated.saturating_add(1);
+            }
+            CodecErrorKind::Unsupported => {
+                self.unsupported = self.unsupported.saturating_add(1);
+            }
+            CodecErrorKind::Overflow => {
+                self.overflow = self.overflow.saturating_add(1);
+            }
+        }
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.missing_resources = self
+            .missing_resources
+            .saturating_add(other.missing_resources);
+        self.invalid = self.invalid.saturating_add(other.invalid);
+        self.truncated = self.truncated.saturating_add(other.truncated);
+        self.unsupported = self.unsupported.saturating_add(other.unsupported);
+        self.overflow = self.overflow.saturating_add(other.overflow);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RenderStats {
+    pub frame: u32,
+    pub commands_seen: u32,
+    pub commands_drawn: u32,
+    pub commands_clipped: u32,
+    pub blend_commands: u32,
+    pub mask_commands: u32,
+    pub layer_commands: u32,
+    pub blur_commands: u32,
+    pub vector_commands: u32,
+    pub text_commands: u32,
+    pub image_commands: u32,
+    pub three_d_commands: u32,
+    pub fill_commands: u32,
+    pub border_commands: u32,
+    pub shadow_commands: u32,
+    pub line_commands: u32,
+    pub arc_commands: u32,
+    pub triangle_commands: u32,
+    pub mask_rect_commands: u32,
+    pub mask_bitmap_commands: u32,
+    pub letter_commands: u32,
+    pub label_commands: u32,
+    pub fallback_count: u32,
+    pub scratch_bytes: u32,
+    pub mask_bytes: u32,
+    pub layer_bytes: u32,
+    pub scratch_peak_bytes: u32,
+    pub fast_path_hits: u32,
+    pub layer_alloc_failures: u32,
+    pub mask_stack_overflows: u32,
+    pub blur_pixels: u32,
+    pub shadow_pixels: u32,
+    pub layer_fallbacks: u32,
+    pub clip_changes: u32,
+    pub effective_clip_changes: u32,
+    pub dirty_rects: u32,
+    pub dirty_passes: u32,
+    pub dirty_copy_bytes: u32,
+    pub pixels_estimate: u32,
+    pub presents: u32,
+    pub cache_hits: u32,
+    pub cache_misses: u32,
+    pub cache_loads: u32,
+    pub cache_bytes: u32,
+    pub cache_slots: u32,
+    pub cache_pinned: u32,
+    pub cache_load_failures: u32,
+    pub cache_decode_failures: u32,
+    pub cache_decode_invalid: u32,
+    pub cache_decode_truncated: u32,
+    pub cache_decode_unsupported: u32,
+    pub cache_decode_overflow: u32,
+    pub cache_evictions: u32,
+    pub codec_fallbacks: u32,
+    pub codec_missing_resources: u32,
+    pub codec_invalid: u32,
+    pub codec_truncated: u32,
+    pub codec_unsupported: u32,
+    pub codec_overflow: u32,
+    pub progressive_jpeg_decodes: u32,
+    pub progressive_jpeg_scan_fallbacks: u32,
+    pub cff_raster_glyphs: u32,
+    pub cff_fallback_glyphs: u32,
+    pub opentype_shaping_runs: u32,
+    pub opentype_gsub_hits: u32,
+    pub opentype_gpos_hits: u32,
+    pub opentype_kern_hits: u32,
+    pub svg_clip_paths: u32,
+    pub svg_masks: u32,
+    pub svg_filters: u32,
+    pub svg_gradients: u32,
+    pub svg_real_clip_paths: u32,
+    pub svg_real_masks: u32,
+    pub svg_filter_fallbacks: u32,
+    pub svg_gradient_fallbacks: u32,
+    pub vector_mask_rasters: u32,
+    pub vector_mask_scratch_overflows: u32,
+    pub text_layout_overflows: u32,
+    pub text_shaped_layouts: u32,
+    pub text_shaping_fallbacks: u32,
+    pub glyph_run_cache_hits: u32,
+    pub glyph_run_cache_misses: u32,
+    pub glyph_run_cache_inserts: u32,
+    pub glyph_run_cache_evictions: u32,
+    pub glyph_run_cache_overflows: u32,
+    pub glyph_run_cache_slots: u32,
+    pub glyph_id_draw_hits: u32,
+    pub codepoint_fallbacks: u32,
+    pub selection_fallbacks: u32,
+    pub svg_filter_budget_exceeded: u32,
+    pub draw_task_fallbacks: u32,
+    pub software_path_hits: u32,
+    pub accelerated_path_hits: u32,
+    pub fallback_path_hits: u32,
+    pub task_software_hits: DrawTaskCounters,
+    pub task_accelerated_hits: DrawTaskCounters,
+    pub task_fallback_hits: DrawTaskCounters,
+    pub draw_us: u32,
+    pub present_us: u32,
+    pub input_events: u32,
+    pub dropped_frames: u32,
+    pub late_frames: u32,
+    pub fps_x1000: u32,
+    pub pan_presents: u32,
+    pub copy_presents: u32,
+    pub skipped_presents: u32,
+    pub present_bytes: u32,
+    pub overflowed: bool,
+}
+
+impl RenderStats {
+    pub const fn new() -> Self {
+        Self {
+            frame: 0,
+            commands_seen: 0,
+            commands_drawn: 0,
+            commands_clipped: 0,
+            blend_commands: 0,
+            mask_commands: 0,
+            layer_commands: 0,
+            blur_commands: 0,
+            vector_commands: 0,
+            text_commands: 0,
+            image_commands: 0,
+            three_d_commands: 0,
+            fill_commands: 0,
+            border_commands: 0,
+            shadow_commands: 0,
+            line_commands: 0,
+            arc_commands: 0,
+            triangle_commands: 0,
+            mask_rect_commands: 0,
+            mask_bitmap_commands: 0,
+            letter_commands: 0,
+            label_commands: 0,
+            fallback_count: 0,
+            scratch_bytes: 0,
+            mask_bytes: 0,
+            layer_bytes: 0,
+            scratch_peak_bytes: 0,
+            fast_path_hits: 0,
+            layer_alloc_failures: 0,
+            mask_stack_overflows: 0,
+            blur_pixels: 0,
+            shadow_pixels: 0,
+            layer_fallbacks: 0,
+            clip_changes: 0,
+            effective_clip_changes: 0,
+            dirty_rects: 0,
+            dirty_passes: 0,
+            dirty_copy_bytes: 0,
+            pixels_estimate: 0,
+            presents: 0,
+            cache_hits: 0,
+            cache_misses: 0,
+            cache_loads: 0,
+            cache_bytes: 0,
+            cache_slots: 0,
+            cache_pinned: 0,
+            cache_load_failures: 0,
+            cache_decode_failures: 0,
+            cache_decode_invalid: 0,
+            cache_decode_truncated: 0,
+            cache_decode_unsupported: 0,
+            cache_decode_overflow: 0,
+            cache_evictions: 0,
+            codec_fallbacks: 0,
+            codec_missing_resources: 0,
+            codec_invalid: 0,
+            codec_truncated: 0,
+            codec_unsupported: 0,
+            codec_overflow: 0,
+            progressive_jpeg_decodes: 0,
+            progressive_jpeg_scan_fallbacks: 0,
+            cff_raster_glyphs: 0,
+            cff_fallback_glyphs: 0,
+            opentype_shaping_runs: 0,
+            opentype_gsub_hits: 0,
+            opentype_gpos_hits: 0,
+            opentype_kern_hits: 0,
+            svg_clip_paths: 0,
+            svg_masks: 0,
+            svg_filters: 0,
+            svg_gradients: 0,
+            svg_real_clip_paths: 0,
+            svg_real_masks: 0,
+            svg_filter_fallbacks: 0,
+            svg_gradient_fallbacks: 0,
+            vector_mask_rasters: 0,
+            vector_mask_scratch_overflows: 0,
+            text_layout_overflows: 0,
+            text_shaped_layouts: 0,
+            text_shaping_fallbacks: 0,
+            glyph_run_cache_hits: 0,
+            glyph_run_cache_misses: 0,
+            glyph_run_cache_inserts: 0,
+            glyph_run_cache_evictions: 0,
+            glyph_run_cache_overflows: 0,
+            glyph_run_cache_slots: 0,
+            glyph_id_draw_hits: 0,
+            codepoint_fallbacks: 0,
+            selection_fallbacks: 0,
+            svg_filter_budget_exceeded: 0,
+            draw_task_fallbacks: 0,
+            software_path_hits: 0,
+            accelerated_path_hits: 0,
+            fallback_path_hits: 0,
+            task_software_hits: DrawTaskCounters::new(),
+            task_accelerated_hits: DrawTaskCounters::new(),
+            task_fallback_hits: DrawTaskCounters::new(),
+            draw_us: 0,
+            present_us: 0,
+            input_events: 0,
+            dropped_frames: 0,
+            late_frames: 0,
+            fps_x1000: 0,
+            pan_presents: 0,
+            copy_presents: 0,
+            skipped_presents: 0,
+            present_bytes: 0,
+            overflowed: false,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::new();
+    }
+
+    pub fn mark_dirty_rects(&mut self, dirty_rects: usize) {
+        self.dirty_rects = dirty_rects.min(u32::MAX as usize) as u32;
+    }
+
+    pub fn dirty_pass_started(&mut self) {
+        self.dirty_passes = self.dirty_passes.saturating_add(1);
+    }
+
+    pub fn mark_dirty_copy_bytes(&mut self, bytes: u32) {
+        self.dirty_copy_bytes = self.dirty_copy_bytes.saturating_add(bytes);
+    }
+
+    pub fn mark_overflowed(&mut self, overflowed: bool) {
+        self.overflowed |= overflowed;
+    }
+
+    pub fn mark_frame(&mut self, frame: u32) {
+        self.frame = frame;
+    }
+
+    pub fn presented(&mut self) {
+        self.presents = self.presents.saturating_add(1);
+    }
+
+    pub fn mark_present_stats(&mut self, present: PresentStats) {
+        self.presents = self.presents.saturating_add(present.presents);
+        self.pan_presents = self.pan_presents.saturating_add(present.pan_presents);
+        self.copy_presents = self.copy_presents.saturating_add(present.copy_presents);
+        self.skipped_presents = self
+            .skipped_presents
+            .saturating_add(present.skipped_presents);
+        self.present_bytes = self.present_bytes.saturating_add(present.bytes_copied);
+    }
+
+    pub fn mark_frame_stats(&mut self, frame: FrameStats) {
+        self.frame = frame.frame;
+        self.draw_us = frame.draw_us;
+        self.present_us = frame.present_us;
+        self.input_events = frame.input_events;
+        self.dropped_frames = frame.dropped_frames;
+        self.late_frames = frame.late_frames;
+        self.fps_x1000 = frame.fps_x1000;
+        self.mark_present_stats(frame.present);
+    }
+
+    pub fn mark_cache(&mut self, hits: u32, misses: u32, bytes: usize) {
+        self.cache_hits = hits;
+        self.cache_misses = misses;
+        self.cache_bytes = bytes.min(u32::MAX as usize) as u32;
+    }
+
+    pub fn mark_image_cache(&mut self, cache: ImageCacheStats) {
+        self.cache_hits = cache.hits;
+        self.cache_misses = cache.misses;
+        self.cache_loads = cache.loads;
+        self.cache_bytes = cache.bytes.min(u32::MAX as usize) as u32;
+        self.cache_slots = cache.slots.min(u32::MAX as usize) as u32;
+        self.cache_pinned = cache.pinned.min(u32::MAX as usize) as u32;
+        self.cache_load_failures = cache.load_failures;
+        self.cache_decode_failures = cache.decode_failures;
+        self.cache_decode_invalid = cache.decode_invalid;
+        self.cache_decode_truncated = cache.decode_truncated;
+        self.cache_decode_unsupported = cache.decode_unsupported;
+        self.cache_decode_overflow = cache.decode_overflow;
+        self.cache_evictions = cache.evictions;
+        self.codec_missing_resources = cache.load_failures;
+        self.codec_invalid = cache.decode_invalid;
+        self.codec_truncated = cache.decode_truncated;
+        self.codec_unsupported = cache.decode_unsupported;
+        self.codec_overflow = cache.decode_overflow;
+        self.codec_fallbacks = self
+            .codec_missing_resources
+            .saturating_add(self.codec_invalid)
+            .saturating_add(self.codec_truncated)
+            .saturating_add(self.codec_unsupported)
+            .saturating_add(self.codec_overflow);
+    }
+
+    pub fn mark_glyph_run_cache(&mut self, cache: GlyphRunCacheStats) {
+        self.glyph_run_cache_hits = cache.hits;
+        self.glyph_run_cache_misses = cache.misses;
+        self.glyph_run_cache_inserts = cache.inserts;
+        self.glyph_run_cache_evictions = cache.evictions;
+        self.glyph_run_cache_overflows = cache.overflows;
+        self.glyph_run_cache_slots = cache.slots.min(u32::MAX as usize) as u32;
+    }
+
+    pub fn mark_codec_error(&mut self, kind: CodecErrorKind) {
+        match kind {
+            CodecErrorKind::MissingResource => {
+                self.codec_missing_resources = self.codec_missing_resources.saturating_add(1);
+            }
+            CodecErrorKind::Invalid => {
+                self.codec_invalid = self.codec_invalid.saturating_add(1);
+            }
+            CodecErrorKind::Truncated => {
+                self.codec_truncated = self.codec_truncated.saturating_add(1);
+            }
+            CodecErrorKind::Unsupported => {
+                self.codec_unsupported = self.codec_unsupported.saturating_add(1);
+            }
+            CodecErrorKind::Overflow => {
+                self.codec_overflow = self.codec_overflow.saturating_add(1);
+            }
+        }
+        self.codec_fallbacks = self.codec_fallbacks.saturating_add(1);
+    }
+
+    pub fn mark_codec_stats(&mut self, stats: CodecStats) {
+        self.codec_missing_resources = self
+            .codec_missing_resources
+            .saturating_add(stats.missing_resources);
+        self.codec_invalid = self.codec_invalid.saturating_add(stats.invalid);
+        self.codec_truncated = self.codec_truncated.saturating_add(stats.truncated);
+        self.codec_unsupported = self.codec_unsupported.saturating_add(stats.unsupported);
+        self.codec_overflow = self.codec_overflow.saturating_add(stats.overflow);
+        self.codec_fallbacks = self.codec_fallbacks.saturating_add(stats.total_failures());
+    }
+
+    pub fn mark_progressive_jpeg(&mut self) {
+        self.progressive_jpeg_decodes = self.progressive_jpeg_decodes.saturating_add(1);
+    }
+
+    pub fn mark_progressive_jpeg_scan_fallback(&mut self) {
+        self.progressive_jpeg_scan_fallbacks = self.progressive_jpeg_scan_fallbacks.saturating_add(1);
+    }
+
+    pub fn mark_cff_raster_glyph(&mut self) {
+        self.cff_raster_glyphs = self.cff_raster_glyphs.saturating_add(1);
+    }
+
+    pub fn mark_cff_fallback_glyph(&mut self) {
+        self.cff_fallback_glyphs = self.cff_fallback_glyphs.saturating_add(1);
+    }
+
+    pub fn mark_opentype_shaping_run(&mut self) {
+        self.opentype_shaping_runs = self.opentype_shaping_runs.saturating_add(1);
+    }
+
+    pub fn mark_opentype_gsub_hit(&mut self) {
+        self.opentype_gsub_hits = self.opentype_gsub_hits.saturating_add(1);
+    }
+
+    pub fn mark_opentype_gpos_hit(&mut self) {
+        self.opentype_gpos_hits = self.opentype_gpos_hits.saturating_add(1);
+    }
+
+    pub fn mark_opentype_kern_hit(&mut self) {
+        self.opentype_kern_hits = self.opentype_kern_hits.saturating_add(1);
+    }
+
+    pub fn mark_svg_clip_path(&mut self) {
+        self.svg_clip_paths = self.svg_clip_paths.saturating_add(1);
+    }
+
+    pub fn mark_svg_mask(&mut self) {
+        self.svg_masks = self.svg_masks.saturating_add(1);
+    }
+
+    pub fn mark_svg_filter(&mut self) {
+        self.svg_filters = self.svg_filters.saturating_add(1);
+    }
+
+    pub fn mark_svg_gradient(&mut self) {
+        self.svg_gradients = self.svg_gradients.saturating_add(1);
+    }
+
+    pub fn mark_svg_real_clip_path(&mut self) {
+        self.svg_real_clip_paths = self.svg_real_clip_paths.saturating_add(1);
+    }
+
+    pub fn mark_svg_real_mask(&mut self) {
+        self.svg_real_masks = self.svg_real_masks.saturating_add(1);
+    }
+
+    pub fn mark_svg_filter_fallback(&mut self) {
+        self.svg_filter_fallbacks = self.svg_filter_fallbacks.saturating_add(1);
+    }
+
+    pub fn mark_svg_gradient_fallback(&mut self) {
+        self.svg_gradient_fallbacks = self.svg_gradient_fallbacks.saturating_add(1);
+    }
+
+    pub fn mark_vector_mask_raster(&mut self) {
+        self.vector_mask_rasters = self.vector_mask_rasters.saturating_add(1);
+    }
+
+    pub fn mark_vector_mask_scratch_overflow(&mut self) {
+        self.vector_mask_scratch_overflows = self.vector_mask_scratch_overflows.saturating_add(1);
+    }
+
+    pub fn mark_text_layout_overflow(&mut self) {
+        self.text_layout_overflows = self.text_layout_overflows.saturating_add(1);
+    }
+
+    pub fn mark_text_shaped_layout(&mut self) {
+        self.text_shaped_layouts = self.text_shaped_layouts.saturating_add(1);
+    }
+
+    pub fn mark_text_shaping_fallback(&mut self) {
+        self.text_shaping_fallbacks = self.text_shaping_fallbacks.saturating_add(1);
+    }
+
+    pub fn mark_glyph_id_draw_hit(&mut self) {
+        self.glyph_id_draw_hits = self.glyph_id_draw_hits.saturating_add(1);
+    }
+
+    pub fn mark_codepoint_fallback(&mut self) {
+        self.codepoint_fallbacks = self.codepoint_fallbacks.saturating_add(1);
+    }
+
+    pub fn mark_selection_fallback(&mut self) {
+        self.selection_fallbacks = self.selection_fallbacks.saturating_add(1);
+    }
+
+    pub fn mark_svg_filter_budget_exceeded(&mut self) {
+        self.svg_filter_budget_exceeded = self.svg_filter_budget_exceeded.saturating_add(1);
+    }
+
+    pub fn dispatch_hits_for(&self, kind: DrawTaskKind) -> u32 {
+        self.task_software_hits
+            .get(kind)
+            .saturating_add(self.task_accelerated_hits.get(kind))
+            .saturating_add(self.task_fallback_hits.get(kind))
+    }
+
+    pub fn fallback_hits_for(&self, kind: DrawTaskKind) -> u32 {
+        self.task_fallback_hits.get(kind)
+    }
+
+    pub fn top_dispatch_task(&self) -> Option<(DrawTaskKind, u32)> {
+        let mut best_kind = None;
+        let mut best_count = 0u32;
+        let mut index = 0usize;
+        while index < DrawTaskKind::COUNT {
+            if let Some(kind) = DrawTaskKind::from_index(index) {
+                let count = self.dispatch_hits_for(kind);
+                if count > best_count {
+                    best_count = count;
+                    best_kind = Some(kind);
+                }
+            }
+            index += 1;
+        }
+        best_kind.map(|kind| (kind, best_count))
+    }
+
+    pub fn top_fallback_task(&self) -> Option<(DrawTaskKind, u32)> {
+        let mut best_kind = None;
+        let mut best_count = 0u32;
+        let mut index = 0usize;
+        while index < DrawTaskKind::COUNT {
+            if let Some(kind) = DrawTaskKind::from_index(index) {
+                let count = self.fallback_hits_for(kind);
+                if count > best_count {
+                    best_count = count;
+                    best_kind = Some(kind);
+                }
+            }
+            index += 1;
+        }
+        best_kind.map(|kind| (kind, best_count))
+    }
+
+    pub fn benchmark_summary(&self) -> RenderBenchmarkSummary {
+        let top_dispatch = self.top_dispatch_task();
+        let top_fallback = self.top_fallback_task();
+        RenderBenchmarkSummary {
+            draw_us: self.draw_us,
+            present_us: self.present_us,
+            dirty_passes: self.dirty_passes,
+            dirty_copy_bytes: self.dirty_copy_bytes,
+            present_bytes: self.present_bytes,
+            top_dispatch_task: top_dispatch.map(|(kind, _)| kind),
+            top_dispatch_hits: top_dispatch.map(|(_, count)| count).unwrap_or(0),
+            top_fallback_task: top_fallback.map(|(kind, _)| kind),
+            top_fallback_hits: top_fallback.map(|(_, count)| count).unwrap_or(0),
+        }
+    }
+
+    pub fn merge_draw_stats(&mut self, other: Self) {
+        self.commands_seen = self.commands_seen.saturating_add(other.commands_seen);
+        self.commands_drawn = self.commands_drawn.saturating_add(other.commands_drawn);
+        self.commands_clipped = self.commands_clipped.saturating_add(other.commands_clipped);
+        self.blend_commands = self.blend_commands.saturating_add(other.blend_commands);
+        self.mask_commands = self.mask_commands.saturating_add(other.mask_commands);
+        self.layer_commands = self.layer_commands.saturating_add(other.layer_commands);
+        self.blur_commands = self.blur_commands.saturating_add(other.blur_commands);
+        self.vector_commands = self.vector_commands.saturating_add(other.vector_commands);
+        self.text_commands = self.text_commands.saturating_add(other.text_commands);
+        self.image_commands = self.image_commands.saturating_add(other.image_commands);
+        self.three_d_commands = self.three_d_commands.saturating_add(other.three_d_commands);
+        self.fill_commands = self.fill_commands.saturating_add(other.fill_commands);
+        self.border_commands = self.border_commands.saturating_add(other.border_commands);
+        self.shadow_commands = self.shadow_commands.saturating_add(other.shadow_commands);
+        self.line_commands = self.line_commands.saturating_add(other.line_commands);
+        self.arc_commands = self.arc_commands.saturating_add(other.arc_commands);
+        self.triangle_commands = self.triangle_commands.saturating_add(other.triangle_commands);
+        self.mask_rect_commands = self
+            .mask_rect_commands
+            .saturating_add(other.mask_rect_commands);
+        self.mask_bitmap_commands = self
+            .mask_bitmap_commands
+            .saturating_add(other.mask_bitmap_commands);
+        self.letter_commands = self.letter_commands.saturating_add(other.letter_commands);
+        self.label_commands = self.label_commands.saturating_add(other.label_commands);
+        self.fallback_count = self.fallback_count.saturating_add(other.fallback_count);
+        self.scratch_bytes = self.scratch_bytes.saturating_add(other.scratch_bytes);
+        self.mask_bytes = self.mask_bytes.saturating_add(other.mask_bytes);
+        self.layer_bytes = self.layer_bytes.saturating_add(other.layer_bytes);
+        self.scratch_peak_bytes = self.scratch_peak_bytes.max(other.scratch_peak_bytes);
+        self.fast_path_hits = self.fast_path_hits.saturating_add(other.fast_path_hits);
+        self.layer_alloc_failures = self
+            .layer_alloc_failures
+            .saturating_add(other.layer_alloc_failures);
+        self.mask_stack_overflows = self
+            .mask_stack_overflows
+            .saturating_add(other.mask_stack_overflows);
+        self.blur_pixels = self.blur_pixels.saturating_add(other.blur_pixels);
+        self.shadow_pixels = self.shadow_pixels.saturating_add(other.shadow_pixels);
+        self.layer_fallbacks = self.layer_fallbacks.saturating_add(other.layer_fallbacks);
+        self.codec_fallbacks = self.codec_fallbacks.saturating_add(other.codec_fallbacks);
+        self.codec_missing_resources = self
+            .codec_missing_resources
+            .saturating_add(other.codec_missing_resources);
+        self.codec_invalid = self.codec_invalid.saturating_add(other.codec_invalid);
+        self.codec_truncated = self.codec_truncated.saturating_add(other.codec_truncated);
+        self.codec_unsupported = self
+            .codec_unsupported
+            .saturating_add(other.codec_unsupported);
+        self.codec_overflow = self.codec_overflow.saturating_add(other.codec_overflow);
+        self.progressive_jpeg_decodes = self
+            .progressive_jpeg_decodes
+            .saturating_add(other.progressive_jpeg_decodes);
+        self.progressive_jpeg_scan_fallbacks = self
+            .progressive_jpeg_scan_fallbacks
+            .saturating_add(other.progressive_jpeg_scan_fallbacks);
+        self.cff_raster_glyphs = self
+            .cff_raster_glyphs
+            .saturating_add(other.cff_raster_glyphs);
+        self.cff_fallback_glyphs = self
+            .cff_fallback_glyphs
+            .saturating_add(other.cff_fallback_glyphs);
+        self.opentype_shaping_runs = self
+            .opentype_shaping_runs
+            .saturating_add(other.opentype_shaping_runs);
+        self.opentype_gsub_hits = self.opentype_gsub_hits.saturating_add(other.opentype_gsub_hits);
+        self.opentype_gpos_hits = self.opentype_gpos_hits.saturating_add(other.opentype_gpos_hits);
+        self.opentype_kern_hits = self.opentype_kern_hits.saturating_add(other.opentype_kern_hits);
+        self.svg_clip_paths = self.svg_clip_paths.saturating_add(other.svg_clip_paths);
+        self.svg_masks = self.svg_masks.saturating_add(other.svg_masks);
+        self.svg_filters = self.svg_filters.saturating_add(other.svg_filters);
+        self.svg_gradients = self.svg_gradients.saturating_add(other.svg_gradients);
+        self.svg_real_clip_paths = self.svg_real_clip_paths.saturating_add(other.svg_real_clip_paths);
+        self.svg_real_masks = self.svg_real_masks.saturating_add(other.svg_real_masks);
+        self.svg_filter_fallbacks = self.svg_filter_fallbacks.saturating_add(other.svg_filter_fallbacks);
+        self.svg_gradient_fallbacks = self.svg_gradient_fallbacks.saturating_add(other.svg_gradient_fallbacks);
+        self.vector_mask_rasters = self
+            .vector_mask_rasters
+            .saturating_add(other.vector_mask_rasters);
+        self.vector_mask_scratch_overflows = self
+            .vector_mask_scratch_overflows
+            .saturating_add(other.vector_mask_scratch_overflows);
+        self.text_layout_overflows = self
+            .text_layout_overflows
+            .saturating_add(other.text_layout_overflows);
+        self.text_shaped_layouts = self
+            .text_shaped_layouts
+            .saturating_add(other.text_shaped_layouts);
+        self.text_shaping_fallbacks = self
+            .text_shaping_fallbacks
+            .saturating_add(other.text_shaping_fallbacks);
+        self.glyph_run_cache_hits = self
+            .glyph_run_cache_hits
+            .saturating_add(other.glyph_run_cache_hits);
+        self.glyph_run_cache_misses = self
+            .glyph_run_cache_misses
+            .saturating_add(other.glyph_run_cache_misses);
+        self.glyph_run_cache_inserts = self
+            .glyph_run_cache_inserts
+            .saturating_add(other.glyph_run_cache_inserts);
+        self.glyph_run_cache_evictions = self
+            .glyph_run_cache_evictions
+            .saturating_add(other.glyph_run_cache_evictions);
+        self.glyph_run_cache_overflows = self
+            .glyph_run_cache_overflows
+            .saturating_add(other.glyph_run_cache_overflows);
+        self.glyph_run_cache_slots = self.glyph_run_cache_slots.max(other.glyph_run_cache_slots);
+        self.glyph_id_draw_hits = self
+            .glyph_id_draw_hits
+            .saturating_add(other.glyph_id_draw_hits);
+        self.codepoint_fallbacks = self
+            .codepoint_fallbacks
+            .saturating_add(other.codepoint_fallbacks);
+        self.selection_fallbacks = self
+            .selection_fallbacks
+            .saturating_add(other.selection_fallbacks);
+        self.svg_filter_budget_exceeded = self
+            .svg_filter_budget_exceeded
+            .saturating_add(other.svg_filter_budget_exceeded);
+        self.cache_decode_invalid = self
+            .cache_decode_invalid
+            .saturating_add(other.cache_decode_invalid);
+        self.cache_decode_truncated = self
+            .cache_decode_truncated
+            .saturating_add(other.cache_decode_truncated);
+        self.cache_decode_unsupported = self
+            .cache_decode_unsupported
+            .saturating_add(other.cache_decode_unsupported);
+        self.cache_decode_overflow = self
+            .cache_decode_overflow
+            .saturating_add(other.cache_decode_overflow);
+        self.draw_task_fallbacks = self
+            .draw_task_fallbacks
+            .saturating_add(other.draw_task_fallbacks);
+        self.software_path_hits = self
+            .software_path_hits
+            .saturating_add(other.software_path_hits);
+        self.accelerated_path_hits = self
+            .accelerated_path_hits
+            .saturating_add(other.accelerated_path_hits);
+        self.fallback_path_hits = self
+            .fallback_path_hits
+            .saturating_add(other.fallback_path_hits);
+        self.task_software_hits.merge(other.task_software_hits);
+        self.task_accelerated_hits.merge(other.task_accelerated_hits);
+        self.task_fallback_hits.merge(other.task_fallback_hits);
+        self.clip_changes = self.clip_changes.saturating_add(other.clip_changes);
+        self.effective_clip_changes = self
+            .effective_clip_changes
+            .saturating_add(other.effective_clip_changes);
+        self.dirty_rects = self.dirty_rects.max(other.dirty_rects);
+        self.dirty_passes = self.dirty_passes.saturating_add(other.dirty_passes);
+        self.dirty_copy_bytes = self
+            .dirty_copy_bytes
+            .saturating_add(other.dirty_copy_bytes);
+        self.pixels_estimate = self.pixels_estimate.saturating_add(other.pixels_estimate);
+        self.overflowed |= other.overflowed;
+    }
+
+    pub fn command_seen(&mut self) {
+        self.commands_seen = self.commands_seen.saturating_add(1);
+    }
+
+    pub fn mark_command_kind(&mut self, cmd: DrawCommand) {
+        match cmd {
+            DrawCommand::FillRect { .. }
+            | DrawCommand::FillRoundRect { .. }
+            | DrawCommand::FillGradient { .. }
+            | DrawCommand::FillCircle { .. } => {
+                self.fill_commands = self.fill_commands.saturating_add(1);
+                self.fast_path_hits = self.fast_path_hits.saturating_add(1);
+            }
+            DrawCommand::FillStyled { style, .. } => {
+                self.fill_commands = self.fill_commands.saturating_add(1);
+                if style.blend != crate::BlendMode::Normal {
+                    self.blend_commands = self.blend_commands.saturating_add(1);
+                }
+                if style.radius == 0 && style.gradient == crate::GradientStyle::None {
+                    self.fast_path_hits = self.fast_path_hits.saturating_add(1);
+                }
+            }
+            DrawCommand::DrawMask { rect, .. } => {
+                self.mask_commands = self.mask_commands.saturating_add(1);
+                self.mask_rect_commands = self.mask_rect_commands.saturating_add(1);
+                self.mask_bytes = self.mask_bytes.saturating_add(rect_area(rect));
+            }
+            DrawCommand::DrawLayer { rect, .. } => {
+                self.layer_commands = self.layer_commands.saturating_add(1);
+                self.mark_layer_bytes(rect_area(rect).saturating_mul(4));
+                self.mark_layer_fallback();
+            }
+            DrawCommand::BeginLayer { rect, .. } => {
+                self.layer_commands = self.layer_commands.saturating_add(1);
+                self.mark_layer_bytes(rect_area(rect).saturating_mul(4));
+            }
+            DrawCommand::DrawBlur { rect, .. } => {
+                self.blur_commands = self.blur_commands.saturating_add(1);
+                self.mark_scratch_bytes(rect_area(rect).saturating_mul(4));
+                self.blur_pixels = self.blur_pixels.saturating_add(rect_area(rect));
+                self.mark_layer_fallback();
+            }
+            DrawCommand::DrawShadow { rect, .. } => {
+                self.shadow_commands = self.shadow_commands.saturating_add(1);
+                self.mark_shadow_pixels(rect_area(rect));
+            }
+            DrawCommand::DrawBorder { .. } => {
+                self.border_commands = self.border_commands.saturating_add(1);
+            }
+            DrawCommand::StrokeLine { .. } | DrawCommand::StrokeStyledLine { .. } => {
+                self.line_commands = self.line_commands.saturating_add(1);
+            }
+            DrawCommand::DrawArc { .. } => {
+                self.arc_commands = self.arc_commands.saturating_add(1);
+            }
+            DrawCommand::PushMask { .. } => {
+                self.mask_commands = self.mask_commands.saturating_add(1);
+                self.mask_rect_commands = self.mask_rect_commands.saturating_add(1);
+            }
+            DrawCommand::PushBitmapMask { .. } => {
+                self.mask_commands = self.mask_commands.saturating_add(1);
+                self.mask_bitmap_commands = self.mask_bitmap_commands.saturating_add(1);
+            }
+            DrawCommand::DrawSvgIcon { .. } | DrawCommand::DrawSvgDocument { .. } => {
+                self.vector_commands = self.vector_commands.saturating_add(1);
+            }
+            DrawCommand::DrawText { .. } => {
+                self.text_commands = self.text_commands.saturating_add(1);
+                self.letter_commands = self.letter_commands.saturating_add(1);
+            }
+            DrawCommand::DrawLabel { .. } => {
+                self.text_commands = self.text_commands.saturating_add(1);
+                self.label_commands = self.label_commands.saturating_add(1);
+            }
+            DrawCommand::DrawImage { .. }
+            | DrawCommand::DrawImageFit { .. }
+            | DrawCommand::DrawImageTint { .. } => {
+                self.image_commands = self.image_commands.saturating_add(1);
+            }
+            DrawCommand::DrawImageStyled { style, .. } => {
+                self.image_commands = self.image_commands.saturating_add(1);
+                if style.blend != crate::BlendMode::Normal {
+                    self.blend_commands = self.blend_commands.saturating_add(1);
+                }
+            }
+            DrawCommand::DrawTriangle { .. } | DrawCommand::DrawGradientTriangle { .. } => {
+                self.triangle_commands = self.triangle_commands.saturating_add(1);
+                self.three_d_commands = self.three_d_commands.saturating_add(1);
+            }
+            DrawCommand::DrawTexturedTriangle { .. } => {
+                self.triangle_commands = self.triangle_commands.saturating_add(1);
+                self.three_d_commands = self.three_d_commands.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn mark_scratch_bytes(&mut self, bytes: u32) {
+        self.scratch_bytes = self.scratch_bytes.saturating_add(bytes);
+        self.scratch_peak_bytes = self.scratch_peak_bytes.max(bytes);
+    }
+
+    pub fn mark_layer_bytes(&mut self, bytes: u32) {
+        self.layer_bytes = self.layer_bytes.saturating_add(bytes);
+        self.scratch_peak_bytes = self.scratch_peak_bytes.max(bytes);
+    }
+
+    pub fn mark_layer_alloc_failure(&mut self) {
+        self.layer_alloc_failures = self.layer_alloc_failures.saturating_add(1);
+        self.mark_layer_fallback();
+    }
+
+    pub fn mark_mask_stack_overflow(&mut self) {
+        self.mask_stack_overflows = self.mask_stack_overflows.saturating_add(1);
+        self.overflowed = true;
+    }
+
+    pub fn mark_layer_fallback(&mut self) {
+        self.layer_fallbacks = self.layer_fallbacks.saturating_add(1);
+        self.fallback_count = self.fallback_count.saturating_add(1);
+        self.draw_task_fallbacks = self.draw_task_fallbacks.saturating_add(1);
+        self.fallback_path_hits = self.fallback_path_hits.saturating_add(1);
+    }
+
+    pub fn mark_draw_dispatch(&mut self, path: DrawPathKind) {
+        self.mark_draw_dispatch_kind(path, None);
+    }
+
+    pub fn mark_draw_dispatch_for(&mut self, kind: DrawTaskKind, path: DrawPathKind) {
+        self.mark_draw_dispatch_kind(path, Some(kind));
+    }
+
+    fn mark_draw_dispatch_kind(&mut self, path: DrawPathKind, kind: Option<DrawTaskKind>) {
+        match path {
+            DrawPathKind::Software => {
+                self.software_path_hits = self.software_path_hits.saturating_add(1);
+                if let Some(kind) = kind {
+                    self.task_software_hits.increment(kind);
+                }
+            }
+            DrawPathKind::Accelerated => {
+                self.accelerated_path_hits = self.accelerated_path_hits.saturating_add(1);
+                if let Some(kind) = kind {
+                    self.task_accelerated_hits.increment(kind);
+                }
+            }
+            DrawPathKind::Fallback => {
+                self.fallback_path_hits = self.fallback_path_hits.saturating_add(1);
+                self.draw_task_fallbacks = self.draw_task_fallbacks.saturating_add(1);
+                self.fallback_count = self.fallback_count.saturating_add(1);
+                if let Some(kind) = kind {
+                    self.task_fallback_hits.increment(kind);
+                }
+            }
+        }
+    }
+
+    pub fn mark_blur_pixels(&mut self, pixels: u32) {
+        self.blur_pixels = self.blur_pixels.saturating_add(pixels);
+    }
+
+    pub fn mark_shadow_pixels(&mut self, pixels: u32) {
+        self.shadow_pixels = self.shadow_pixels.saturating_add(pixels);
+    }
+
+    pub fn command_clipped(&mut self) {
+        self.commands_clipped = self.commands_clipped.saturating_add(1);
+    }
+
+    pub fn clip_changed(&mut self) {
+        self.clip_changes = self.clip_changes.saturating_add(1);
+    }
+
+    pub fn effective_clip_changed(&mut self) {
+        self.effective_clip_changes = self.effective_clip_changes.saturating_add(1);
+        self.clip_changed();
+    }
+
+    pub fn command_drawn(&mut self, bounds: Option<Rect>) {
+        self.commands_drawn = self.commands_drawn.saturating_add(1);
+        if let Some(bounds) = bounds {
+            self.pixels_estimate = self.pixels_estimate.saturating_add(rect_area(bounds));
+        }
+    }
+}
+
+impl BackendCapabilities {
+    pub const SOFTWARE_UNKNOWN: Self = Self {
+        pixel_format: PixelFormat::Unknown(0),
+        software: true,
+        accelerated_2d: false,
+        accelerated_3d: false,
+        clip_rect: true,
+        alpha_blend: true,
+        blend_modes: true,
+        gradients: true,
+        mask: true,
+        layers: true,
+        blur: true,
+        arc: true,
+        vector_icons: true,
+        vector_fill: true,
+        image_transform: true,
+        text_layout: true,
+        triangles: true,
+        draw_fill: true,
+        draw_border: true,
+        draw_box_shadow: true,
+        draw_letter: true,
+        draw_label: true,
+        draw_image: true,
+        draw_layer: true,
+        draw_line: true,
+        draw_arc: true,
+        draw_triangle: true,
+        draw_mask_rect: true,
+        draw_mask_bitmap: true,
+        draw_blur: true,
+        draw_vector: true,
+        draw_3d: true,
+        software_draw_features: DrawFeatureFlags::ALL_SOFTWARE,
+        accelerated_draw_features: DrawFeatureFlags::NONE,
+    };
+
+    pub const fn software(pixel_format: PixelFormat) -> Self {
+        Self {
+            pixel_format,
+            software: true,
+            accelerated_2d: false,
+            accelerated_3d: false,
+            clip_rect: true,
+            alpha_blend: true,
+            blend_modes: true,
+            gradients: true,
+            mask: true,
+            layers: true,
+            blur: true,
+            arc: true,
+            vector_icons: true,
+            vector_fill: true,
+            image_transform: true,
+            text_layout: true,
+            triangles: true,
+            draw_fill: true,
+            draw_border: true,
+            draw_box_shadow: true,
+            draw_letter: true,
+            draw_label: true,
+            draw_image: true,
+            draw_layer: true,
+            draw_line: true,
+            draw_arc: true,
+            draw_triangle: true,
+            draw_mask_rect: true,
+            draw_mask_bitmap: true,
+            draw_blur: true,
+            draw_vector: true,
+            draw_3d: true,
+            software_draw_features: DrawFeatureFlags::ALL_SOFTWARE,
+            accelerated_draw_features: DrawFeatureFlags::NONE,
+        }
+    }
+
+    pub const fn supports_draw_task(&self, kind: DrawTaskKind) -> bool {
+        self.software_draw_features.supports(kind) || self.accelerated_draw_features.supports(kind)
+    }
+}
+
+pub trait RenderBackend {
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities::SOFTWARE_UNKNOWN
+    }
+
+    fn set_clip(&mut self, _clip: Option<Rect>) {}
+    fn draw_command(&mut self, cmd: DrawCommand);
+
+    fn draw_dispatched_command(
+        &mut self,
+        cmd: DrawCommand,
+        path: DrawPathKind,
+        stats: &mut RenderStats,
+    ) {
+        if let Some(kind) = cmd.task_kind() {
+            stats.mark_draw_dispatch_for(kind, path);
+        } else {
+            stats.mark_draw_dispatch(path);
+        }
+        if let DrawCommand::DrawLabel { style, .. } = cmd {
+            if style.font.0 != 0 {
+                stats.mark_glyph_id_draw_hit();
+            } else {
+                stats.mark_codepoint_fallback();
+            }
+            if style.selection.is_some() && style.font.0 == 0 {
+                stats.mark_selection_fallback();
+            }
+        }
+        self.draw_command(cmd);
+    }
+
+    fn push_mask(&mut self, _spec: MaskSpec) -> bool {
+        true
+    }
+
+    fn pop_mask(&mut self) -> bool {
+        true
+    }
+
+    fn clear_masks(&mut self) {}
+
+    fn draw_layer_commands(
+        &mut self,
+        rect: Rect,
+        spec: LayerSpec,
+        _cmds: &[DrawCommand],
+        _clips: &[Option<Rect>],
+        stats: &mut RenderStats,
+    ) -> bool {
+        stats.mark_layer_fallback();
+        self.draw_command(DrawCommand::DrawLayer {
+            rect,
+            depth: 0,
+            spec,
+        });
+        false
+    }
+
+    fn draw_dispatched_layer_commands(
+        &mut self,
+        rect: Rect,
+        spec: LayerSpec,
+        cmds: &[DrawCommand],
+        clips: &[Option<Rect>],
+        path: DrawPathKind,
+        stats: &mut RenderStats,
+    ) -> bool {
+        stats.mark_draw_dispatch_for(DrawTaskKind::Layer, path);
+        self.draw_layer_commands(rect, spec, cmds, clips, stats)
+    }
+}
+
+fn rect_area(rect: Rect) -> u32 {
+    (rect.w as u32).saturating_mul(rect.h as u32)
+}

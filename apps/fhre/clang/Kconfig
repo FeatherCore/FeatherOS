@@ -1,10 +1,7 @@
-#
-# For a description of the syntax of this configuration file,
-# see the file kconfig-language.txt in the NuttX tools repository.
-#
-
 config FHRE_CLANG
-	bool "Feather Hybrid Render Engine (Clang version)"
+	bool "FHRE clang implementation"
 	default n
+	depends on FHRE
 	---help---
-		Enable Feather Hybrid Render Engine (Clang version)
+		Reserved for the parallel clang/C implementation of FHRE.  The Rust
+		implementation is currently the default path.

@@ -1,0 +1,29 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+config WING_SURFACE_DEMO
+	tristate "Wing managed surface demo"
+	default y if WING_RUST && !DISABLE_MQUEUE
+	depends on WING_RUST && !DISABLE_MQUEUE
+	---help---
+		Enable a small Wing managed-surface builtin application. The app is
+		launched as an independent NuttX task and renders into a surface
+		owned by Wing.
+
+if WING_SURFACE_DEMO
+
+config WING_SURFACE_DEMO_PROGNAME
+	string "Program name"
+	default "wing_surface_demo"
+
+config WING_SURFACE_DEMO_PRIORITY
+	int "Surface demo task priority"
+	default 110
+
+config WING_SURFACE_DEMO_STACKSIZE
+	int "Surface demo stack size"
+	default DEFAULT_TASK_STACKSIZE
+
+endif

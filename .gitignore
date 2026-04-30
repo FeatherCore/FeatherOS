@@ -107,6 +107,9 @@ apps/romfs.img
 apps/staging/
 apps/symtab_apps.c
 apps/wasm/
+apps/graphics/lvgl/lvgl/
+apps/graphics/lvgl/v*.zip
+apps/wing/resource/generated/
 
 # =============================================================================
 # Nuttx specific ignore rules (from third/Nuttx/nuttx/.gitignore)
@@ -158,3 +161,4 @@ nuttx/SAVEconfig
 nuttx/.aider*
 nuttx/imx9-norimage.img
 nuttx/config.txt
+nuttx/boards/sim/sim/sim/src/etc/wing/wing_*.bin

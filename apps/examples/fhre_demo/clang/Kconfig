@@ -1,0 +1,8 @@
+config EXAMPLES_FHRE_DEMO_CLANG
+	bool "FHRE demo in clang"
+	default n
+	depends on EXAMPLES_FHRE_DEMO
+	select FHRE_CLANG
+	---help---
+		Reserved for the parallel clang/C FHRE demo.
+

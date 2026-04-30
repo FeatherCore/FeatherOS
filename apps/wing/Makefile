@@ -2,6 +2,6 @@
 # apps/wing/Makefile
 ############################################################################
 
-MENUDESC = "Wing Desktop Environment"
+MENUDESC = "Wing"
 
 include $(APPDIR)/Directory.mk

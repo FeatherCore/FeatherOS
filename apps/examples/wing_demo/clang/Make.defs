@@ -1,0 +1,8 @@
+############################################################################
+# apps/examples/wing_demo/clang/Make.defs
+############################################################################
+
+ifneq ($(CONFIG_EXAMPLES_WING_DEMO_CLANG),)
+CONFIGURED_APPS += $(APPDIR)/examples/wing_demo/clang
+endif
+

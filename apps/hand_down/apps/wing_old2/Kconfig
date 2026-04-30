@@ -1,0 +1,6 @@
+#
+# Archived Wing prototype.
+#
+# This directory is intentionally kept out of the active NuttX build. The
+# clean implementation lives in apps/wing.
+#

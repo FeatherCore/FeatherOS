@@ -1,0 +1,42 @@
+############################################################################
+# apps/fhre/rust/Make.defs
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+############################################################################
+
+include $(APPDIR)/tools/Rust.mk
+
+ifneq ($(CONFIG_FHRE_RUST),)
+CONFIGURED_APPS += $(APPDIR)/fhre/rust
+
+# Check if we're building for NuttX simulator (native compilation)
+ifeq ($(CONFIG_ARCH_SIM),y)
+RUST_NATIVE := y
+endif
+
+# Rust library path differs between SIM and embedded builds
+RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
+ifeq ($(RUST_NATIVE),y)
+# SIM: native compilation, no target subdirectory
+EXTRA_LIBS += $(APPDIR)/fhre/rust/target/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libfhre.a
+else
+# Embedded: cross-compilation with target subdirectory
+EXTRA_LIBS += $(APPDIR)/fhre/rust/target/$(RUST_TARGET)/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libfhre.a
+endif
+endif

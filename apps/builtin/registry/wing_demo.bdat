@@ -1,0 +1,1 @@
+{ "wing_demo", 100, 32768, wing_demo_main },

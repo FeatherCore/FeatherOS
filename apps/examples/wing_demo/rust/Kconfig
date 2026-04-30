@@ -1,0 +1,24 @@
+config EXAMPLES_WING_DEMO_RUST
+	bool "Wing demo in Rust"
+	default y if EXAMPLES_WING_DEMO
+	depends on EXAMPLES_WING_DEMO
+	select WING_RUST
+	---help---
+		Rust-first Wing UI demo. It is independent from the FHRE
+		rendering demo and registers only wing_demo.
+
+if EXAMPLES_WING_DEMO_RUST
+
+config EXAMPLES_WING_DEMO_RUST_PROGNAME
+	string "Program name"
+	default "wing_demo"
+
+config EXAMPLES_WING_DEMO_RUST_PRIORITY
+	int "Wing demo task priority"
+	default 100
+
+config EXAMPLES_WING_DEMO_RUST_STACKSIZE
+	int "Wing demo stack size"
+	default 32768
+
+endif

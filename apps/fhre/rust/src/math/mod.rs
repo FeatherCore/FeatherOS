@@ -1,25 +1,27 @@
-//! Math utilities for FHRE
-//!
-//! Provides basic vector and color types for 2D/3D rendering
+pub type Fixed16 = i32;
 
-mod vec2;
-mod vec3;
-mod color;
-mod rect;
-mod mat4;
+pub const FIXED_ONE: Fixed16 = 1 << 16;
 
-pub use vec2::Vec2;
-pub use vec3::{Vec3, Vec4};
-pub use color::{Color, BlendMode};
-pub use rect::Rect;
-pub use mat4::Mat4;
+pub const fn fixed_from_i32(value: i32) -> Fixed16 {
+    value.saturating_mul(FIXED_ONE)
+}
 
-pub fn clamp<T: PartialOrd>(value: T, min: T, max: T) -> T {
-    if value < min {
-        min
-    } else if value > max {
-        max
+pub const fn fixed_to_i32(value: Fixed16) -> i32 {
+    value / FIXED_ONE
+}
+
+pub fn fixed_mul(a: Fixed16, b: Fixed16) -> Fixed16 {
+    ((a as i64 * b as i64) / FIXED_ONE as i64) as Fixed16
+}
+
+pub fn fixed_div(a: Fixed16, b: Fixed16) -> Fixed16 {
+    if b == 0 {
+        0
     } else {
-        value
+        (((a as i64) * FIXED_ONE as i64) / b as i64) as Fixed16
     }
+}
+
+pub fn fixed_lerp(a: Fixed16, b: Fixed16, t: Fixed16) -> Fixed16 {
+    a.saturating_add(fixed_mul(b.saturating_sub(a), t))
 }

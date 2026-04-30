@@ -1,0 +1,7 @@
+config EXAMPLES_WING_DEMO
+	bool "Wing UI shell demo"
+	default n
+	depends on WING
+	depends on VIDEO_FB
+	---help---
+		Enable the Wing UI demo command. It runs from NSH as wing_demo.

@@ -1,0 +1,7 @@
+#
+# Clean Wing shell.
+#
+
+menu "Wing Clean Shell"
+source "/home/uan-gpd/codes/FeatherOS/apps/wing/rust/Kconfig"
+endmenu

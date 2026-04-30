@@ -3,68 +3,31 @@
 ############################################################################
 
 include $(APPDIR)/Make.defs
+include $(APPDIR)/tools/Rust.mk
 
 MODULE = $(CONFIG_WING_RUST)
 
-RUST_CRATE_NAME := wing
 RUST_CARGO_PATH := $(APPDIR)/wing/rust
+RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
+WING_W10M_RESOURCE := $(APPDIR)/wing/resource/windows10_mobile
+WING_SIM_RESOURCE := $(TOPDIR)/boards/sim/sim/sim/src/etc/wing/resource/windows10_mobile
 
-# Check if we're building for NuttX simulator (native compilation)
 ifeq ($(CONFIG_ARCH_SIM),y)
-RUST_NATIVE := y
-endif
-
-# FHRE library path differs between SIM and embedded builds
-ifeq ($(RUST_NATIVE),y)
-FHRE_LIB := $(APPDIR)/fhre/rust/target/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libfhre.a
+context::
+	@echo "Checking Wing Rust core (native, no_std)..."
+	cargo build --manifest-path $(RUST_CARGO_PATH)/Cargo.toml --no-default-features
+	@echo "Installing Wing Windows 10 Mobile resources into sim ROMFS..."
+	@rm -rf $(WING_SIM_RESOURCE)
+	@mkdir -p $(WING_SIM_RESOURCE)
+	@cp -R $(WING_W10M_RESOURCE)/. $(WING_SIM_RESOURCE)/
 else
-RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
-FHRE_LIB := $(APPDIR)/fhre/rust/target/$(RUST_TARGET)/$(if $(CONFIG_DEBUG_FULLOPT),release,debug)/libfhre.a
-endif
-
-# For SIM (native compilation), we don't need --target flag
-ifeq ($(RUST_NATIVE),y)
-context:: $(FHRE_LIB)
-	@echo "Building Wing library with cargo (native)..."
-	cargo build \
-		--manifest-path $(RUST_CARGO_PATH)/Cargo.toml
-else
-RUST_TARGET := $(strip $(call RUST_TARGET_TRIPLE))
-
-# Generate .cargo/config.toml dynamically based on target
-CARGO_CONFIG := $(RUST_CARGO_PATH)/.cargo/config.toml
-
-context:: $(CARGO_CONFIG) $(FHRE_LIB)
-	@echo "Building Wing library with cargo..."
+context::
+	@echo "Checking Wing Rust core..."
 	@echo "Target: $(RUST_TARGET)"
-	NUTTX_INCLUDE_DIR=$(TOPDIR)/include:$(TOPDIR)/include/arch \
-	RUST_TARGET=$(RUST_TARGET) \
-	cargo build \
-		--manifest-path $(RUST_CARGO_PATH)/Cargo.toml \
-		--target $(RUST_TARGET)
-
-$(CARGO_CONFIG):
-	@echo "Generating Cargo config for target: $(RUST_TARGET)"
-	@mkdir -p $(dir $@)
-	@echo '[build]' > $@
-	@echo 'target = "$(RUST_TARGET)"' >> $@
-	@echo '' >> $@
-	@echo '[target.$(RUST_TARGET)]' >> $@
-	@echo 'rustflags = [' >> $@
-	@echo '  "-C", "link-arg=-Tlink.x",' >> $@
-	@echo '  "-C", "linker=rust-lld",' >> $@
-	@echo '  "-C", "link-arg=--undefined=rust_eh_personality",' >> $@
-	@echo ']' >> $@
+	cargo build --manifest-path $(RUST_CARGO_PATH)/Cargo.toml --target $(RUST_TARGET) --no-default-features
 endif
-
-$(FHRE_LIB):
-	@echo "Building FHRE library..."
-	$(MAKE) -C $(APPDIR)/fhre/rust context
 
 clean::
 	cargo clean --manifest-path $(RUST_CARGO_PATH)/Cargo.toml
-
-distclean::
-	$(call DELFILE, $(CARGO_CONFIG))
 
 include $(APPDIR)/Application.mk

@@ -1,0 +1,8 @@
+config EXAMPLES_FHRE_DEMO
+	bool "FHRE framebuffer drawing demo"
+	default n
+	depends on FHRE
+	depends on VIDEO_FB
+	---help---
+		Enable the FHRE demo command. It runs from NSH as fhre_demo.
+

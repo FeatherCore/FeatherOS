@@ -1,0 +1,22 @@
+[package]
+name = "wing_demo"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "wing_demo"
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+opt-level = "z"
+
+[dependencies]
+fhre = { path = "../../../fhre/rust" }
+wing = { path = "../../../wing/rust" }

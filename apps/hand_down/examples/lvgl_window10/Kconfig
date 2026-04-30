@@ -1,0 +1,30 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+menuconfig EXAMPLES_LVGL_WINDOW10
+	tristate "LVGL Windows 10 Mobile style demo"
+	default n
+	depends on GRAPHICS_LVGL
+	---help---
+		Enable a compact Windows 10 Mobile inspired LVGL demo.
+
+if EXAMPLES_LVGL_WINDOW10
+
+config EXAMPLES_LVGL_WINDOW10_PRIORITY
+	int "lvgl_window10 task priority"
+	default 100
+
+config EXAMPLES_LVGL_WINDOW10_STACKSIZE
+	int "lvgl_window10 stack size"
+	default 65536
+
+config EXAMPLES_LVGL_WINDOW10_INPUT_DEVPATH
+	string "Touchscreen device path"
+	default "/dev/input0"
+	depends on INPUT_TOUCHSCREEN
+	---help---
+		The path to the touchscreen device. Default: "/dev/input0"
+
+endif

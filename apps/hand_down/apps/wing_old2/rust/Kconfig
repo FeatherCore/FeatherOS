@@ -1,0 +1,80 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+config WING_RUST
+	tristate "Wing unified shell (Rust)"
+	default n
+	---help---
+		Enable the new unified Wing shell. This is a single Rust runtime that
+		contains the ECS, shell, renderer, and platform bridge. It does not
+		depend on the previous standalone renderer crate.
+
+if WING_RUST
+
+config WING_RUST_PROGNAME
+	string "Program name"
+	default "wing_rust"
+
+config WING_RUST_PRIORITY
+	int "Wing task priority"
+	default 100
+
+config WING_RUST_STACKSIZE
+	int "Wing stack size"
+	default 131072
+	---help---
+		The unified Wing shell is a Rust task that builds the runtime, renderer,
+		resource stores, and UI frame state during startup. Keep this larger than
+		the NuttX default task stack, especially on the sim target.
+
+config WING_RUST_SURFACE_DEMO_PROGNAME
+	string "Rust surface demo program name"
+	default "wing_surface_rust_demo"
+
+config WING_RUST_SURFACE_DEMO_PRIORITY
+	int "Rust surface demo task priority"
+	default 110
+
+config WING_RUST_SURFACE_DEMO_STACKSIZE
+	int "Rust surface demo stack size"
+	default 65536
+
+config WING_RUST_SETTINGS_PROGNAME
+	string "Wing settings app program name"
+	default "wing_settings"
+
+config WING_RUST_SETTINGS_PRIORITY
+	int "Wing settings app task priority"
+	default 110
+
+config WING_RUST_SETTINGS_STACKSIZE
+	int "Wing settings app stack size"
+	default 65536
+
+config WING_RUST_SYSTEM_PROGNAME
+	string "Wing system app program name"
+	default "wing_system"
+
+config WING_RUST_SYSTEM_PRIORITY
+	int "Wing system app task priority"
+	default 110
+
+config WING_RUST_SYSTEM_STACKSIZE
+	int "Wing system app stack size"
+	default 65536
+
+config WING_RUST_TERMINAL_PROGNAME
+	string "Wing terminal app program name"
+	default "wing_terminal"
+
+config WING_RUST_TERMINAL_PRIORITY
+	int "Wing terminal app task priority"
+	default 110
+
+config WING_RUST_TERMINAL_STACKSIZE
+	int "Wing terminal app stack size"
+	default 65536
+
+endif

@@ -1,0 +1,28 @@
+[package]
+name = "wing"
+version = "0.1.0"
+edition = "2021"
+authors = ["FeatherOS Team"]
+description = "Wing Shell - A mobile/watch shell for FeatherOS based on FHRE"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "wing"
+path = "src/lib.rs"
+crate-type = ["staticlib", "rlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+opt-level = 'z'
+
+[dependencies]
+fhre = { path = "../../fhre/rust", default-features = false }
+libm = "0.2"
+
+[features]
+default = []

@@ -1,0 +1,27 @@
+#
+# Clean Wing Rust shell entry.
+#
+
+config WING_RUST
+	tristate "Wing clean shell (Rust)"
+	default n
+	---help---
+		Enable the clean Wing shell. This version intentionally starts with a
+		small framebuffer demo kernel and avoids the previous prototype's app,
+		resource, PTY, and SDK layers.
+
+if WING_RUST
+
+config WING_RUST_PROGNAME
+	string "Program name"
+	default "wing_rust"
+
+config WING_RUST_PRIORITY
+	int "Wing task priority"
+	default 100
+
+config WING_RUST_STACKSIZE
+	int "Wing stack size"
+	default 32768
+
+endif

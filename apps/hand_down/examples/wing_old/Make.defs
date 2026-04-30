@@ -1,0 +1,6 @@
+############################################################################
+# apps/examples/wing_old/Make.defs
+############################################################################
+
+# Historical reference only. The unified Wing runtime no longer builds
+# through apps/examples/wing.

@@ -1,0 +1,8 @@
+############################################################################
+# apps/wing/surface_demo/Make.defs
+############################################################################
+
+ifneq ($(CONFIG_WING_SURFACE_DEMO),)
+CONFIGURED_APPS += $(APPDIR)/wing/surface_demo
+CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/wing/rust/include
+endif

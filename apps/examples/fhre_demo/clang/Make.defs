@@ -1,0 +1,8 @@
+############################################################################
+# apps/examples/fhre_demo/clang/Make.defs
+############################################################################
+
+ifneq ($(CONFIG_EXAMPLES_FHRE_DEMO_CLANG),)
+CONFIGURED_APPS += $(APPDIR)/examples/fhre_demo/clang
+endif
+

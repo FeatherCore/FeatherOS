@@ -23,7 +23,7 @@ The shell will initialize and display the UI on the X11 framebuffer.
 Framebuffer
 -----------
 
-- Resolution: 640x480 (configurable via CONFIG_SIM_FBWIDTH/FHEIGHT)
+- Resolution: 480x640 portrait (configurable via CONFIG_SIM_FBWIDTH/FBHEIGHT)
 - X11-based display via NuttX simulation
 
 Input

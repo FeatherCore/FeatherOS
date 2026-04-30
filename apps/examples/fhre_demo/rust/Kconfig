@@ -1,0 +1,25 @@
+config EXAMPLES_FHRE_DEMO_RUST
+	bool "FHRE demo in Rust"
+	default y if EXAMPLES_FHRE_DEMO
+	depends on EXAMPLES_FHRE_DEMO
+	select FHRE_RUST
+	---help---
+		Rust-first FHRE demo.  It is no_std and uses no external Rust
+		crates.
+
+if EXAMPLES_FHRE_DEMO_RUST
+
+config EXAMPLES_FHRE_DEMO_RUST_PROGNAME
+	string "Program name"
+	default "fhre_demo"
+
+config EXAMPLES_FHRE_DEMO_RUST_PRIORITY
+	int "FHRE demo task priority"
+	default 100
+
+config EXAMPLES_FHRE_DEMO_RUST_STACKSIZE
+	int "FHRE demo stack size"
+	default 8192
+
+endif
+

@@ -1,10 +1,8 @@
-#
-# For a description of the syntax of this configuration file,
-# see the file kconfig-language.txt in the NuttX tools repository.
-#
-
 config FHRE_RUST
-	bool "Feather Hybrid Render Engine (Rust version)"
-	default n
+	bool "FHRE Rust implementation"
+	default y if FHRE
+	depends on FHRE
 	---help---
-		Enable Feather Hybrid Render Engine (Rust version)
+		Build the primary FHRE implementation as no_std Rust.  The crate
+		uses only core and local code; it does not depend on external Rust
+		packages.
