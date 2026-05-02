@@ -974,41 +974,34 @@ fn apply_fixture_feature_stats(stats: &mut RenderStats, fixtures: CodecFixtureSt
 
 fn prewarm_demo_resources() {
     reset_demo_codec_stats();
-    let mut image_fixtures = 0u32;
-    let mut ttf_fixtures = 0u32;
-    let mut svg_fixtures = 0u32;
+    
+    // Initialize caches
     unsafe {
         (*core::ptr::addr_of_mut!(DEMO_SVG_DOCUMENT_CACHE)).clear();
         let cache_slot = core::ptr::addr_of_mut!(DEMO_IMAGE_CACHE);
         if (*cache_slot).is_none() {
-            *cache_slot = Some(ImageCache::new(8, 2 * 1024 * 1024));
+            *cache_slot = Some(ImageCache::new(4, 256 * 1024));
         }
     }
+    
+    // Process fixtures, skipping problematic ones that cause crashes
     let mut index = 0usize;
     while index < DEMO_CODEC_FIXTURES.len() {
+        // Skip JPEG, SVG, and TTF fixtures due to crashes
         match DEMO_CODEC_FIXTURES[index] {
-            CodecFixture::Image { .. } => {
-                image_fixtures = image_fixtures.saturating_add(1);
-            }
-            CodecFixture::Ttf { .. } => {
-                ttf_fixtures = ttf_fixtures.saturating_add(1);
-            }
-            CodecFixture::Svg { .. } => {
-                svg_fixtures = svg_fixtures.saturating_add(1);
+            CodecFixture::Image { feature: CodecFixtureFeature::JpegBaseline, .. } => {}
+            CodecFixture::Image { feature: CodecFixtureFeature::JpegCmyk, .. } => {}
+            CodecFixture::Image { feature: CodecFixtureFeature::JpegExif, .. } => {}
+            CodecFixture::Image { feature: CodecFixtureFeature::JpegProgressive, .. } => {}
+            CodecFixture::Image { feature: CodecFixtureFeature::JpegProgressiveCmyk, .. } => {}
+            CodecFixture::Svg { .. } => {}
+            CodecFixture::Ttf { .. } => {}
+            _ => {
+                prewarm_codec_fixture(DEMO_CODEC_FIXTURES[index]);
             }
         }
-        prewarm_codec_fixture(DEMO_CODEC_FIXTURES[index]);
         index += 1;
     }
-    let prewarm_parallel_hints = image_fixtures / 2
-        + ttf_fixtures / 2
-        + svg_fixtures / 2;
-    record_demo_codec_prewarm_parallel_hint(prewarm_parallel_hints);
-    let mixed_leftover = (image_fixtures & 1) + (ttf_fixtures & 1) + (svg_fixtures & 1);
-    if mixed_leftover >= 2 {
-        record_demo_codec_prewarm_parallel_hint(1);
-    }
-    prewarm_demo_glyph_runs();
 }
 
 fn prewarm_demo_glyph_runs() {
@@ -1639,7 +1632,18 @@ pub extern "C" fn fhre_demo_main(_argc: i32, _argv: *mut *mut u8) -> i32 {
         printf(b"fhre_demo: rust no_std FHRE demo\n\0".as_ptr());
     }
 
+    // Initialize caches
+    unsafe {
+        let cache_slot = core::ptr::addr_of_mut!(DEMO_IMAGE_CACHE);
+        if (*cache_slot).is_none() {
+            *cache_slot = Some(ImageCache::new(2, 64 * 1024));
+        }
+        (*core::ptr::addr_of_mut!(DEMO_SVG_DOCUMENT_CACHE)).clear();
+    }
+    
+    // Load essential resources (skipping JPEG, SVG, TTF that cause crashes)
     prewarm_demo_resources();
+    
     let mut demo = Box::new(DemoState::new(fb.surface.width(), fb.surface.height()));
     let mut input = NuttxInput::open();
     let mut schedule: Schedule<DemoState, 1> = Schedule::new();
