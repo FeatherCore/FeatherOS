@@ -89,6 +89,14 @@ impl DecodedImage {
     pub fn byte_len(&self) -> usize {
         self.data.len()
     }
+
+    pub fn is_gray(&self) -> bool {
+        matches!(self.format, ImageFormat::A8)
+    }
+
+    pub fn has_alpha(&self) -> bool {
+        matches!(self.format, ImageFormat::Rgba8888 | ImageFormat::A8)
+    }
 }
 
 pub struct PngDecoder;

@@ -667,28 +667,117 @@ impl Surface {
         }
 
         let glyph = glyph_5x7_a8(ch as u8);
-        let mut row = 0;
-        while row < glyph.height {
-            let mut col = 0;
-            while col < glyph.width {
-                let alpha = glyph.alpha_at(col, row);
-                if alpha != 0 {
-                    let a = ((color.a as u16 * alpha as u16) / 255) as u8;
-                    self.fill_rect(
-                        Rect::new(
-                            x + col as i32 * scale,
-                            y + row as i32 * scale,
-                            scale as u16,
-                            scale as u16,
-                        ),
-                        Color::rgba(color.r, color.g, color.b, a),
-                    );
-                }
-                col += 1;
-            }
-            row += 1;
-        }
+        self.draw_glyph_5x7_fast(x, y, glyph, color, scale);
         glyph.advance as i32 * scale
+    }
+
+    fn draw_glyph_5x7_fast(&mut self, x: i32, y: i32, glyph: crate::glyph::GlyphA8, color: Color, scale: i32) {
+        if color.a == 0 {
+            return;
+        }
+
+        let glyph_w = glyph.width as i32;
+        let glyph_h = glyph.height as i32;
+        let has_masks = self.has_masks();
+        let clip = self.clip;
+
+        let x0 = x;
+        let y0 = y;
+        let x1 = x + glyph_w * scale;
+        let y1 = y + glyph_h * scale;
+
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+
+        if color.a == 255 && !has_masks && clip.is_none() && self.format == PixelFormat::Rgb565 {
+            self.draw_glyph_5x7_rgb565_fast_path(x, y, glyph, color, scale);
+            return;
+        }
+
+        let base_color = color;
+        let mut gy = 0i32;
+        while gy < glyph_h {
+            let mut gx = 0i32;
+            while gx < glyph_w {
+                let alpha = glyph.alpha_at(gx as u8, gy as u8);
+                if alpha != 0 {
+                    let a = ((base_color.a as u16 * alpha as u16) / 255) as u8;
+                    if a != 0 {
+                        self.fill_rect(
+                            Rect::new(
+                                x + gx * scale,
+                                y + gy * scale,
+                                scale as u16,
+                                scale as u16,
+                            ),
+                            Color::rgba(base_color.r, base_color.g, base_color.b, a),
+                        );
+                    }
+                }
+                gx += 1;
+            }
+            gy += 1;
+        }
+    }
+
+    fn draw_glyph_5x7_rgb565_fast_path(&mut self, x: i32, y: i32, glyph: crate::glyph::GlyphA8, color: Color, scale: i32) {
+        let glyph_w = glyph.width as i32;
+        let glyph_h = glyph.height as i32;
+        let raw = rgb565(Color::rgb(color.r, color.g, color.b));
+        let pixel_bytes = 2;
+
+        // Early exit if invalid
+        if !self.is_valid() || scale <= 0 || glyph_w <= 0 || glyph_h <= 0 || self.pixels.is_null() {
+            return;
+        }
+
+        let mut gy = 0i32;
+        while gy < glyph_h {
+            let row_mask = glyph.row(gy as u8);
+            let dst_y = y + gy * scale;
+            
+            // Skip if row is completely outside surface
+            if dst_y >= self.height as i32 || dst_y + scale < 0 {
+                gy += 1;
+                continue;
+            }
+            
+            let mut gx = 0i32;
+            while gx < glyph_w {
+                if (row_mask >> (glyph_w - 1 - gx)) & 1 != 0 {
+                    let start_x = x + gx * scale;
+                    
+                    // Skip if column is completely outside surface
+                    if start_x >= self.width as i32 || start_x + scale < 0 {
+                        gx += 1;
+                        continue;
+                    }
+                    
+                    let mut fill_y = dst_y;
+                    while fill_y < dst_y + scale {
+                        // Only draw if within surface bounds
+                        if fill_y >= 0 && fill_y < self.height as i32 {
+                            let mut fill_x = start_x;
+                            let mut fill_w = 0i32;
+                            while fill_w < scale {
+                                if fill_x >= 0 && fill_x < self.width as i32 {
+                                    unsafe {
+                                        let dst_ptr = self.pixels.add((fill_y as usize) * self.stride + (fill_x as usize) * pixel_bytes) as *mut u16;
+                                        core::ptr::write_unaligned(dst_ptr, raw);
+                                    }
+                                }
+                                fill_x += 1;
+                                fill_w += 1;
+                            }
+                        }
+                        fill_y += 1;
+                    }
+                }
+                gx += 1;
+            }
+            gy += 1;
+        }
     }
 
     fn draw_codepoint_font(

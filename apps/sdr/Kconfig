@@ -6,5 +6,5 @@
 #
 
 menu "Software Define Radio Libraries"
-source "/home/uan-wsl2/codes/FeatherOS/apps/sdr/liquid_dsp/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/sdr/liquid_dsp/Kconfig"
 endmenu # Software Define Radio Libraries

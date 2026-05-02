@@ -164,21 +164,13 @@ impl Surface {
         if !self.is_valid() || x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
             return;
         }
-        if let Some(clip) = self.clip {
-            if !clip.contains_point(Point::new(x, y)) {
-                return;
+        if let Some(color) = self.apply_masks_to_color(Point::new(x, y), color) {
+            unsafe {
+                let offset = y as usize * self.stride + x as usize * (self.bpp as usize / 8);
+                let ptr = self.pixels.add(offset);
+                let out = color.over(self.read_pixel_ptr(ptr));
+                self.write_pixel_ptr(ptr, out);
             }
-        }
-
-        let Some(color) = self.apply_masks_to_color(Point::new(x, y), color) else {
-            return;
-        };
-
-        unsafe {
-            let offset = y as usize * self.stride + x as usize * (self.bpp as usize / 8);
-            let ptr = self.pixels.add(offset);
-            let out = color.over(self.read_pixel_ptr(ptr));
-            self.write_pixel_ptr(ptr, out);
         }
     }
 
@@ -201,20 +193,23 @@ impl Surface {
             return;
         }
 
-        if !self.has_masks() && color.a == 255 && self.fill_rect_opaque_fast(x0, y0, x1, y1, color)
-        {
-            return;
+        if !self.has_masks() {
+            if color.a == 255 && self.fill_rect_opaque_fast(x0, y0, x1, y1, color) {
+                return;
+            }
+            if self.fill_rect_alpha_fast(x0, y0, x1, y1, color) {
+                return;
+            }
         }
 
-        if !self.has_masks() && self.fill_rect_alpha_fast(x0, y0, x1, y1, color) {
-            return;
-        }
-
+        let old_clip = self.clip;
+        self.clip = None;
         for y in y0..y1 {
             for x in x0..x1 {
                 self.put_pixel(x, y, color);
             }
         }
+        self.clip = old_clip;
     }
 
     pub fn fill_vgradient(&mut self, rect: Rect, top: Color, bottom: Color) {
@@ -235,19 +230,20 @@ impl Surface {
         }
 
         let h = rect.h.max(1) as i32;
+        let has_masks = self.has_masks();
+        let old_clip = self.clip;
+        self.clip = None;
+
         let mut y = y0;
         while y < y1 {
             let row = y.saturating_sub(rect.y).clamp(0, h.saturating_sub(1));
             let t = ((row * 255) / h) as u8;
             let color = top.mix(bottom, t);
-            if !self.has_masks()
-                && color.a == 255
-                && self.fill_rect_opaque_fast(x0, y, x1, y + 1, color)
-            {
+            if !has_masks && color.a == 255 && self.fill_rect_opaque_fast(x0, y, x1, y + 1, color) {
                 y += 1;
                 continue;
             }
-            if !self.has_masks() && self.fill_rect_alpha_fast(x0, y, x1, y + 1, color) {
+            if !has_masks && self.fill_rect_alpha_fast(x0, y, x1, y + 1, color) {
                 y += 1;
                 continue;
             }
@@ -258,6 +254,8 @@ impl Surface {
             }
             y += 1;
         }
+
+        self.clip = old_clip;
     }
 }
 

@@ -6,12 +6,12 @@
 #
 
 menu "mm"
-source "$APPSDIR/testing/mm/cachetest/Kconfig"
-source "$APPSDIR/testing/mm/heaptest/Kconfig"
-source "$APPSDIR/testing/mm/iob/Kconfig"
-source "$APPSDIR/testing/mm/kasantest/Kconfig"
-source "$APPSDIR/testing/mm/memstress/Kconfig"
-source "$APPSDIR/testing/mm/memtester/Kconfig"
-source "$APPSDIR/testing/mm/ramtest/Kconfig"
-source "$APPSDIR/testing/mm/stressapptest/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/mm/cachetest/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/mm/heaptest/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/mm/iob/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/mm/kasantest/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/mm/memstress/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/mm/memtester/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/mm/ramtest/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/mm/stressapptest/Kconfig"
 endmenu # mm

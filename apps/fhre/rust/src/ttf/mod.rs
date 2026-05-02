@@ -29,6 +29,28 @@ pub struct RasterGlyph {
     pub data: Vec<u8>,
 }
 
+impl RasterGlyph {
+    pub fn byte_size(&self) -> usize {
+        self.width as usize * self.height as usize
+    }
+
+    pub fn aspect_ratio(&self) -> f32 {
+        if self.height == 0 {
+            1.0
+        } else {
+            self.width as f32 / self.height as f32
+        }
+    }
+
+    pub fn scaled_width(&self, scale: u16) -> u16 {
+        self.width as u16 * scale / 16
+    }
+
+    pub fn scaled_height(&self, scale: u16) -> u16 {
+        self.height as u16 * scale / 16
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TtfError {
     BadSignature,

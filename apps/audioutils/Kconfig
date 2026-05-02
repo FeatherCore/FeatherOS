@@ -6,9 +6,9 @@
 #
 
 menu "Audio Utility libraries"
-source "/home/uan-wsl2/codes/FeatherOS/apps/audioutils/fmsynth/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/audioutils/lame/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/audioutils/libmad/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/audioutils/mml_parser/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/audioutils/nxaudio/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/audioutils/fmsynth/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/audioutils/lame/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/audioutils/libmad/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/audioutils/mml_parser/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/audioutils/nxaudio/Kconfig"
 endmenu # Audio Utility libraries

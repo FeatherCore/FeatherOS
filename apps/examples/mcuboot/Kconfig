@@ -6,8 +6,8 @@
 #
 
 menu "MCUboot Examples"
-source "$APPSDIR/examples/mcuboot/slot_confirm/Kconfig"
-source "$APPSDIR/examples/mcuboot/swap_test/Kconfig"
-source "$APPSDIR/examples/mcuboot/update_agent/Kconfig"
-source "$APPSDIR/examples/mcuboot/update_agent_local/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/examples/mcuboot/slot_confirm/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/examples/mcuboot/swap_test/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/examples/mcuboot/update_agent/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/examples/mcuboot/update_agent_local/Kconfig"
 endmenu # MCUboot Examples

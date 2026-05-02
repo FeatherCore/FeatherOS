@@ -6,6 +6,6 @@
 #
 
 menu "Video Utility libraries"
-source "/home/uan-wsl2/codes/FeatherOS/apps/videoutils/openh264/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/videoutils/x264/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/videoutils/openh264/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/videoutils/x264/Kconfig"
 endmenu # Video Utility libraries

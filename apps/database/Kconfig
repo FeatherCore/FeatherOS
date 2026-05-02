@@ -6,5 +6,5 @@
 #
 
 menu "Database"
-source "/home/uan-wsl2/codes/FeatherOS/apps/database/sqlite/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/database/sqlite/Kconfig"
 endmenu # Database

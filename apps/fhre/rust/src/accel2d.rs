@@ -3,9 +3,10 @@ use crate::{
         DrawChain, DrawChainOpKind, DrawChainOpPayload, DrawChainRunContract,
         DrawChainRunDescriptor,
     },
+    draw::BorderStyle,
     image::{ImageFormat, ImageResolver, ImageView},
     mock_accel::{resolve_draw_chain_image_descriptor, DrawChainImageResolveError},
-    Color, ImageFit, ImageId, PixelFormat, Rect, Surface,
+    Color, ImageFit, ImageId, PixelFormat, Point, Rect, Surface,
 };
 
 const ACCEL2D_FENCE_START: u32 = 1;
@@ -189,6 +190,9 @@ pub struct Accel2dImageSourceDescriptor {
     pub height: u16,
     pub stride: usize,
     pub format: ImageFormat,
+    pub src_rect: Option<Rect>,
+    pub color_key: Option<Color>,
+    pub premultiplied_alpha: bool,
 }
 
 impl Accel2dImageSourceDescriptor {
@@ -218,6 +222,53 @@ impl Accel2dImageSourceDescriptor {
             height: view.height,
             stride: view.stride,
             format: view.format,
+            src_rect: None,
+            color_key: None,
+            premultiplied_alpha: false,
+        })
+    }
+
+    pub fn from_view_with_options(
+        view: ImageView,
+        src_rect: Option<Rect>,
+        color_key: Option<Color>,
+        premultiplied_alpha: bool,
+    ) -> Result<Self, Accel2dCommandBuildError> {
+        if view.data.is_null()
+            || view.width == 0
+            || view.height == 0
+            || view.stride == 0
+            || view.len == 0
+        {
+            return Err(Accel2dCommandBuildError::Image(
+                DrawChainImageResolveError::EmptyImage,
+            ));
+        }
+
+        if let Some(rect) = src_rect {
+            if rect.x < 0
+                || rect.y < 0
+                || rect.w == 0
+                || rect.h == 0
+                || rect.x.saturating_add(rect.w as i32) > view.width as i32
+                || rect.y.saturating_add(rect.h as i32) > view.height as i32
+            {
+                return Err(Accel2dCommandBuildError::Image(
+                    DrawChainImageResolveError::SourceOutOfBounds,
+                ));
+            }
+        }
+
+        Ok(Self {
+            data: view.data,
+            len: view.len,
+            width: view.width,
+            height: view.height,
+            stride: view.stride,
+            format: view.format,
+            src_rect,
+            color_key,
+            premultiplied_alpha,
         })
     }
 
@@ -232,8 +283,20 @@ impl Accel2dImageSourceDescriptor {
         }
     }
 
+    pub const fn effective_src_rect(self) -> Rect {
+        match self.src_rect {
+            Some(rect) => rect,
+            None => Rect::new(0, 0, self.width, self.height),
+        }
+    }
+
     pub const fn is_valid(self) -> bool {
-        !self.data.is_null() && self.len > 0 && self.width > 0 && self.height > 0 && self.stride > 0
+        !self.data.is_null()
+            && self.len > 0
+            && self.width > 0
+            && self.height > 0
+            && self.stride > 0
+            && self.stride >= self.width as usize * (self.format.bpp() as usize / 8)
     }
 }
 
@@ -321,6 +384,26 @@ pub enum Accel2dCommand {
         opacity: u8,
         fit: ImageFit,
         tint: Option<Color>,
+    },
+    Line {
+        from: Point,
+        to: Point,
+        clip: Option<Rect>,
+        color: Color,
+        width: u16,
+    },
+    Border {
+        rect: Rect,
+        clip: Option<Rect>,
+        style: BorderStyle,
+    },
+    Arc {
+        center: Point,
+        radius: u16,
+        clip: Option<Rect>,
+        color: Color,
+        start_angle: i32,
+        end_angle: i32,
     },
 }
 
@@ -563,6 +646,41 @@ pub fn execute_accel_2d_command_list_on_surface<const COMMANDS: usize>(
                 } else {
                     surface.draw_image_view_fit(rect, view, opacity, fit);
                 }
+            }
+            Accel2dCommand::Line {
+                from,
+                to,
+                clip,
+                color,
+                width,
+            } => {
+                surface.set_clip(clip);
+                surface.draw_wide_line(from, to, width, color);
+            }
+            Accel2dCommand::Border {
+                rect,
+                clip,
+                style,
+            } => {
+                surface.set_clip(clip);
+                surface.draw_border(rect, style);
+            }
+            Accel2dCommand::Arc {
+                center,
+                radius,
+                clip,
+                color,
+                start_angle,
+                end_angle,
+            } => {
+                surface.set_clip(clip);
+                surface.draw_arc(center, radius, crate::draw::ArcStyle {
+                    color,
+                    width: 1,
+                    start_angle: start_angle as i16,
+                    end_angle: end_angle as i16,
+                    rounded: false,
+                });
             }
         }
     }

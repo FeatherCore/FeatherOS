@@ -6,8 +6,8 @@
 #
 
 menu "Math Library Support"
-source "/home/uan-wsl2/codes/FeatherOS/apps/math/gemmlowp/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/math/kissfft/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/math/libtommath/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/math/ruy/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/math/gemmlowp/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/math/kissfft/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/math/libtommath/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/math/ruy/Kconfig"
 endmenu # Math Library Support

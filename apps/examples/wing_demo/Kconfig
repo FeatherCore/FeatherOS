@@ -6,7 +6,7 @@
 #
 
 menu "Wing Demo"
-source "$APPSDIR/examples/wing_demo/base/Kconfig"
-source "$APPSDIR/examples/wing_demo/clang/Kconfig"
-source "$APPSDIR/examples/wing_demo/rust/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/examples/wing_demo/base/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/examples/wing_demo/clang/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/examples/wing_demo/rust/Kconfig"
 endmenu # Wing Demo

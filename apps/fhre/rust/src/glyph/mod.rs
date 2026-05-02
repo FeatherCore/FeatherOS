@@ -34,6 +34,14 @@ impl GlyphA8 {
             0
         }
     }
+
+    pub const fn row(self, y: u8) -> u8 {
+        if y >= self.height {
+            0
+        } else {
+            self.rows[y as usize]
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

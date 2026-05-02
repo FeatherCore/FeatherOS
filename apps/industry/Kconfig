@@ -6,7 +6,7 @@
 #
 
 menu "Industrial Applications"
-source "/home/uan-wsl2/codes/FeatherOS/apps/industry/abnt_codi/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/industry/foc/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/industry/scpi/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/industry/abnt_codi/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/industry/foc/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/industry/scpi/Kconfig"
 endmenu # Industrial Applications

@@ -6,5 +6,5 @@
 #
 
 menu "Inertial Libraries Support"
-source "/home/uan-wsl2/codes/FeatherOS/apps/inertial/madgwick/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/inertial/madgwick/Kconfig"
 endmenu # Inertial Libraries Support

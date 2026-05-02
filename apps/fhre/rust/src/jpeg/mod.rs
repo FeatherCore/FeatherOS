@@ -45,6 +45,28 @@ pub struct JpegInfo {
     pub adobe_transform: Option<u8>,
 }
 
+impl JpegInfo {
+    pub fn is_grayscale(&self) -> bool {
+        self.components == 1
+    }
+
+    pub fn is_ycbcr(&self) -> bool {
+        self.components == 3
+    }
+
+    pub fn is_cmyk(&self) -> bool {
+        self.components == 4
+    }
+
+    pub fn is_progressive(&self) -> bool {
+        self.progressive
+    }
+
+    pub fn pixel_count(&self) -> usize {
+        self.width as usize * self.height as usize
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct JpegDecodeOptions {
     pub apply_exif_orientation: bool,

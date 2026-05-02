@@ -6,6 +6,6 @@
 #
 
 menu "Module example"
-source "$APPSDIR/examples/module/chardev/Kconfig"
-source "$APPSDIR/examples/module/main/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/examples/module/chardev/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/examples/module/main/Kconfig"
 endmenu # Module example

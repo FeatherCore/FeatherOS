@@ -6,13 +6,13 @@
 #
 
 menu "drivers"
-source "$APPSDIR/testing/drivers/crypto/Kconfig"
-source "$APPSDIR/testing/drivers/drivertest/Kconfig"
-source "$APPSDIR/testing/drivers/fftest/Kconfig"
-source "$APPSDIR/testing/drivers/nand_sim/Kconfig"
-source "$APPSDIR/testing/drivers/pcitest/Kconfig"
-source "$APPSDIR/testing/drivers/rpmsgdev/Kconfig"
-source "$APPSDIR/testing/drivers/sd_stress/Kconfig"
-source "$APPSDIR/testing/drivers/ser/Kconfig"
-source "$APPSDIR/testing/drivers/setest/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/drivers/crypto/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/drivers/drivertest/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/drivers/fftest/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/drivers/nand_sim/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/drivers/pcitest/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/drivers/rpmsgdev/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/drivers/sd_stress/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/drivers/ser/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/testing/drivers/setest/Kconfig"
 endmenu # drivers

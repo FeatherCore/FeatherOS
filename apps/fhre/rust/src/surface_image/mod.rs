@@ -2,7 +2,7 @@ use crate::{
     image::{builtin_image, ImageFormat, ImageView},
     raster::{clamp_i32, rgb565},
     surface_pixels::blend_rgb565_raw,
-    BlendMode, Color, ImageDrawStyle, ImageFit, ImageId, PixelFormat, Point, Rect, Surface,
+    BlendMode, Color, ImageDrawStyle, ImageFit, ImageId, Point, Rect, Surface,
     TexCoord,
 };
 
@@ -168,8 +168,7 @@ impl Surface {
 
         if tint.is_none()
             && blend == BlendMode::Normal
-            && self.format == PixelFormat::Rgb565
-            && self.blit_rgb565_normal_fast(rect, dst_rect, image, fit, opacity, x0, y0, x1, y1)
+            && self.blit_rgb565_normal_fast(rect, dst_rect, image, fit, opacity, x0, y0, x1, y1, tint)
         {
             return;
         }
@@ -225,6 +224,74 @@ impl Surface {
         }
     }
 
+    fn copy_rgba8888_image_rows(
+        &mut self,
+        rect: Rect,
+        image: ImageView,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+    ) {
+        let copy_width = (x1 - x0).max(0) as usize * 4;
+        if copy_width == 0 || image.data.is_null() {
+            return;
+        }
+
+        let src_x = (x0 - rect.x).max(0) as usize * 4;
+        let dst_x = x0 as usize * 4;
+        let mut y = y0;
+        while y < y1 {
+            let src_y = (y - rect.y).max(0) as usize;
+            unsafe {
+                let src = image.data.add(src_y * image.stride + src_x);
+                let dst = self.pixels.add(y as usize * self.stride + dst_x);
+                core::ptr::copy_nonoverlapping(src, dst, copy_width);
+            }
+            y += 1;
+        }
+    }
+
+    fn copy_a8_as_rgba8888_rows(
+        &mut self,
+        rect: Rect,
+        image: ImageView,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        r: u8,
+        g: u8,
+        b: u8,
+    ) {
+        let copy_width = (x1 - x0).max(0) as usize;
+        if copy_width == 0 || image.data.is_null() {
+            return;
+        }
+
+        let src_x = (x0 - rect.x).max(0) as usize;
+        let dst_x = x0 as usize * 4;
+        let mut y = y0;
+        while y < y1 {
+            let src_y = (y - rect.y).max(0) as usize;
+            unsafe {
+                let src = image.data.add(src_y * image.stride + src_x);
+                let mut dst_ptr = self.pixels.add(y as usize * self.stride + dst_x);
+                let mut x = 0;
+                while x < copy_width {
+                    let a = *src.add(x);
+                    *dst_ptr = r;
+                    *dst_ptr.add(1) = g;
+                    *dst_ptr.add(2) = b;
+                    *dst_ptr.add(3) = a;
+                    dst_ptr = dst_ptr.add(4);
+                    x += 1;
+                }
+            }
+            y += 1;
+        }
+    }
+
     fn blit_rgb565_scaled_nearest(
         &mut self,
         dst_rect: Rect,
@@ -264,6 +331,90 @@ impl Surface {
         }
     }
 
+    fn blit_rgba8888_scaled_nearest(
+        &mut self,
+        dst_rect: Rect,
+        image: ImageView,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+    ) {
+        if image.data.is_null() || dst_rect.w == 0 || dst_rect.h == 0 {
+            return;
+        }
+
+        let dst_w = dst_rect.w.max(1) as i32;
+        let dst_h = dst_rect.h.max(1) as i32;
+        let src_w = image.width.max(1) as i32;
+        let src_h = image.height.max(1) as i32;
+        let mut y = y0;
+        while y < y1 {
+            let sy = ((y - dst_rect.y).saturating_mul(src_h) / dst_h)
+                .max(0)
+                .min(src_h - 1) as usize;
+            let dst_y = y as usize * self.stride;
+            let mut x = x0;
+            while x < x1 {
+                let sx = ((x - dst_rect.x).saturating_mul(src_w) / dst_w)
+                    .max(0)
+                    .min(src_w - 1) as usize;
+                unsafe {
+                    let src = image.data.add(sy * image.stride + sx * 4);
+                    let dst = self.pixels.add(dst_y + x as usize * 4);
+                    core::ptr::copy_nonoverlapping(src, dst, 4);
+                }
+                x += 1;
+            }
+            y += 1;
+        }
+    }
+
+    fn blit_a8_scaled_as_rgba8888(
+        &mut self,
+        dst_rect: Rect,
+        image: ImageView,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        r: u8,
+        g: u8,
+        b: u8,
+    ) {
+        if image.data.is_null() || dst_rect.w == 0 || dst_rect.h == 0 {
+            return;
+        }
+
+        let dst_w = dst_rect.w.max(1) as i32;
+        let dst_h = dst_rect.h.max(1) as i32;
+        let src_w = image.width.max(1) as i32;
+        let src_h = image.height.max(1) as i32;
+        let mut y = y0;
+        while y < y1 {
+            let sy = ((y - dst_rect.y).saturating_mul(src_h) / dst_h)
+                .max(0)
+                .min(src_h - 1) as usize;
+            let dst_y = y as usize * self.stride;
+            let mut x = x0;
+            while x < x1 {
+                let sx = ((x - dst_rect.x).saturating_mul(src_w) / dst_w)
+                    .max(0)
+                    .min(src_w - 1) as usize;
+                unsafe {
+                    let a = *image.data.add(sy * image.stride + sx);
+                    let dst = self.pixels.add(dst_y + x as usize * 4);
+                    *dst = r;
+                    *dst.add(1) = g;
+                    *dst.add(2) = b;
+                    *dst.add(3) = a;
+                }
+                x += 1;
+            }
+            y += 1;
+        }
+    }
+
     fn blit_rgb565_normal_fast(
         &mut self,
         rect: Rect,
@@ -275,17 +426,29 @@ impl Surface {
         y0: i32,
         x1: i32,
         y1: i32,
+        tint: Option<Color>,
     ) -> bool {
         if image.data.is_null() || opacity == 0 || dst_rect.w == 0 || dst_rect.h == 0 {
             return true;
         }
 
         let has_masks = self.has_masks();
-        if image.format == ImageFormat::Rgb565 && opacity == 255 && !has_masks {
+        let has_tint = tint.is_some();
+
+        if image.format == ImageFormat::Rgb565 && opacity == 255 && !has_masks && !has_tint {
             if fit == ImageFit::Stretch && rect.w == image.width && rect.h == image.height {
                 self.copy_rgb565_image_rows(rect, image, x0, y0, x1, y1);
             } else {
                 self.blit_rgb565_scaled_nearest(dst_rect, image, x0, y0, x1, y1);
+            }
+            return true;
+        }
+
+        if image.format == ImageFormat::Rgba8888 && opacity == 255 && !has_masks && !has_tint {
+            if fit == ImageFit::Stretch && rect.w == image.width && rect.h == image.height {
+                self.copy_rgba8888_image_rows(rect, image, x0, y0, x1, y1);
+            } else {
+                self.blit_rgba8888_scaled_nearest(dst_rect, image, x0, y0, x1, y1);
             }
             return true;
         }

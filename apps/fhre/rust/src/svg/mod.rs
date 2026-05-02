@@ -69,6 +69,30 @@ pub enum SvgFilterEffect {
     },
 }
 
+impl SvgFilterEffect {
+    pub const fn is_none(&self) -> bool {
+        matches!(self, SvgFilterEffect::None)
+    }
+
+    pub const fn is_blur(&self) -> bool {
+        matches!(self, SvgFilterEffect::Blur(_))
+    }
+
+    pub const fn is_shadow(&self) -> bool {
+        matches!(self, SvgFilterEffect::DropShadow { .. })
+    }
+
+    pub const fn effective_radius(&self, max_radius: u16) -> u16 {
+        match self {
+            SvgFilterEffect::Blur(r) => if *r > max_radius { max_radius } else { *r },
+            SvgFilterEffect::DropShadow { radius, .. } => {
+                if *radius > max_radius { max_radius } else { *radius }
+            }
+            SvgFilterEffect::None => 0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SvgRasterOptions {
     pub viewport: Rect,

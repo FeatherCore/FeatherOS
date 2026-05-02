@@ -6,6 +6,6 @@
 #
 
 menu "LTE Libraries and NSH Add-Ons"
-source "/home/uan-wsl2/codes/FeatherOS/apps/lte/alt1250/Kconfig"
-source "/home/uan-wsl2/codes/FeatherOS/apps/lte/lapi/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/lte/alt1250/Kconfig"
+source "/home/uan-gpd/codes/FeatherOS/apps/lte/lapi/Kconfig"
 endmenu # LTE Libraries and NSH Add-Ons

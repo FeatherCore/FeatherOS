@@ -20,6 +20,7 @@ pub enum DrawChainImageResolveError {
     NotImagePayload,
     MissingImage,
     EmptyImage,
+    SourceOutOfBounds,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

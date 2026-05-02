@@ -26,6 +26,33 @@ pub enum ImageFormat {
     A8,
 }
 
+impl ImageFormat {
+    pub const fn bpp(self) -> u8 {
+        match self {
+            ImageFormat::Rgb565 => 16,
+            ImageFormat::Rgb888 => 24,
+            ImageFormat::Rgba8888 => 32,
+            ImageFormat::A8 => 8,
+        }
+    }
+
+    pub const fn bytes_per_pixel(self) -> usize {
+        (self.bpp() / 8) as usize
+    }
+
+    pub const fn has_alpha(self) -> bool {
+        matches!(self, ImageFormat::Rgba8888 | ImageFormat::A8)
+    }
+
+    pub const fn is_rgb(self) -> bool {
+        matches!(self, ImageFormat::Rgb565 | ImageFormat::Rgb888 | ImageFormat::Rgba8888)
+    }
+
+    pub const fn is_gray(self) -> bool {
+        matches!(self, ImageFormat::A8)
+    }
+}
+
 pub type ImageResolver = fn(ImageId) -> Option<ImageView>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -142,6 +169,30 @@ impl ImageView {
             return None;
         }
         Some(Color::rgba(tint.r, tint.g, tint.b, a))
+    }
+
+    pub const fn pixel_count(self) -> usize {
+        self.width as usize * self.height as usize
+    }
+
+    pub const fn row_bytes(self) -> usize {
+        self.width as usize * self.format.bytes_per_pixel()
+    }
+
+    pub const fn total_bytes(self) -> usize {
+        self.height as usize * self.stride
+    }
+
+    pub const fn is_valid(self) -> bool {
+        !self.data.is_null() && self.width > 0 && self.height > 0 && self.stride > 0
+    }
+
+    pub const fn aspect_ratio(self) -> f32 {
+        if self.height == 0 {
+            1.0
+        } else {
+            self.width as f32 / self.height as f32
+        }
     }
 }
 
