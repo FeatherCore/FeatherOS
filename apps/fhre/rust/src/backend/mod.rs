@@ -1,7 +1,7 @@
 use crate::svg::SvgDocumentCacheStats;
 use crate::{
-    DrawCommand, FrameStats, GlyphRunCacheStats, ImageCacheStats, LayerSpec, MaskSpec, PixelFormat,
-    PresentStats, Rect,
+    Color, DrawCommand, FrameStats, GlyphRunCacheStats, ImageCacheStats, ImageFit, ImageId,
+    LayerSpec, MaskSpec, PixelFormat, PresentStats, Rect,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -122,6 +122,12 @@ impl DrawFeatureFlags {
         (self.bits & other.bits) == other.bits
     }
 
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            bits: self.bits | other.bits,
+        }
+    }
+
     pub const fn supports(self, kind: DrawTaskKind) -> bool {
         self.contains(Self::for_kind(kind))
     }
@@ -181,6 +187,59 @@ pub const DEFAULT_DRAW_CHAIN_OPS: usize = 64;
 pub const DEFAULT_CODEC_PIPELINE_STAGES: usize = 16;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawChainRunDescriptor {
+    pub command_start: u16,
+    pub command_end: u16,
+    pub has_clip: bool,
+    pub has_mask: bool,
+    pub has_layer: bool,
+    pub bounds: Rect,
+}
+
+impl DrawChainRunDescriptor {
+    pub const EMPTY: Self = Self {
+        command_start: 0,
+        command_end: 0,
+        has_clip: false,
+        has_mask: false,
+        has_layer: false,
+        bounds: Rect::EMPTY,
+    };
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawChainRunContract<const OPS: usize> {
+    pub kinds: [DrawChainOpKind; OPS],
+    pub len: usize,
+    pub descriptor: DrawChainRunDescriptor,
+}
+
+impl<const OPS: usize> DrawChainRunContract<OPS> {
+    pub const EMPTY: Self = Self {
+        kinds: [DrawChainOpKind::FallbackRange; OPS],
+        len: 0,
+        descriptor: DrawChainRunDescriptor::EMPTY,
+    };
+
+    pub fn push_kind(&mut self, kind: DrawChainOpKind) -> bool {
+        if self.len >= OPS {
+            return false;
+        }
+        self.kinds[self.len] = kind;
+        self.len += 1;
+        true
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub(crate) fn set_descriptor(&mut self, descriptor: DrawChainRunDescriptor) {
+        self.descriptor = descriptor;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DrawChainOpKind {
     SolidFill,
     AlphaFill,
@@ -226,20 +285,71 @@ impl DrawChainOpKind {
         if capabilities.chain_draw_features.bits() == DrawFeatureFlags::NONE.bits() {
             return false;
         }
-        if !capabilities.chain_draw_features.contains(self.required_feature()) {
+        if !capabilities
+            .chain_draw_features
+            .contains(self.required_feature())
+        {
             return false;
         }
         match self {
             Self::Clip => capabilities.clip_rect,
             Self::MaskEnter | Self::MaskExit => capabilities.mask,
             Self::LayerEnter | Self::LayerExit => capabilities.layers,
-            Self::SolidFill
-            | Self::AlphaFill
-            | Self::ImageBlit
-            | Self::ImageBlend => capabilities.chain_draw_features.contains(self.required_feature()),
+            Self::SolidFill | Self::AlphaFill | Self::ImageBlit | Self::ImageBlend => capabilities
+                .chain_draw_features
+                .contains(self.required_feature()),
             Self::FallbackRange => false,
         }
     }
+
+    pub(crate) const fn is_alpha_render(self) -> bool {
+        matches!(self, Self::AlphaFill | Self::ImageBlend)
+    }
+
+    pub(crate) const fn is_non_alpha_render(self) -> bool {
+        matches!(
+            self,
+            Self::SolidFill | Self::ImageBlit | Self::FallbackRange
+        )
+    }
+
+    pub(crate) const fn is_clip_marker(self) -> bool {
+        matches!(self, Self::Clip)
+    }
+
+    pub(crate) const fn is_mask_marker(self) -> bool {
+        matches!(self, Self::MaskEnter | Self::MaskExit)
+    }
+
+    pub(crate) const fn is_layer_marker(self) -> bool {
+        matches!(self, Self::LayerEnter | Self::LayerExit)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DrawChainOpPayload {
+    None,
+    FillRect {
+        rect: Rect,
+        color: Color,
+    },
+    Image {
+        rect: Rect,
+        image: ImageId,
+        opacity: u8,
+        fit: ImageFit,
+        tint: Option<Color>,
+    },
+    Clip {
+        clip: Option<Rect>,
+    },
+    Mask {
+        spec: MaskSpec,
+    },
+    Layer {
+        rect: Rect,
+        spec: LayerSpec,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -248,6 +358,7 @@ pub struct DrawChainOp {
     pub task: Option<DrawTaskKind>,
     pub bounds: Rect,
     pub clip: Option<Rect>,
+    pub payload: DrawChainOpPayload,
     pub command_start: u16,
     pub command_len: u16,
 }
@@ -258,6 +369,7 @@ impl DrawChainOp {
         task: None,
         bounds: Rect::EMPTY,
         clip: None,
+        payload: DrawChainOpPayload::None,
         command_start: 0,
         command_len: 0,
     };
@@ -267,6 +379,7 @@ impl DrawChainOp {
         task: Option<DrawTaskKind>,
         bounds: Rect,
         clip: Option<Rect>,
+        payload: DrawChainOpPayload,
         command_start: u16,
         command_len: u16,
     ) -> Self {
@@ -275,6 +388,7 @@ impl DrawChainOp {
             task,
             bounds,
             clip,
+            payload,
             command_start,
             command_len,
         }
@@ -391,6 +505,24 @@ pub enum DrawChainSubmitResult {
     Submitted,
     Unsupported,
     Fallback,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ParallelDrawChainSubmitResult {
+    Queued,
+    Submitted,
+    Unsupported,
+    Fallback,
+}
+
+impl ParallelDrawChainSubmitResult {
+    pub const fn as_draw_chain_result(self) -> DrawChainSubmitResult {
+        match self {
+            Self::Queued | Self::Submitted => DrawChainSubmitResult::Submitted,
+            Self::Unsupported => DrawChainSubmitResult::Unsupported,
+            Self::Fallback => DrawChainSubmitResult::Fallback,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -638,6 +770,304 @@ impl<const STAGES: usize> CodecPipelinePlan<STAGES> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CodecPipelineJobState {
+    Planned,
+    Prepared,
+    Submitted,
+    Completed,
+    Fallback,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CodecPipelineJobError {
+    InvalidTransition,
+    Unsupported,
+    Overflow,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CodecPipelineJobToken(pub u32);
+
+impl CodecPipelineJobToken {
+    pub const INVALID: Self = Self(0);
+}
+
+pub trait CodecPipelineBackend {
+    fn capabilities(&self) -> CodecAcceleratorCapabilities;
+
+    fn prepare_job<const STAGES: usize>(
+        &mut self,
+        job: &mut CodecPipelineJob<STAGES>,
+    ) -> Result<(), CodecPipelineJobError>;
+
+    fn submit_job<const STAGES: usize>(
+        &mut self,
+        job: &mut CodecPipelineJob<STAGES>,
+    ) -> Result<(), CodecPipelineJobError>;
+
+    fn complete_job<const STAGES: usize>(
+        &mut self,
+        job: &mut CodecPipelineJob<STAGES>,
+    ) -> Result<(), CodecPipelineJobError>;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CodecPipelineJob<const STAGES: usize> {
+    plan: CodecPipelinePlan<STAGES>,
+    capabilities: CodecAcceleratorCapabilities,
+    state: CodecPipelineJobState,
+    failure: Option<CodecErrorKind>,
+}
+
+impl<const STAGES: usize> CodecPipelineJob<STAGES> {
+    pub const fn new(
+        plan: CodecPipelinePlan<STAGES>,
+        capabilities: CodecAcceleratorCapabilities,
+    ) -> Self {
+        Self {
+            plan,
+            capabilities,
+            state: CodecPipelineJobState::Planned,
+            failure: None,
+        }
+    }
+
+    pub const fn plan(&self) -> &CodecPipelinePlan<STAGES> {
+        &self.plan
+    }
+
+    pub const fn capabilities(&self) -> CodecAcceleratorCapabilities {
+        self.capabilities
+    }
+
+    pub const fn state(&self) -> CodecPipelineJobState {
+        self.state
+    }
+
+    pub const fn failure(&self) -> Option<CodecErrorKind> {
+        self.failure
+    }
+
+    pub const fn stats(&self) -> CodecPipelineStats {
+        self.plan.stats()
+    }
+
+    pub fn prepare(&mut self) -> Result<(), CodecPipelineJobError> {
+        if self.state != CodecPipelineJobState::Planned {
+            return Err(CodecPipelineJobError::InvalidTransition);
+        }
+
+        let stats = self.plan.stats();
+        if self.plan.overflowed() || stats.overflows > 0 {
+            self.state = CodecPipelineJobState::Fallback;
+            self.failure = Some(CodecErrorKind::Overflow);
+            return Err(CodecPipelineJobError::Overflow);
+        }
+        if stats.hardware_candidates == 0 || stats.unsupported > 0 {
+            self.state = CodecPipelineJobState::Fallback;
+            self.failure = Some(CodecErrorKind::Unsupported);
+            return Err(CodecPipelineJobError::Unsupported);
+        }
+
+        self.state = CodecPipelineJobState::Prepared;
+        Ok(())
+    }
+
+    pub fn prepare_with<B: CodecPipelineBackend>(
+        &mut self,
+        backend: &mut B,
+    ) -> Result<(), CodecPipelineJobError> {
+        backend.prepare_job(self)
+    }
+
+    pub fn submit(&mut self) -> Result<(), CodecPipelineJobError> {
+        if self.state != CodecPipelineJobState::Prepared {
+            return Err(CodecPipelineJobError::InvalidTransition);
+        }
+        self.state = CodecPipelineJobState::Submitted;
+        Ok(())
+    }
+
+    pub fn submit_with<B: CodecPipelineBackend>(
+        &mut self,
+        backend: &mut B,
+    ) -> Result<(), CodecPipelineJobError> {
+        backend.submit_job(self)
+    }
+
+    pub fn complete(&mut self) -> Result<(), CodecPipelineJobError> {
+        if self.state != CodecPipelineJobState::Submitted {
+            return Err(CodecPipelineJobError::InvalidTransition);
+        }
+        self.state = CodecPipelineJobState::Completed;
+        Ok(())
+    }
+
+    pub fn complete_with<B: CodecPipelineBackend>(
+        &mut self,
+        backend: &mut B,
+    ) -> Result<(), CodecPipelineJobError> {
+        backend.complete_job(self)
+    }
+
+    pub fn fallback(&mut self, kind: CodecErrorKind) -> Result<(), CodecPipelineJobError> {
+        match self.state {
+            CodecPipelineJobState::Planned
+            | CodecPipelineJobState::Prepared
+            | CodecPipelineJobState::Submitted => {
+                self.state = CodecPipelineJobState::Fallback;
+                self.failure = Some(kind);
+                Ok(())
+            }
+            CodecPipelineJobState::Completed
+            | CodecPipelineJobState::Fallback
+            | CodecPipelineJobState::Failed => Err(CodecPipelineJobError::InvalidTransition),
+        }
+    }
+
+    pub fn fail(&mut self, kind: CodecErrorKind) -> Result<(), CodecPipelineJobError> {
+        match self.state {
+            CodecPipelineJobState::Prepared | CodecPipelineJobState::Submitted => {
+                self.state = CodecPipelineJobState::Failed;
+                self.failure = Some(kind);
+                Ok(())
+            }
+            CodecPipelineJobState::Planned
+            | CodecPipelineJobState::Completed
+            | CodecPipelineJobState::Fallback
+            | CodecPipelineJobState::Failed => Err(CodecPipelineJobError::InvalidTransition),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MockCodecBackendFailure {
+    Prepare,
+    Submit,
+    Complete,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MockCodecBackend {
+    capabilities: CodecAcceleratorCapabilities,
+    prepare_calls: u32,
+    submit_calls: u32,
+    complete_calls: u32,
+    fail_next: Option<MockCodecBackendFailure>,
+    next_token: u32,
+    submitted_token: Option<CodecPipelineJobToken>,
+    completed_token: Option<CodecPipelineJobToken>,
+}
+
+impl MockCodecBackend {
+    pub const fn new(capabilities: CodecAcceleratorCapabilities) -> Self {
+        Self {
+            capabilities,
+            prepare_calls: 0,
+            submit_calls: 0,
+            complete_calls: 0,
+            fail_next: None,
+            next_token: 1,
+            submitted_token: None,
+            completed_token: None,
+        }
+    }
+
+    pub const fn with_next_failure(mut self, failure: MockCodecBackendFailure) -> Self {
+        self.fail_next = Some(failure);
+        self
+    }
+
+    pub const fn prepare_calls(&self) -> u32 {
+        self.prepare_calls
+    }
+
+    pub const fn submit_calls(&self) -> u32 {
+        self.submit_calls
+    }
+
+    pub const fn complete_calls(&self) -> u32 {
+        self.complete_calls
+    }
+
+    pub const fn submitted_token(&self) -> Option<CodecPipelineJobToken> {
+        self.submitted_token
+    }
+
+    pub const fn completed_token(&self) -> Option<CodecPipelineJobToken> {
+        self.completed_token
+    }
+
+    fn take_failure(&mut self, failure: MockCodecBackendFailure) -> bool {
+        if self.fail_next == Some(failure) {
+            self.fail_next = None;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl CodecPipelineBackend for MockCodecBackend {
+    fn capabilities(&self) -> CodecAcceleratorCapabilities {
+        self.capabilities
+    }
+
+    fn prepare_job<const STAGES: usize>(
+        &mut self,
+        job: &mut CodecPipelineJob<STAGES>,
+    ) -> Result<(), CodecPipelineJobError> {
+        self.prepare_calls = self.prepare_calls.saturating_add(1);
+        if job.state() != CodecPipelineJobState::Planned {
+            return Err(CodecPipelineJobError::InvalidTransition);
+        }
+        if self.take_failure(MockCodecBackendFailure::Prepare)
+            || self.capabilities != job.capabilities()
+        {
+            job.fallback(CodecErrorKind::Unsupported)?;
+            return Err(CodecPipelineJobError::Unsupported);
+        }
+        job.prepare()
+    }
+
+    fn submit_job<const STAGES: usize>(
+        &mut self,
+        job: &mut CodecPipelineJob<STAGES>,
+    ) -> Result<(), CodecPipelineJobError> {
+        self.submit_calls = self.submit_calls.saturating_add(1);
+        if self.take_failure(MockCodecBackendFailure::Submit) {
+            job.fail(CodecErrorKind::Unsupported)?;
+            return Err(CodecPipelineJobError::Unsupported);
+        }
+        job.submit()?;
+        let token = CodecPipelineJobToken(self.next_token);
+        self.next_token = self.next_token.saturating_add(1);
+        self.submitted_token = Some(token);
+        self.completed_token = None;
+        Ok(())
+    }
+
+    fn complete_job<const STAGES: usize>(
+        &mut self,
+        job: &mut CodecPipelineJob<STAGES>,
+    ) -> Result<(), CodecPipelineJobError> {
+        self.complete_calls = self.complete_calls.saturating_add(1);
+        if self.take_failure(MockCodecBackendFailure::Complete) {
+            job.fail(CodecErrorKind::Unsupported)?;
+            return Err(CodecPipelineJobError::Unsupported);
+        }
+        let Some(token) = self.submitted_token else {
+            return Err(CodecPipelineJobError::InvalidTransition);
+        };
+        job.complete()?;
+        self.submitted_token = None;
+        self.completed_token = Some(token);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BackendCapabilities {
     pub pixel_format: PixelFormat,
     pub software: bool,
@@ -674,6 +1104,12 @@ pub struct BackendCapabilities {
     pub software_draw_features: DrawFeatureFlags,
     pub accelerated_draw_features: DrawFeatureFlags,
     pub draw_chain: bool,
+    pub chain_continuous_submit: bool,
+    pub chain_run_fence: bool,
+    pub chain_mix_alpha: bool,
+    pub chain_mix_clip: bool,
+    pub chain_mix_mask: bool,
+    pub chain_mix_layer: bool,
     pub max_chain_ops: usize,
     pub chain_draw_features: DrawFeatureFlags,
 }
@@ -835,17 +1271,13 @@ impl CodecStats {
     }
 
     pub fn record_pipeline(&mut self, stats: CodecPipelineStats) {
-        self.pipeline_candidates = self
-            .pipeline_candidates
-            .saturating_add(stats.candidates);
+        self.pipeline_candidates = self.pipeline_candidates.saturating_add(stats.candidates);
         self.pipeline_stages = self.pipeline_stages.saturating_add(stats.stages);
         self.pipeline_hardware_candidates = self
             .pipeline_hardware_candidates
             .saturating_add(stats.hardware_candidates);
         self.pipeline_fallbacks = self.pipeline_fallbacks.saturating_add(stats.fallbacks);
-        self.pipeline_unsupported = self
-            .pipeline_unsupported
-            .saturating_add(stats.unsupported);
+        self.pipeline_unsupported = self.pipeline_unsupported.saturating_add(stats.unsupported);
         self.pipeline_overflows = self.pipeline_overflows.saturating_add(stats.overflows);
     }
 }
@@ -904,6 +1336,12 @@ pub struct RenderStats {
     pub cache_decode_truncated: u32,
     pub cache_decode_unsupported: u32,
     pub cache_decode_overflow: u32,
+    pub cache_decode_placeholders: u32,
+    pub cache_decode_placeholder_missing: u32,
+    pub cache_decode_placeholder_invalid: u32,
+    pub cache_decode_placeholder_truncated: u32,
+    pub cache_decode_placeholder_unsupported: u32,
+    pub cache_decode_placeholder_overflow: u32,
     pub cache_evictions: u32,
     pub codec_fallbacks: u32,
     pub codec_missing_resources: u32,
@@ -962,6 +1400,16 @@ pub struct RenderStats {
     pub draw_chain_sw_runs: u32,
     pub draw_chain_splits: u32,
     pub draw_chain_parallel_hints: u32,
+    pub draw_chain_parallel_queued: u32,
+    pub draw_chain_parallel_completed: u32,
+    pub draw_chain_parallel_barriers: u32,
+    pub draw_chain_parallel_software_runs: u32,
+    pub draw_chain_parallel_fallbacks: u32,
+    pub accel2d_ring_submissions: u32,
+    pub accel2d_ring_flushes: u32,
+    pub accel2d_fences_issued: u32,
+    pub accel2d_fences_completed: u32,
+    pub accel2d_ring_overflows: u32,
     pub codec_prewarm_parallel_hints: u32,
     pub task_draw_chain_hits: DrawTaskCounters,
     pub codec_pipeline_candidates: u32,
@@ -1041,6 +1489,12 @@ impl RenderStats {
             cache_decode_truncated: 0,
             cache_decode_unsupported: 0,
             cache_decode_overflow: 0,
+            cache_decode_placeholders: 0,
+            cache_decode_placeholder_missing: 0,
+            cache_decode_placeholder_invalid: 0,
+            cache_decode_placeholder_truncated: 0,
+            cache_decode_placeholder_unsupported: 0,
+            cache_decode_placeholder_overflow: 0,
             cache_evictions: 0,
             codec_fallbacks: 0,
             codec_missing_resources: 0,
@@ -1099,6 +1553,16 @@ impl RenderStats {
             draw_chain_sw_runs: 0,
             draw_chain_splits: 0,
             draw_chain_parallel_hints: 0,
+            draw_chain_parallel_queued: 0,
+            draw_chain_parallel_completed: 0,
+            draw_chain_parallel_barriers: 0,
+            draw_chain_parallel_software_runs: 0,
+            draw_chain_parallel_fallbacks: 0,
+            accel2d_ring_submissions: 0,
+            accel2d_ring_flushes: 0,
+            accel2d_fences_issued: 0,
+            accel2d_fences_completed: 0,
+            accel2d_ring_overflows: 0,
             codec_prewarm_parallel_hints: 0,
             task_draw_chain_hits: DrawTaskCounters::new(),
             codec_pipeline_candidates: 0,
@@ -1192,6 +1656,12 @@ impl RenderStats {
         self.cache_decode_truncated = cache.decode_truncated;
         self.cache_decode_unsupported = cache.decode_unsupported;
         self.cache_decode_overflow = cache.decode_overflow;
+        self.cache_decode_placeholders = cache.decode_placeholders;
+        self.cache_decode_placeholder_missing = cache.decode_placeholder_missing;
+        self.cache_decode_placeholder_invalid = cache.decode_placeholder_invalid;
+        self.cache_decode_placeholder_truncated = cache.decode_placeholder_truncated;
+        self.cache_decode_placeholder_unsupported = cache.decode_placeholder_unsupported;
+        self.cache_decode_placeholder_overflow = cache.decode_placeholder_overflow;
         self.cache_evictions = cache.evictions;
         self.codec_pipeline_candidates = cache.pipeline_candidates;
         self.codec_pipeline_stages = cache.pipeline_stages;
@@ -1654,6 +2124,24 @@ impl RenderStats {
         self.cache_decode_overflow = self
             .cache_decode_overflow
             .saturating_add(other.cache_decode_overflow);
+        self.cache_decode_placeholders = self
+            .cache_decode_placeholders
+            .saturating_add(other.cache_decode_placeholders);
+        self.cache_decode_placeholder_missing = self
+            .cache_decode_placeholder_missing
+            .saturating_add(other.cache_decode_placeholder_missing);
+        self.cache_decode_placeholder_invalid = self
+            .cache_decode_placeholder_invalid
+            .saturating_add(other.cache_decode_placeholder_invalid);
+        self.cache_decode_placeholder_truncated = self
+            .cache_decode_placeholder_truncated
+            .saturating_add(other.cache_decode_placeholder_truncated);
+        self.cache_decode_placeholder_unsupported = self
+            .cache_decode_placeholder_unsupported
+            .saturating_add(other.cache_decode_placeholder_unsupported);
+        self.cache_decode_placeholder_overflow = self
+            .cache_decode_placeholder_overflow
+            .saturating_add(other.cache_decode_placeholder_overflow);
         self.draw_task_fallbacks = self
             .draw_task_fallbacks
             .saturating_add(other.draw_task_fallbacks);
@@ -1689,10 +2177,42 @@ impl RenderStats {
         self.draw_chain_sw_runs = self
             .draw_chain_sw_runs
             .saturating_add(other.draw_chain_sw_runs);
-        self.draw_chain_splits = self.draw_chain_splits.saturating_add(other.draw_chain_splits);
+        self.draw_chain_splits = self
+            .draw_chain_splits
+            .saturating_add(other.draw_chain_splits);
         self.draw_chain_parallel_hints = self
             .draw_chain_parallel_hints
             .saturating_add(other.draw_chain_parallel_hints);
+        self.draw_chain_parallel_queued = self
+            .draw_chain_parallel_queued
+            .saturating_add(other.draw_chain_parallel_queued);
+        self.draw_chain_parallel_completed = self
+            .draw_chain_parallel_completed
+            .saturating_add(other.draw_chain_parallel_completed);
+        self.draw_chain_parallel_barriers = self
+            .draw_chain_parallel_barriers
+            .saturating_add(other.draw_chain_parallel_barriers);
+        self.draw_chain_parallel_software_runs = self
+            .draw_chain_parallel_software_runs
+            .saturating_add(other.draw_chain_parallel_software_runs);
+        self.draw_chain_parallel_fallbacks = self
+            .draw_chain_parallel_fallbacks
+            .saturating_add(other.draw_chain_parallel_fallbacks);
+        self.accel2d_ring_submissions = self
+            .accel2d_ring_submissions
+            .saturating_add(other.accel2d_ring_submissions);
+        self.accel2d_ring_flushes = self
+            .accel2d_ring_flushes
+            .saturating_add(other.accel2d_ring_flushes);
+        self.accel2d_fences_issued = self
+            .accel2d_fences_issued
+            .saturating_add(other.accel2d_fences_issued);
+        self.accel2d_fences_completed = self
+            .accel2d_fences_completed
+            .saturating_add(other.accel2d_fences_completed);
+        self.accel2d_ring_overflows = self
+            .accel2d_ring_overflows
+            .saturating_add(other.accel2d_ring_overflows);
         self.codec_prewarm_parallel_hints = self
             .codec_prewarm_parallel_hints
             .saturating_add(other.codec_prewarm_parallel_hints);
@@ -1864,9 +2384,7 @@ impl RenderStats {
     }
 
     pub fn mark_draw_chain_stats(&mut self, chain: DrawChainStats) {
-        self.draw_chain_candidates = self
-            .draw_chain_candidates
-            .saturating_add(chain.candidates);
+        self.draw_chain_candidates = self.draw_chain_candidates.saturating_add(chain.candidates);
         self.draw_chain_ops = self.draw_chain_ops.saturating_add(chain.ops);
         self.draw_chain_submitted = self.draw_chain_submitted.saturating_add(chain.submitted);
         self.draw_chain_fallbacks = self.draw_chain_fallbacks.saturating_add(chain.fallbacks);
@@ -1916,10 +2434,51 @@ impl RenderStats {
         self.draw_chain_parallel_hints = self.draw_chain_parallel_hints.saturating_add(1);
     }
 
+    pub fn mark_draw_chain_parallel_queued(&mut self) {
+        self.draw_chain_parallel_queued = self.draw_chain_parallel_queued.saturating_add(1);
+    }
+
+    pub fn mark_draw_chain_parallel_completed(&mut self) {
+        self.draw_chain_parallel_completed = self.draw_chain_parallel_completed.saturating_add(1);
+    }
+
+    pub fn mark_draw_chain_parallel_barrier(&mut self) {
+        self.draw_chain_parallel_barriers = self.draw_chain_parallel_barriers.saturating_add(1);
+    }
+
+    pub fn mark_draw_chain_parallel_software_run(&mut self) {
+        self.draw_chain_parallel_software_runs =
+            self.draw_chain_parallel_software_runs.saturating_add(1);
+    }
+
+    pub fn mark_draw_chain_parallel_fallback(&mut self) {
+        self.draw_chain_parallel_fallbacks = self.draw_chain_parallel_fallbacks.saturating_add(1);
+    }
+
+    pub fn mark_accel2d_ring_submission(&mut self) {
+        self.accel2d_ring_submissions = self.accel2d_ring_submissions.saturating_add(1);
+    }
+
+    pub fn mark_accel2d_ring_flush(&mut self) {
+        self.accel2d_ring_flushes = self.accel2d_ring_flushes.saturating_add(1);
+    }
+
+    pub fn mark_accel2d_fence_issued(&mut self) {
+        self.accel2d_fences_issued = self.accel2d_fences_issued.saturating_add(1);
+    }
+
+    pub fn mark_accel2d_fence_completed(&mut self) {
+        self.accel2d_fences_completed = self.accel2d_fences_completed.saturating_add(1);
+    }
+
+    pub fn mark_accel2d_ring_overflow(&mut self) {
+        self.accel2d_ring_overflows = self.accel2d_ring_overflows.saturating_add(1);
+        self.draw_chain_overflows = self.draw_chain_overflows.saturating_add(1);
+        self.overflowed = true;
+    }
+
     pub fn mark_codec_prewarm_parallel_hint(&mut self) {
-        self.codec_prewarm_parallel_hints = self
-            .codec_prewarm_parallel_hints
-            .saturating_add(1);
+        self.codec_prewarm_parallel_hints = self.codec_prewarm_parallel_hints.saturating_add(1);
     }
 
     pub fn mark_draw_dispatch(&mut self, path: DrawPathKind) {
@@ -2021,6 +2580,12 @@ impl BackendCapabilities {
         software_draw_features: DrawFeatureFlags::ALL_SOFTWARE,
         accelerated_draw_features: DrawFeatureFlags::NONE,
         draw_chain: false,
+        chain_continuous_submit: false,
+        chain_run_fence: false,
+        chain_mix_alpha: false,
+        chain_mix_clip: false,
+        chain_mix_mask: false,
+        chain_mix_layer: false,
         max_chain_ops: 0,
         chain_draw_features: DrawFeatureFlags::NONE,
     };
@@ -2062,6 +2627,12 @@ impl BackendCapabilities {
             software_draw_features: DrawFeatureFlags::ALL_SOFTWARE,
             accelerated_draw_features: DrawFeatureFlags::NONE,
             draw_chain: false,
+            chain_continuous_submit: false,
+            chain_run_fence: false,
+            chain_mix_alpha: false,
+            chain_mix_clip: false,
+            chain_mix_mask: false,
+            chain_mix_layer: false,
             max_chain_ops: 0,
             chain_draw_features: DrawFeatureFlags::NONE,
         }
@@ -2087,6 +2658,15 @@ pub trait RenderBackend {
         }
         stats.mark_draw_chain_submit(chain.stats(), DrawChainSubmitResult::Unsupported);
         DrawChainSubmitResult::Unsupported
+    }
+
+    fn submit_draw_chain_with_contract<const OPS: usize>(
+        &mut self,
+        chain: &DrawChain<OPS>,
+        _contract: &DrawChainRunContract<OPS>,
+        stats: &mut RenderStats,
+    ) -> DrawChainSubmitResult {
+        self.submit_draw_chain(chain, stats)
     }
 
     fn set_clip(&mut self, _clip: Option<Rect>) {}
@@ -2154,6 +2734,25 @@ pub trait RenderBackend {
     ) -> bool {
         stats.mark_draw_dispatch_for(DrawTaskKind::Layer, path);
         self.draw_layer_commands(rect, spec, cmds, clips, stats)
+    }
+}
+
+pub trait ParallelRenderBackend: RenderBackend {
+    fn queue_draw_chain_with_contract<const OPS: usize>(
+        &mut self,
+        _chain: &DrawChain<OPS>,
+        _contract: &DrawChainRunContract<OPS>,
+        _stats: &mut RenderStats,
+    ) -> ParallelDrawChainSubmitResult {
+        ParallelDrawChainSubmitResult::Unsupported
+    }
+
+    fn pending_draw_chain_bounds(&self) -> Option<Rect> {
+        None
+    }
+
+    fn flush_pending_draw_chain(&mut self, _stats: &mut RenderStats) -> DrawChainSubmitResult {
+        DrawChainSubmitResult::Unsupported
     }
 }
 

@@ -44,6 +44,313 @@ Wing 游戏应用 = 基于 FHRE 的 game loop、输入、scene 和渲染能力�
 - `fhre_build.sh` 必须能独立构建 `fhre_demo`。
 - `wing_build.sh` 必须也能编入 `fhre_demo`，用于 Wing 调试时确认 FHRE 正常。
 
+## V4.7 真实 EGL/OpenGL Worker 并行后端（2026-05-02）
+
+V4.7 继续 FHRE-first，不替换默认 `/dev/fb0 + X11 present` 路径。它把 V4.6 的 deterministic parallel scheduler 接到一个默认关闭的真实 host/sim EGL/OpenGL worker：GL worker 线程独占 EGL context/FBO，Rust 主线程继续软件绘制不相交 run；遇到 overlap/stateful barrier 时等待 worker fence/readback，并按原 draw order 收敛。
+
+已落地目标：
+
+- 新增 `EglParallelAccelBackend<RUNS, OPS>`：
+  - 实现 `RenderBackend + ParallelRenderBackend`；
+  - `queue_draw_chain_with_contract()` 先 build `Accel2dCommandList`，再提交给 C worker，成功后立即返回 `Queued`；
+  - `pending_draw_chain_bounds()` 由 Rust pending ring 给出，不依赖 C worker 反查；
+  - `flush_pending_draw_chain()` 等待 worker readback 并完成 Rust 侧 fence；若 GL submit/fence/readback 失败，则用保存的 pending packet 软件回放，保证像素与纯软件基线一致。
+- `egl_shim.c` 从 unavailable stub 升级为真实 worker 边界：
+  - build script 在 `sim-opengl-egl` feature 下探测 host `EGL/GL/pthread`；
+  - 可用时编入真实 EGL pbuffer + desktop OpenGL worker，不可用时编入稳定 unavailable stub；
+  - worker 只消费 C packet，不反查 `DrawCommand`；
+  - 支持最小 `SetClip/Fill/Image` packet，mask/layer/vector/text/3D 继续 fallback。
+- 默认构建 gate 保持关闭：
+  - `cargo test --features sim-opengl-egl` 默认编入 unavailable stub，只验证 unavailable/fallback 路径，不链接真实 GL；
+  - 构建时设置 `FHRE_SIM_OPENGL=egl` 或 `FHRE_EGL_WORKER_ENABLE=1` 才编入真实 worker 并链接 EGL/OpenGL/pthread；
+  - `FHRE_SIM_OPENGL=egl ./nuttx/fhre_build.sh` 会编入真实 worker，并且只做 offscreen/readback，不接管 X11 present。
+- API 已公开：
+  - `EglParallelAccelBackend<RUNS, OPS>`；
+  - `EglOpenGlWorkerStats`；
+  - `EglOpenGlWorkerError`；
+  - `EglOpenGlAccel2dExecutor` 保留为 packet/executor shim 兼容入口。
+- 单测已覆盖：
+  - 默认 stub/unavailable path；
+  - EGL parallel backend queue/flush 或软件回放后的像素一致性；
+  - ring overflow fallback；
+  - 显式 `FHRE_EGL_WORKER_ENABLE=1` / `FHRE_SIM_OPENGL=egl` 下的 OpenGL worker tests。
+
+V4.7 后的下一步：
+
+1. 选择 STM32 DMA2D、NXP PXP 或 VG-Lite 中一个真实 MCU/MPU 2D 后端，复用同一 `Accel2dCommandList + ring/fence + ParallelRenderBackend` 契约。
+2. 为真实外设补 cache clean/invalidate、alignment、source window、destination window、color key 与 premultiplied alpha。
+3. 把 GL worker 的 image path 从最小 `Stretch` 子集扩展到 contain/cover/source window，但仍保持 unsupported/fallback 稳定。
+4. WING 继续只观察 FHRE stats，不持有 EGL context、worker、packet、ring 或 fence。
+
+## V4.6 Hybrid Parallel Renderer 与 EGL/OpenGL Offscreen Shim（2026-05-02）
+
+V4.6 继续 FHRE-first，不替换默认 `/dev/fb0 + X11 present` 路径。它把 V4.5 的 packet/executor/ring 契约推进到确定性的 hybrid parallel 调度：硬件/GL-like 后端可以先 queue 不相交 run，CPU 软件路径在不相交区域继续绘制；遇到 overlap、mask/layer、未知 bounds 或状态边界时先 flush fence，再按原 draw order 收敛。
+
+已落地目标：
+
+- 新增 `ParallelRenderBackend` 边界：
+  - `queue_draw_chain_with_contract()` 表达 run 级异步/延迟提交；
+  - `pending_draw_chain_bounds()` 暴露待完成 run 的几何范围；
+  - `flush_pending_draw_chain()` 作为 fence/barrier 收敛点；
+  - 默认实现返回 unsupported，不影响普通 `RenderBackend` 同步路径。
+- 新增 `DrawList::execute_parallel_tracked_on()`：
+  - 复用现有 draw-chain planner 和 `DrawChainRunContract`；
+  - 只 queue 无 mask/layer、bounds 已知、与 pending run 不相交的硬件候选 run；
+  - pending hardware run 与后续软件 run 不相交时允许软件先执行，并记录 `draw_chain_parallel_software_runs`；
+  - overlap、stateful run、纯 marker run 或最终收尾会触发 barrier/flush；
+  - 最终像素与纯软件 `Surface` 基线一致。
+- 新增 `MockParallelAccelBackend<RUNS, OPS>`：
+  - 包装 `Surface` 和 `Accel2dSubmissionRing`；
+  - queue 阶段只 build packet + 入 ring，不立即写像素；
+  - flush 阶段按 submission 顺序执行 packet 并 complete fence；
+  - 用于验证多后端调度、barrier、fallback 与 stats，不依赖 OS 线程或真实 GPU。
+- `RenderStats` 新增并行可观测字段：
+  - `draw_chain_parallel_queued`
+  - `draw_chain_parallel_completed`
+  - `draw_chain_parallel_barriers`
+  - `draw_chain_parallel_software_runs`
+  - `draw_chain_parallel_fallbacks`
+- 新增默认关闭的 `sim-opengl-egl` feature：
+  - 通过 `apps/fhre/rust/src/egl_shim.c` 建立 C/FFI shim 边界；
+  - `EglOpenGlAccel2dExecutor` 在 EGL shim 不可用时稳定返回 `Unsupported`；
+  - 当前 shim 不链接系统 GL/EGL，也不接管 NuttX sim 的 X11 event loop；
+  - `FHRE_SIM_OPENGL=egl ./nuttx/fhre_build.sh` 可编入 EGL/OpenGL offscreen shim feature。
+- 单测已覆盖 disjoint queue、software-while-hw、overlap barrier、stateful barrier、`sim-opengl` probe 与 `sim-opengl-egl` shim unavailable 路径。
+
+V4.6 后的下一步：
+
+1. 把 `EglOpenGlAccel2dExecutor` 的 unavailable shim 替换为真实 EGL pbuffer/surfaceless renderer，仍只消费 `Accel2dCommandList`。
+2. 选择一个 MCU/MPU 2D 后端（STM32 DMA2D、NXP PXP、VG-Lite 等）实现 `Accel2dExecutor` 或 `ParallelRenderBackend`。
+3. 在真实硬件后端补 cache clean/invalidate、alignment、readback ownership 与 fence polling/interrupt 语义。
+4. 在不破坏像素一致性的前提下，把 parallel scheduler 从确定性模拟推进到真实异步完成。
+
+## V4.5 OpenGL Renderer Backend Boundary 与 Sim GL Probe（2026-05-02）
+
+V4.5 不把 NuttX sim 的 X11 framebuffer/present 路径替换成 OpenGL。它只把 OpenGL 作为 FHRE 的可选 renderer/accelerator backend 边界来验证，继续服务“软件 / DMA2D / PXP / VG-Lite / 简单 GPU / OpenGL ES”共用 packet 契约。
+
+已落地目标：
+
+- 新增 no_std 友好的 `Accel2dExecutor<CMDS>` 抽象：
+  - `Accel2dExecutorCapabilities` 表达 fill、image、clip、target/source format、sync/async fence；
+  - `Accel2dExecutorError` 稳定表达 unsupported、fallback、overflow、submit failed、fence failed、ring error；
+  - executor 只消费 `Accel2dCommandList`，不反查 `DrawCommand`。
+- 新增 `SurfaceAccel2dExecutor`：
+  - 复用 V4.4 的 `Accel2dSubmissionRing`；
+  - queue 前验证 framebuffer/source format；
+  - flush 后只执行 submitted packet；
+  - fill、alpha fill、clip、image 的像素结果继续与纯软件 `Surface` 一致。
+- `MockAccelBackend` 改为通过 executor 执行 packet：
+  - 提交流程变为 `build packet -> executor queue -> flush -> execute submitted -> complete fence`；
+  - stats 语义保持 V4.4 不变；
+  - missing image、mask/layer、fallback payload 仍在写 framebuffer 前回退。
+- 新增默认关闭的 `sim-opengl` feature：
+  - `SimOpenGlAccel2dExecutor` 将 `SetClip/Fill/Image` packet 映射为 OpenGL-like `Scissor/FillQuad/TextureQuad`；
+  - 当前执行仍委托 `SurfaceAccel2dExecutor` 做 offscreen/readback 等价结果，避免默认引入 GLX/EGL/OpenGL 链接依赖；
+  - `FHRE_SIM_OPENGL=1 ./nuttx/fhre_build.sh` 可把 FHRE crate/demo 编入 probe feature；
+  - 默认 `fhre_build.sh` / `wing_build.sh` 不启用 OpenGL feature。
+- 单测已覆盖默认 executor、ring/fence error 映射，以及 `sim-opengl` feature 下的 packet mapping + 像素一致性。
+
+V4.5 后的下一步：
+
+1. 选择 GLX/EGL host shim 或 STM32 DMA2D/NXP PXP 中一个真实执行层，把 `Accel2dExecutor` 的 execute 层替换为真实 descriptor/GPU 提交。
+2. 明确 framebuffer/source descriptor lifetime、cache clean/invalidate、alignment 和 readback ownership。
+3. 扩展 `Accel2dCommand::Image` 的 source/destination window、blend mode、color key、premultiplied alpha。
+4. WING 继续只观察 FHRE stats，不持有 OpenGL context、packet、ring 或 fence。
+
+## V4.4 Descriptor Ring 与 Mock Fence 闭环（2026-05-02）
+
+V4.4 把 V4.3 的单 packet 同步执行推进为固定容量 descriptor ring：`Accel2dCommandList` 先入队为 submission，再 flush、执行、complete fence。当前仍是平台无关 mock 后端同步完成，但真实 DMA2D/PXP/VG-Lite 后端后续可以替换 ring flush/complete 层。
+
+已落地目标：
+
+- 新增 `Accel2dSubmissionRing<RUNS, CMDS>` / `Accel2dSubmission<CMDS>` / `Accel2dFence`：
+  - ring 固定容量、无堆分配；
+  - `queue()` 只接收已 build 成功的 packet；
+  - `flush()` 按入队顺序把 queued submission 标记为 submitted；
+  - `complete_fence()` 对非法 fence、未提交完成、重复完成返回稳定错误。
+- `MockAccelBackend` 改为 `build packet -> queue ring -> flush ring -> execute packet -> complete fence`：
+  - 默认同步 flush，保持 V4.3 绘制结果；
+  - capabilities 打开 `chain_run_fence` / `chain_continuous_submit`，让 run planner 可产生 parallel hint；
+  - missing image、mask/layer、fallback payload 仍在 queue 前失败，不污染 framebuffer。
+- `RenderStats` 新增 ring/fence 可观测字段：
+  - `accel2d_ring_submissions`
+  - `accel2d_ring_flushes`
+  - `accel2d_fences_issued`
+  - `accel2d_fences_completed`
+  - `accel2d_ring_overflows`
+- `MockCodecBackend` 新增 `CodecPipelineJobToken`：
+  - submit 成功时产生 token；
+  - complete 成功时 token 进入 completed；
+  - submit/complete failure 继续映射到 `Failed`，不新增真实 codec 能力。
+- 单测已覆盖 ring 入队/flush/complete 顺序、ring 错误、mock ring 像素一致、多 packet 顺序、stats、codec token/failure。
+
+V4.4 后的下一步：
+
+1. V4.5 已把 ring flush/execute 抽象为 `Accel2dExecutor`，下一步开始对齐 STM32 DMA2D / NXP PXP / VG-Lite / GLX/EGL 的 descriptor 字段。
+2. 为 `Accel2dCommand::Image` 增加更细的 source/destination window、pitch alignment、blend mode 与 color key 边界。
+3. codec token 下一轮补真实 decoder job handle / completion callback，但默认仍走软件 decode + placeholder。
+4. WING 继续只消费 FHRE stats，不解析 ring/fence 或持有硬件后端。
+
+## V4.3 2D Packet 化与 Mock Codec Executor（2026-05-02）
+
+V4.3 把 V4.2 的 payload-only mock 执行再下沉一层：先把 `DrawChainOpPayload + DrawChainRunContract` 编译成固定容量 2D packet，再由 mock 后端执行 packet 写入 `Surface`。这样真实 DMA2D/PXP/VG-Lite 后端后续可以替换 packet 执行层，而不需要反查 `DrawCommand`。
+
+已落地目标：
+
+- 新增 `Accel2dCommandList<N>` / `Accel2dCommand`：
+  - 固定容量、无堆分配；
+  - 覆盖 `SetClip`、`Fill`、`ImageBlit/ImageBlend`；
+  - `Accel2dFramebufferDescriptor` 显式携带目标地址、尺寸、stride、bpp、`PixelFormat` 与 clip；
+  - `Accel2dImageSourceDescriptor` 显式携带源地址、长度、尺寸、stride 与 `ImageFormat`。
+- 新增 `build_accel_2d_command_list()` / `build_accel_2d_command_list_for_framebuffer()`：
+  - 只读 draw chain payload、run contract、framebuffer descriptor 和 image resolver；
+  - build 阶段处理 overflow、missing image、空 framebuffer、payload 不匹配、mask/layer/fallback payload；
+  - 任一错误都发生在写 framebuffer 前。
+- `MockAccelBackend` 改为先 build packet，再执行 packet：
+  - 成功路径只消费 `Accel2dCommandList`；
+  - 失败路径继续返回 `Fallback`，由调度器按 run/op 粒度软件回放；
+  - 现有 fill/alpha/clip/image/missing/mask 像素回归继续保持与纯软件一致。
+- 新增 `CodecPipelineBackend` 与 `MockCodecBackend`：
+  - `CodecPipelineJob` 保留原 `prepare/submit/complete`，并新增 `prepare_with/submit_with/complete_with`；
+  - mock backend 只验证 capability 与 job 状态，不新增真实 JPEG/PNG/SVG/TTF 解码；
+  - 支持成功路径、unsupported fallback、提交失败进入 `Failed`、非法状态跳转。
+- 单测已覆盖 packet descriptor 字段、packet build 错误、mock packet 像素执行、mock codec executor 状态机。
+
+V4.3 后的下一步（V4.4 已接手第 1/3 项）：
+
+1. `Accel2dSubmissionRing` / `Accel2dFence` 已验证多 packet 入队、flush、complete 顺序与 fence stats。
+2. 把 packet 字段继续映射到具体平台族：STM32 DMA2D、NXP PXP、VG-Lite 或 OpenGL ES texture/blit。
+3. `MockCodecBackend` 已补轻量 job token；真实硬件 decoder handle 仍留到下一轮。
+4. WING 继续只作为 FHRE 回归目标，不新增页面或交互。
+
+## V4.2 Mock 加速闭环与 Codec Job 骨架（2026-05-02）
+
+V4.2 把 V4.1 的 payload-only contract 从 probe 推进到可执行闭环：平台无关 mock backend 会真实消费 payload 写入 `Surface`，并用像素单测确认与纯软件路径一致；codec pipeline 也从 plan-only 增加到 job 状态机骨架。
+
+已落地目标：
+
+- 新增 `MockAccelBackend`：
+  - 包装 `Surface` 并实现 `RenderBackend`；
+  - 声明 `draw_chain = true`、`accelerated_2d = true`；
+  - 链内只接管 `Fill/Image/Clip`，`Mask/Layer/FallbackRange` 仍回退软件；
+  - 提交时先完整验证 `DrawChainOpPayload`、`DrawChainRunContract` 和图片资源 descriptor，再写 framebuffer，避免失败后污染像素。
+- 新增 `DrawChainImageDescriptor` 与 `resolve_draw_chain_image_descriptor()`，把 `ImageId + ImageResolver/builtin_image` 解析成 `ImageView + format/stride/clip/blend` 等硬件更容易接管的字段；资源缺失在提交前返回 fallback，软件路径继续绘制 placeholder。
+- 新增 `CodecPipelineJob<STAGES>`、`CodecPipelineJobState`、`CodecPipelineJobError`：
+  - 状态为 `Planned -> Prepared -> Submitted -> Completed/Fallback/Failed`；
+  - `prepare()` 根据 `CodecPipelinePlan` 的硬件候选、unsupported 与 overflow 决定进入 `Prepared` 或 `Fallback`；
+  - `plan_resource_image_pipeline_job()` 让 FRAW/JPEG/PNG 资源可直接形成 job，SVG/TTF 继续复用各自 `plan_pipeline_with_caps()` 后包装成 job。
+- 单测已覆盖 mock fill/alpha/clip 像素一致、builtin/resolver image descriptor、missing image 提交前 fallback、mask run 软件回退、codec job 状态转移与非法转移。
+
+V4.2 后的下一步（V4.3 已接手前两项）：
+
+1. `Accel2dCommandList` 已把 image/framebuffer descriptor 拆到更接近 DMA2D/PXP/VG-Lite 的 packet 字段。
+2. `MockAccelBackend` 已改为 packet build + packet execute 两阶段；descriptor ring/mock fence 仍留到下一轮。
+3. `CodecPipelineBackend` / `MockCodecBackend` 已提供 `prepare/submit/complete` 的平台 trait 骨架，不接真实 JPEG/PNG/SVG/TTF 硬解码。
+4. WING 仍不新增页面，只消费 FHRE stats 并作为 `wing_build.sh` 回归入口。
+
+## V4.1 底座清理与硬件可接管闭环（2026-05-02）
+
+V4.1 在 V4.0 run contract 上继续收紧边界：后端不需要再反查 `DrawCommand` 才能知道最小硬件任务；资源缺失也不再混进“真实 decode 失败”统计。
+
+已落地目标：
+
+- `DrawChainOp` 新增 `DrawChainOpPayload`：
+  - `FillRect { rect, color }`
+  - `Image { rect, image, opacity, fit, tint }`
+  - `Clip { clip }`
+  - `Mask { spec }`
+  - `Layer { rect, spec }`
+  - `None`
+- 合成 clip marker 的 `command_len = 0`，不再伪装成可软件重放的绘制命令；真实状态命令（如 `PushMask` / `BeginLayer`）仍保留 `command_len = 1`，保证软件回退时状态栈完整。
+- `DrawChainRunContract.descriptor.command_start/end` 只从真实 command span 推导；纯 marker run 的 command range 为空，硬件后端通过 payload 消费状态。
+- 新增 test-only `ProbeChainBackend` 覆盖 payload-only 提交：后端只读 `DrawChainOpPayload` 和 contract，不反查 `DrawCommand`。
+- `ImageCache` missing 资源统计清理：
+  - missing 计入 `load_failures`、`decode_placeholders` 和 `decode_placeholder_missing`；
+  - `decode_failures` 只表示已有 bytes 进入 decode 后失败；
+  - `RenderStats.codec_missing_resources` 仍从 `load_failures` 汇入，HUD 不丢 missing 可观测性。
+- `ResourceDecodeResult` 新增 `error_kind()` / `placeholder_kind()`，让资源准备路径无需手写 match 就能区分 placeholder 与硬失败。
+- 新增 `plan_resource_image_pipeline_with_caps()`，可显式传入 `CodecAcceleratorCapabilities` 验证 FRAW/JPEG/PNG 阶段的硬件候选统计；默认 `plan_resource_image_pipeline()` 仍使用 `NONE`。
+
+V4.1 后的下一步（V4.2 已接手前三项）：
+
+1. `MockAccelBackend` 已实现 fill/image/clip payload 消费和软件像素校验。
+2. `DrawChainImageDescriptor` 已形成第一版 image descriptor resolve 边界。
+3. `CodecPipelineJob` 已提供 prepare/submit/complete 状态机骨架。
+4. WING 仍不新增页面，只消费 FHRE stats 并作为 `wing_build.sh` 回归入口。
+
+## V4.0 基座优先路线（FHRE 底座收口）
+
+V4.0 目标是把 FHRE 从“能运行”推进到“能对接硬件加速底座”：
+
+- 先把运行链 `draw chain` 与解码过程定义为可提交的硬件契约，核心仍保持 `no_std + alloc + 无宏`；
+- 回退（fallback）总是保底：`run` 级提交失败仅回退 `该 run`，并不影响前后片段；
+- 先做最小闭环：`Fill/AlphaFill/ImageBlit/Clip/Layer` 可作为第一版硬件/链式提交集合，PNG/JPEG/SVG/字体未实现全功能时走统一占位；
+- Wing 不新增页面实现，继续作为 FHRE 回归验证入口；`wing_build.sh` 只负责可执行性与兼容性回归。
+
+### V4.0 契约新增点（最小可交付）
+
+- `BackendCapabilities` 收敛字段：
+  - `draw_chain`、`max_chain_ops`、`chain_draw_features`；
+  - `chain_continuous_submit`、`chain_run_fence`、`chain_mix_alpha`、`chain_mix_clip`、`chain_mix_mask`、`chain_mix_layer`。
+- `DrawChainRunDescriptor` / `DrawChainRunContract`：
+  - `command_start/command_end`
+  - `kinds[] + len`
+  - `has_clip/has_mask/has_layer/bounds`
+  - 后端按最小状态片段去映射 descriptor。
+- 资源解码返回值从“成功/失败”改为“渲染结果 + 统计可观测路径”：
+  - `ResourceDecodeResult::Rendered(ImageView)`
+  - `ResourceDecodeResult::Placeholder(ImageView, ImageDecodeErrorKind)`
+  - `ResourceDecodeResult::Failed(CodecErrorKind)`
+- `ImageCache` 统计口径新增：
+  - `decode_placeholders` 与 `decode_placeholder_*`
+  - `decode_failures` 不再把占位当成功，`as_result` 将 `Placeholder` 转成错误用于显式降级链路。
+
+### V4.0 当前已落地（2026-05-01）
+
+- `DrawChainRunDescriptor` / `DrawChainRunContract` 已接入 `RenderBackend::submit_draw_chain_with_contract()`，并通过 crate root / prelude 公开，后续 DMA2D/GPU backend 可直接实现该入口。
+- run planner 已使用 `chain_mix_alpha/clip/mask/layer`、`max_chain_ops` 和 `chain_run_fence`：
+  - alpha/non-alpha 可按能力拆 run；
+  - `mask/layer` run 保持 enter + render + exit 自包含，避免硬件提交状态后软件回退内容时丢失状态；
+  - `chain_run_fence` 为 false 时不再产生 run 并行提示。
+- 回退策略已分层：
+  - stateless render run 提交失败后可继续尝试单 op，失败 op 才回到软件路径；
+  - 含 `mask/layer` 状态的 run 提交失败时整体回退当前 run，保证软件 mask/layer 栈一致。
+- `ResourceDecodeResult` 已接入 `ImageCache`：
+  - `prewarm_result()` 仍返回 `Result`，便于 fixture mismatch 验收；
+  - `get_or_load_with_placeholder()` / `prewarm_with_placeholder()` 可保留占位图并继续渲染；
+  - `RenderStats` 已汇入 `cache_decode_placeholders` 与 `cache_decode_placeholder_*`，`fhre_demo` HUD 的 V3.10/V4 行已显示 placeholder 命中。
+
+### V4.0 验收映射（当前会放到 HUD）
+
+- draw-chain：
+  - `draw_chain_candidates / ops / submitted / fallbacks / unsupported / runs / hw_runs / sw_runs / splits / parallel_hints`
+- codec 管线：
+  - `codec_pipeline_candidates / stages / hardware_candidates / fallbacks / unsupported / overflows`
+- 回退与占位：
+  - `codec_*` 原口径继续保留（missing/invalid/truncated/unsupported/overflow）
+  - 新增可观测字段用于占位分类与硬件/软件降级路径。
+
+### V4.0 HUD 字段映射（推荐展示）
+
+- `draw_chain_runs`：本帧被编排出的 run 总数。
+- `draw_chain_hw_runs`：成功走硬件提交路径的 run 数。
+- `draw_chain_sw_runs`：回退到软件执行的 run 数（含单 op 逐个回退）。
+- `draw_chain_submitted / draw_chain_fallbacks / draw_chain_unsupported / draw_chain_overflows`：提交路径结果与失败来源。
+- `draw_chain_splits`：`max_chain_ops / 兼容性 / marker 混合` 触发的 run 拆分次数。
+- `draw_chain_parallel_hints`：可并行提交的候选提示数。
+- `top chain task`（通过 `top_chain_task()`）：
+  - 标记本帧 draw-chain 中最常出现的任务类型，快速定位提速失败在什么操作上。
+- `codec_pipeline_*`：资源 decode 经过的 pipeline 阶段命中情况，配合 `codec_missing_resources / codec_invalid / codec_truncated / codec_unsupported / codec_overflow` 定位失败原因。
+- `decode_placeholders` 与 `decode_placeholder_*`：占位返回率与分类统计，和 `cache_decode_*` 一起确认“能否继续渲染”。
+
+### V4.0 下一步实现计划（V4.1 已接手前两项）
+
+1. `ProbeChainBackend` 已在单测中验证 payload-only contract；真实 mock DMA2D backend 留到下一轮。
+2. `DrawChainOpPayload` 已覆盖 `Fill/AlphaFill/ImageBlit/ImageBlend/Clip/Mask/Layer` 的第一版固定字段。
+3. codec pipeline 已可通过 `plan_resource_image_pipeline_with_caps()` 声明硬件候选阶段；真实 decoder submit/complete 状态机留到下一轮。
+4. 占位策略后续扩展到 SVG/TTF document/glyph 预热路径：保持 draw 热路径只查 cache/resolver，不把复杂 decode 放进帧内。
+5. `fhre_build.sh` 与 `wing_build.sh` 作为每轮底线回归；Wing 不新增页面，只确认 FHRE stats/resource/draw-chain 改动没有破坏 Shell 入口。
+
 ## V3.10 运行链路可串接编排
 
 V3.10 在 V3.9 的基础上把绘制候选链升级为 **run 级编排器**：在顺序不变前提下，尽量把可加速操作拼成长片段提交，减少硬件/软件切换次数；无法提交的部分仅以局部回退方式执行，避免重绘整帧。

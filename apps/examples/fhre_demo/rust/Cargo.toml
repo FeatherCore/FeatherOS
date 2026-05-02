@@ -17,5 +17,10 @@ lto = true
 codegen-units = 1
 opt-level = "z"
 
+[features]
+default = []
+sim-opengl = ["fhre/sim-opengl"]
+sim-opengl-egl = ["fhre/sim-opengl-egl"]
+
 [dependencies]
 fhre = { path = "../../../fhre/rust" }

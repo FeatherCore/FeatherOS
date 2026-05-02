@@ -2,6 +2,7 @@
 
 extern crate alloc;
 
+mod accel2d;
 mod animation;
 mod backend;
 mod color;
@@ -15,6 +16,9 @@ mod image;
 mod input;
 mod jpeg;
 mod math;
+mod mock_accel;
+#[cfg(feature = "sim-opengl")]
+mod opengl_accel;
 mod platform;
 mod png;
 pub mod prelude;
@@ -33,14 +37,25 @@ mod svg;
 mod text;
 mod ttf;
 
+pub use accel2d::{
+    build_accel_2d_command_list, build_accel_2d_command_list_for_framebuffer,
+    execute_accel_2d_command_list_on_surface, Accel2dCommand, Accel2dCommandBuildError,
+    Accel2dCommandList, Accel2dExecutor, Accel2dExecutorCapabilities, Accel2dExecutorError,
+    Accel2dFence, Accel2dFenceState, Accel2dFormatSupport, Accel2dFramebufferDescriptor,
+    Accel2dImageSourceDescriptor, Accel2dRingError, Accel2dSubmission, Accel2dSubmissionRing,
+    SurfaceAccel2dExecutor,
+};
 pub use animation::{Easing, Tween};
 pub use backend::{
-    BackendCapabilities, CodecAcceleratorCapabilities, CodecErrorKind, CodecPipelinePlan,
-    CodecPipelineStats, CodecStageKind, CodecStagePlan, CodecStats, DrawBackendDispatch,
-    DrawChain, DrawChainCapabilities, DrawChainOp, DrawChainOpKind, DrawChainStats,
+    BackendCapabilities, CodecAcceleratorCapabilities, CodecErrorKind, CodecPipelineBackend,
+    CodecPipelineJob, CodecPipelineJobError, CodecPipelineJobState, CodecPipelineJobToken,
+    CodecPipelinePlan, CodecPipelineStats, CodecStageKind, CodecStagePlan, CodecStats,
+    DrawBackendDispatch, DrawChain, DrawChainCapabilities, DrawChainOp, DrawChainOpKind,
+    DrawChainOpPayload, DrawChainRunContract, DrawChainRunDescriptor, DrawChainStats,
     DrawChainSubmitResult, DrawFeatureFlags, DrawPathKind, DrawTaskCounters, DrawTaskKind,
-    RenderBackend, RenderBenchmarkSummary, RenderStats, DEFAULT_CODEC_PIPELINE_STAGES,
-    DEFAULT_DRAW_CHAIN_OPS,
+    MockCodecBackend, MockCodecBackendFailure, ParallelDrawChainSubmitResult,
+    ParallelRenderBackend, RenderBackend, RenderBenchmarkSummary, RenderStats,
+    DEFAULT_CODEC_PIPELINE_STAGES, DEFAULT_DRAW_CHAIN_OPS,
 };
 pub use color::{Color, PixelFormat};
 pub use dirty::{DirtyRegion, DirtyTracker};
@@ -61,9 +76,11 @@ pub use glyph::{
 pub use image::{
     builtin_image, decode_fraw, decode_fraw_result, decode_resource_image,
     decode_resource_image_result, inspect_resource_image, inspect_resource_image_result,
-    plan_resource_image_pipeline, FrawDecoder, FrawError, FrawInfo, ImageCache, ImageCacheStats,
-    ImageDecodeErrorKind, ImageFormat, ImageResolver, ImageResourceInfo, ImageResourceKind,
-    ImageView, ResourceLoader, IMAGE_MASK_DOT, IMAGE_SWATCH,
+    plan_resource_image_pipeline, plan_resource_image_pipeline_job,
+    plan_resource_image_pipeline_with_caps, FrawDecoder, FrawError, FrawInfo, ImageCache,
+    ImageCacheStats, ImageDecodeErrorKind, ImageFormat, ImageResolver, ImageResourceInfo,
+    ImageResourceKind, ImageView, ResourceDecodeResult, ResourceLoader, IMAGE_MASK_DOT,
+    IMAGE_SWATCH,
 };
 pub use input::{
     GestureConfig, GestureDirection, GestureEvent, GestureKind, GestureRecognizer, InputEvent,
@@ -73,6 +90,17 @@ pub use jpeg::{decode_jpeg, JpegDecodeOptions, JpegDecoder, JpegError, JpegInfo}
 pub use math::{
     fixed_div, fixed_from_i32, fixed_lerp, fixed_mul, fixed_to_i32, Fixed16, FIXED_ONE,
 };
+pub use mock_accel::{
+    resolve_draw_chain_image_descriptor, DrawChainImageDescriptor, DrawChainImageResolveError,
+    MockAccelBackend, MockAccelSubmitError, MockParallelAccelBackend,
+};
+#[cfg(feature = "sim-opengl-egl")]
+pub use opengl_accel::{
+    EglOpenGlAccel2dExecutor, EglOpenGlWorkerError, EglOpenGlWorkerStats,
+    EglParallelAccelBackend,
+};
+#[cfg(feature = "sim-opengl")]
+pub use opengl_accel::{OpenGl2dCommand, OpenGl2dProbeStats, SimOpenGlAccel2dExecutor};
 pub use platform::{FramebufferBackend, InputSource};
 pub use png::{decode_png, decode_png_result, DecodedImage, PngDecoder, PngError, PngInfo};
 pub use runtime::{

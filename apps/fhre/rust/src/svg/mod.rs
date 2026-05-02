@@ -310,9 +310,17 @@ impl<const PATHS: usize, const CMDS: usize> SvgDocument<PATHS, CMDS> {
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Inspect, false, true));
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Header, true, supported));
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Parse, true, supported));
-        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Transform, true, supported));
+        let _ = plan.push(CodecStagePlan::new(
+            CodecStageKind::Transform,
+            true,
+            supported,
+        ));
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Raster, true, supported));
-        let _ = plan.push(CodecStagePlan::new(CodecStageKind::CacheInsert, false, true));
+        let _ = plan.push(CodecStagePlan::new(
+            CodecStageKind::CacheInsert,
+            false,
+            true,
+        ));
         plan
     }
 }
@@ -501,14 +509,16 @@ impl<const DOCS: usize> SvgDocumentCache<DOCS, SVG_DOCUMENT_PATHS, SVG_DOCUMENT_
 
         if self.len >= DOCS {
             self.stats.overflows = self.stats.overflows.saturating_add(1);
-            self.stats.record_pipeline_fallback(Some(CodecErrorKind::Overflow));
+            self.stats
+                .record_pipeline_fallback(Some(CodecErrorKind::Overflow));
             return Err(CodecErrorKind::Overflow);
         }
 
         let mut bytes = Vec::new();
         if !loader.load(path, &mut bytes) {
             self.stats.load_failures = self.stats.load_failures.saturating_add(1);
-            self.stats.record_pipeline_fallback(Some(CodecErrorKind::MissingResource));
+            self.stats
+                .record_pipeline_fallback(Some(CodecErrorKind::MissingResource));
             return Err(CodecErrorKind::MissingResource);
         }
 
@@ -517,7 +527,8 @@ impl<const DOCS: usize> SvgDocumentCache<DOCS, SVG_DOCUMENT_PATHS, SVG_DOCUMENT_
 
         let Ok(data) = core::str::from_utf8(&bytes) else {
             self.stats.decode_failures = self.stats.decode_failures.saturating_add(1);
-            self.stats.record_pipeline_fallback(Some(CodecErrorKind::Invalid));
+            self.stats
+                .record_pipeline_fallback(Some(CodecErrorKind::Invalid));
             return Err(CodecErrorKind::Invalid);
         };
 
@@ -525,14 +536,16 @@ impl<const DOCS: usize> SvgDocumentCache<DOCS, SVG_DOCUMENT_PATHS, SVG_DOCUMENT_
         if !parse_svg_document_into(data, fallback_view_box, &mut self.documents[slot]) {
             self.documents[slot] = SvgDocument::EMPTY;
             self.stats.decode_failures = self.stats.decode_failures.saturating_add(1);
-            self.stats.record_pipeline_fallback(Some(CodecErrorKind::Invalid));
+            self.stats
+                .record_pipeline_fallback(Some(CodecErrorKind::Invalid));
             return Err(CodecErrorKind::Invalid);
         }
         if self.documents[slot].overflowed {
             self.documents[slot] = SvgDocument::EMPTY;
             self.stats.decode_failures = self.stats.decode_failures.saturating_add(1);
             self.stats.overflows = self.stats.overflows.saturating_add(1);
-            self.stats.record_pipeline_fallback(Some(CodecErrorKind::Overflow));
+            self.stats
+                .record_pipeline_fallback(Some(CodecErrorKind::Overflow));
             return Err(CodecErrorKind::Overflow);
         }
 

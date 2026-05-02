@@ -1,8 +1,9 @@
 use crate::{
     backend::{
         BackendCapabilities, DrawBackendDispatch, DrawChain, DrawChainOp, DrawChainOpKind,
-        DrawChainSubmitResult, DrawTaskKind, RenderBackend, RenderStats,
-        DEFAULT_DRAW_CHAIN_OPS,
+        DrawChainOpPayload, DrawChainRunContract, DrawChainRunDescriptor, DrawChainSubmitResult,
+        DrawTaskKind, ParallelDrawChainSubmitResult, ParallelRenderBackend, RenderBackend,
+        RenderStats, DEFAULT_DRAW_CHAIN_OPS,
     },
     dirty::DirtyRegion,
     surface::Surface,
@@ -1379,10 +1380,7 @@ impl<const N: usize> DrawList<N> {
         }
     }
 
-    pub fn compile_draw_chain<const OPS: usize>(
-        &self,
-        dirty_clip: Option<Rect>,
-    ) -> DrawChain<OPS> {
+    pub fn compile_draw_chain<const OPS: usize>(&self, dirty_clip: Option<Rect>) -> DrawChain<OPS> {
         let mut chain = DrawChain::new();
         let mut active_clip = None;
         let mut i = 0usize;
@@ -1422,6 +1420,7 @@ impl<const N: usize> DrawList<N> {
                     None,
                     clip_bounds,
                     clip,
+                    DrawChainOpPayload::Clip { clip },
                     saturating_u16(i),
                     0,
                 ));
@@ -1433,6 +1432,7 @@ impl<const N: usize> DrawList<N> {
                 cmd.task_kind(),
                 bounds,
                 clip,
+                chain_op_payload(cmd),
                 saturating_u16(i),
                 1,
             ));
@@ -1455,6 +1455,51 @@ impl<const N: usize> DrawList<N> {
         stats.mark_overflowed(self.overflowed);
         let dispatch = DrawBackendDispatch::from_capabilities(backend.capabilities());
         self.execute_run_planner::<B, DEFAULT_DRAW_CHAIN_OPS>(backend, None, dispatch, stats);
+    }
+
+    pub fn execute_parallel_tracked_on<B: ParallelRenderBackend>(
+        &self,
+        backend: &mut B,
+        stats: &mut RenderStats,
+    ) {
+        stats.clear();
+        stats.mark_overflowed(self.overflowed);
+        let dispatch = DrawBackendDispatch::from_capabilities(backend.capabilities());
+        self.execute_parallel_run_planner::<B, DEFAULT_DRAW_CHAIN_OPS>(
+            backend, None, dispatch, stats,
+        );
+    }
+
+    pub fn execute_dirty_parallel_tracked_on<B: ParallelRenderBackend, const D: usize>(
+        &self,
+        backend: &mut B,
+        dirty: &DirtyRegion<D>,
+        stats: &mut RenderStats,
+    ) {
+        stats.clear();
+        stats.mark_dirty_rects(dirty.len());
+        stats.mark_overflowed(self.overflowed || dirty.overflowed());
+        let dispatch = DrawBackendDispatch::from_capabilities(backend.capabilities());
+        let mut dirty_index = 0;
+        while dirty_index < dirty.len() {
+            let Some(dirty_rect) = dirty.rect(dirty_index) else {
+                dirty_index += 1;
+                continue;
+            };
+            if dirty_rect.is_empty() {
+                dirty_index += 1;
+                continue;
+            }
+
+            stats.dirty_pass_started();
+            self.execute_parallel_run_planner::<B, DEFAULT_DRAW_CHAIN_OPS>(
+                backend,
+                Some(dirty_rect),
+                dispatch,
+                stats,
+            );
+            dirty_index += 1;
+        }
     }
 
     pub fn execute_dirty_on<B: RenderBackend, const D: usize>(
@@ -1510,6 +1555,12 @@ impl<const N: usize> DrawList<N> {
         }
 
         let supports_chain = capabilities.draw_chain && capabilities.max_chain_ops > 0;
+        let mask_chain_supported = capabilities.chain_mix_mask
+            && DrawChainOpKind::MaskEnter.supports(capabilities)
+            && DrawChainOpKind::MaskExit.supports(capabilities);
+        let layer_chain_supported = capabilities.chain_mix_layer
+            && DrawChainOpKind::LayerEnter.supports(capabilities)
+            && DrawChainOpKind::LayerExit.supports(capabilities);
         let mut max_ops = capabilities.max_chain_ops.max(1).min(ops.len().max(1));
         if !supports_chain {
             max_ops = ops.len().max(1);
@@ -1519,16 +1570,82 @@ impl<const N: usize> DrawList<N> {
         let mut started = false;
         let mut run_len = 0usize;
         let mut run_has_render = false;
+        let mut run_has_alpha_render = false;
+        let mut run_has_non_alpha_render = false;
+        let mut run_has_clip_marker = false;
+        let mut run_has_mask_marker = false;
+        let mut run_has_mask_exit_marker = false;
+        let mut run_has_layer_marker = false;
+        let mut run_has_layer_exit_marker = false;
+        let mut run_has_non_marker_ops = false;
         let mut run_candidate = false;
         let mut run_index = 0usize;
+        let mut mask_depth = 0usize;
+        let mut layer_depth = 0usize;
 
         while run_index < ops.len() {
             let op = ops[run_index];
-            let op_candidate = supports_chain && op.kind.supports(capabilities);
-            let split_by_state = started && run_has_render && op.kind.is_stateful();
+            let op_mask_blocked =
+                (mask_depth > 0 || op.kind.is_mask_marker()) && !mask_chain_supported;
+            let op_layer_blocked =
+                (layer_depth > 0 || op.kind.is_layer_marker()) && !layer_chain_supported;
+            let op_candidate = supports_chain
+                && op.kind.supports(capabilities)
+                && !op_mask_blocked
+                && !op_layer_blocked;
+            let split_by_closed_state =
+                started && (run_has_mask_exit_marker || run_has_layer_exit_marker);
+            let split_by_state = started
+                && run_has_render
+                && op.kind.is_stateful()
+                && !matches!(
+                    op.kind,
+                    DrawChainOpKind::MaskExit | DrawChainOpKind::LayerExit
+                );
             let split_by_candidate = started && run_candidate != op_candidate;
-            let split_by_capacity = supports_chain && started && run_len >= max_ops;
-            let split = split_by_state || split_by_candidate || split_by_capacity;
+            let split_by_capacity = supports_chain
+                && started
+                && run_len >= max_ops
+                && !matches!(
+                    op.kind,
+                    DrawChainOpKind::MaskExit | DrawChainOpKind::LayerExit
+                );
+            let split_by_alpha_mix = if !capabilities.chain_mix_alpha {
+                started
+                    && ((op.kind.is_alpha_render() && run_has_non_alpha_render)
+                        || (op.kind.is_non_alpha_render() && run_has_alpha_render))
+            } else {
+                false
+            };
+            let split_by_clip_mix = if !capabilities.chain_mix_clip {
+                started
+                    && ((op.kind.is_clip_marker() && run_has_non_marker_ops)
+                        || (!op.kind.is_clip_marker() && run_has_clip_marker))
+            } else {
+                false
+            };
+            let split_by_mask_mix = if !capabilities.chain_mix_mask {
+                started
+                    && ((op.kind.is_mask_marker() && run_has_non_marker_ops)
+                        || (!op.kind.is_mask_marker() && run_has_mask_marker))
+            } else {
+                false
+            };
+            let split_by_layer_mix = if !capabilities.chain_mix_layer {
+                started
+                    && ((op.kind.is_layer_marker() && run_has_non_marker_ops)
+                        || (!op.kind.is_layer_marker() && run_has_layer_marker))
+            } else {
+                false
+            };
+            let split = split_by_state
+                || split_by_closed_state
+                || split_by_candidate
+                || split_by_capacity
+                || split_by_alpha_mix
+                || split_by_clip_mix
+                || split_by_mask_mix
+                || split_by_layer_mix;
 
             if split {
                 plan.push(current);
@@ -1537,6 +1654,14 @@ impl<const N: usize> DrawList<N> {
                 started = false;
                 run_len = 0;
                 run_has_render = false;
+                run_has_alpha_render = false;
+                run_has_non_alpha_render = false;
+                run_has_clip_marker = false;
+                run_has_mask_marker = false;
+                run_has_mask_exit_marker = false;
+                run_has_layer_marker = false;
+                run_has_layer_exit_marker = false;
+                run_has_non_marker_ops = false;
                 run_candidate = false;
             }
 
@@ -1551,16 +1676,39 @@ impl<const N: usize> DrawList<N> {
                 };
                 run_candidate = op_candidate;
                 run_has_render = op.command_len > 0;
+                run_has_alpha_render = op.kind.is_alpha_render();
+                run_has_non_alpha_render = op.kind.is_non_alpha_render();
+                run_has_clip_marker = op.kind.is_clip_marker();
+                run_has_mask_marker = op.kind.is_mask_marker();
+                run_has_mask_exit_marker = matches!(op.kind, DrawChainOpKind::MaskExit);
+                run_has_layer_marker = op.kind.is_layer_marker();
+                run_has_layer_exit_marker = matches!(op.kind, DrawChainOpKind::LayerExit);
+                run_has_non_marker_ops = !op.kind.is_clip_marker()
+                    && !op.kind.is_mask_marker()
+                    && !op.kind.is_layer_marker();
                 run_len = 1;
                 started = true;
             } else {
                 current.op_end = saturating_u16(run_index.saturating_add(1));
                 current.candidate = current.candidate && op_candidate;
+                run_has_alpha_render = run_has_alpha_render || op.kind.is_alpha_render();
+                run_has_non_alpha_render =
+                    run_has_non_alpha_render || op.kind.is_non_alpha_render();
+                run_has_clip_marker = run_has_clip_marker || op.kind.is_clip_marker();
+                run_has_mask_marker = run_has_mask_marker || op.kind.is_mask_marker();
+                run_has_mask_exit_marker =
+                    run_has_mask_exit_marker || matches!(op.kind, DrawChainOpKind::MaskExit);
+                run_has_layer_marker = run_has_layer_marker || op.kind.is_layer_marker();
+                run_has_layer_exit_marker =
+                    run_has_layer_exit_marker || matches!(op.kind, DrawChainOpKind::LayerExit);
+                run_has_non_marker_ops = run_has_non_marker_ops
+                    || (!op.kind.is_clip_marker()
+                        && !op.kind.is_mask_marker()
+                        && !op.kind.is_layer_marker());
                 if op.command_len > 0 {
                     run_has_render = true;
                     let command_start = op.command_start as usize;
-                    let command_end = command_start
-                        .saturating_add(op.command_len as usize);
+                    let command_end = command_start.saturating_add(op.command_len as usize);
                     if command_start < current.command_start as usize {
                         current.command_start = saturating_u16(command_start);
                     }
@@ -1570,8 +1718,26 @@ impl<const N: usize> DrawList<N> {
                 }
                 current.bounds = current.bounds.union(op.bounds);
                 run_len = run_len.saturating_add(1);
+                if supports_chain && run_len > max_ops {
+                    current.candidate = false;
+                }
             }
 
+            match op.kind {
+                DrawChainOpKind::MaskEnter => {
+                    mask_depth = mask_depth.saturating_add(1);
+                }
+                DrawChainOpKind::MaskExit => {
+                    mask_depth = mask_depth.saturating_sub(1);
+                }
+                DrawChainOpKind::LayerEnter => {
+                    layer_depth = layer_depth.saturating_add(1);
+                }
+                DrawChainOpKind::LayerExit => {
+                    layer_depth = layer_depth.saturating_sub(1);
+                }
+                _ => {}
+            }
             run_index += 1;
         }
 
@@ -1583,7 +1749,11 @@ impl<const N: usize> DrawList<N> {
         while index < plan.len {
             let previous = plan.runs[index - 1];
             let current = plan.runs[index];
-            if previous.candidate && current.candidate && !previous.bounds.intersects(current.bounds) {
+            if capabilities.chain_run_fence
+                && previous.candidate
+                && current.candidate
+                && !previous.bounds.intersects(current.bounds)
+            {
                 plan.parallel_hints = plan.parallel_hints.saturating_add(1);
             }
             index += 1;
@@ -1627,18 +1797,73 @@ impl<const N: usize> DrawList<N> {
                 continue;
             }
 
+            let contract =
+                run_contract_from_ops::<OPS>(&chain, run.op_start as usize, run.op_end as usize);
+
             let result = if run.candidate {
-                backend.submit_draw_chain(&run_chain, stats)
+                let result = backend.submit_draw_chain_with_contract(&run_chain, &contract, stats);
+                if result == DrawChainSubmitResult::Submitted {
+                    stats.mark_draw_chain_submit(run_chain.stats(), result);
+                    stats.mark_draw_chain_run_result(result);
+                    active_clip = None;
+                    run_index += 1;
+                    continue;
+                }
+
+                result
             } else {
                 DrawChainSubmitResult::Fallback
             };
+
             if run.candidate {
-                stats.mark_draw_chain_submit(run_chain.stats(), result);
+                if result != DrawChainSubmitResult::Submitted {
+                    if contract.descriptor.has_mask || contract.descriptor.has_layer {
+                        stats.mark_draw_chain_submit(run_chain.stats(), result);
+                        stats.mark_draw_chain_run_result(result);
+                        self.execute_command_range(
+                            backend,
+                            run.command_start as usize,
+                            run.command_end as usize,
+                            dirty_clip,
+                            dispatch,
+                            &mut active_clip,
+                            stats,
+                        );
+                    } else {
+                        let mut op_ptr = run.op_start as usize;
+                        while op_ptr < run.op_end as usize {
+                            let _ = run_chain.clear();
+                            let _ = run_chain.push(chain.ops()[op_ptr]);
+                            let op_contract = run_contract_from_ops::<OPS>(
+                                &chain,
+                                op_ptr,
+                                op_ptr.saturating_add(1),
+                            );
+                            let op_result = backend.submit_draw_chain_with_contract(
+                                &run_chain,
+                                &op_contract,
+                                stats,
+                            );
+                            stats.mark_draw_chain_submit(run_chain.stats(), op_result);
+                            stats.mark_draw_chain_run_result(op_result);
+                            if op_result != DrawChainSubmitResult::Submitted {
+                                self.execute_command_range(
+                                    backend,
+                                    run_chain.ops()[0].command_start as usize,
+                                    run_chain.ops()[0].command_start as usize
+                                        + run_chain.ops()[0].command_len as usize,
+                                    dirty_clip,
+                                    dispatch,
+                                    &mut active_clip,
+                                    stats,
+                                );
+                            }
+                            op_ptr = op_ptr.saturating_add(1);
+                        }
+                    }
+                }
             } else {
                 stats.mark_draw_chain_submit(run_chain.stats(), DrawChainSubmitResult::Fallback);
-            }
-            stats.mark_draw_chain_run_result(result);
-            if result != DrawChainSubmitResult::Submitted {
                 self.execute_command_range(
                     backend,
                     run.command_start as usize,
@@ -1648,10 +1873,6 @@ impl<const N: usize> DrawList<N> {
                     &mut active_clip,
                     stats,
                 );
-                if !run.candidate {
-                    active_clip = None;
-                }
-            } else {
                 active_clip = None;
             }
             run_index += 1;
@@ -1662,6 +1883,152 @@ impl<const N: usize> DrawList<N> {
             stats.clip_changed();
         }
         backend.clear_masks();
+    }
+
+    fn execute_parallel_run_planner<B: ParallelRenderBackend, const OPS: usize>(
+        &self,
+        backend: &mut B,
+        dirty_clip: Option<Rect>,
+        dispatch: DrawBackendDispatch,
+        stats: &mut RenderStats,
+    ) {
+        let capabilities = backend.capabilities();
+        let chain = self.compile_draw_chain::<OPS>(dirty_clip);
+        let run_plan = self.plan_draw_chain_runs::<OPS>(&chain, capabilities);
+        let mut split_hints = run_plan.splits;
+        while split_hints > 0 {
+            stats.mark_draw_chain_split();
+            split_hints -= 1;
+        }
+        let mut parallel_hints = run_plan.parallel_hints;
+        while parallel_hints > 0 {
+            stats.mark_draw_chain_parallel_hint();
+            parallel_hints -= 1;
+        }
+
+        let mut active_clip = None;
+        let mut run_index = 0usize;
+        while run_index < run_plan.len {
+            let run = run_plan.runs[run_index];
+            let mut run_chain: DrawChain<OPS> = DrawChain::new();
+            let mut op_index = run.op_start as usize;
+            while op_index < run.op_end as usize {
+                let _ = run_chain.push(chain.ops()[op_index]);
+                op_index += 1;
+            }
+            if run_chain.is_empty() {
+                run_index += 1;
+                continue;
+            }
+
+            let contract =
+                run_contract_from_ops::<OPS>(&chain, run.op_start as usize, run.op_end as usize);
+            let stateful = contract.descriptor.has_mask || contract.descriptor.has_layer;
+            let marker_only = run.command_start >= run.command_end;
+
+            if self.pending_parallel_intersects_run(backend, run)
+                || (backend.pending_draw_chain_bounds().is_some() && (stateful || marker_only))
+            {
+                self.flush_parallel_pending(backend, stats, true);
+            }
+
+            if run.candidate && !stateful && !marker_only {
+                match backend.queue_draw_chain_with_contract(&run_chain, &contract, stats) {
+                    ParallelDrawChainSubmitResult::Queued => {
+                        stats.mark_draw_chain_submit(
+                            run_chain.stats(),
+                            DrawChainSubmitResult::Submitted,
+                        );
+                        stats.mark_draw_chain_run_result(DrawChainSubmitResult::Submitted);
+                        active_clip = None;
+                        run_index += 1;
+                        continue;
+                    }
+                    ParallelDrawChainSubmitResult::Submitted => {
+                        stats.mark_draw_chain_submit(
+                            run_chain.stats(),
+                            DrawChainSubmitResult::Submitted,
+                        );
+                        stats.mark_draw_chain_run_result(DrawChainSubmitResult::Submitted);
+                        active_clip = None;
+                        run_index += 1;
+                        continue;
+                    }
+                    ParallelDrawChainSubmitResult::Fallback
+                    | ParallelDrawChainSubmitResult::Unsupported => {
+                        stats.mark_draw_chain_parallel_fallback();
+                    }
+                }
+            } else if run.candidate {
+                let result = backend.submit_draw_chain_with_contract(&run_chain, &contract, stats);
+                if result == DrawChainSubmitResult::Submitted {
+                    stats.mark_draw_chain_submit(run_chain.stats(), result);
+                    stats.mark_draw_chain_run_result(result);
+                    active_clip = None;
+                    run_index += 1;
+                    continue;
+                }
+            }
+
+            if backend.pending_draw_chain_bounds().is_some() {
+                if self.pending_parallel_intersects_run(backend, run) || stateful || marker_only {
+                    self.flush_parallel_pending(backend, stats, true);
+                } else {
+                    stats.mark_draw_chain_parallel_software_run();
+                }
+            }
+
+            stats.mark_draw_chain_submit(run_chain.stats(), DrawChainSubmitResult::Fallback);
+            stats.mark_draw_chain_run_result(DrawChainSubmitResult::Fallback);
+            self.execute_command_range(
+                backend,
+                run.command_start as usize,
+                run.command_end as usize,
+                dirty_clip,
+                dispatch,
+                &mut active_clip,
+                stats,
+            );
+            active_clip = None;
+            run_index += 1;
+        }
+
+        self.flush_parallel_pending(backend, stats, false);
+
+        if active_clip.is_some() {
+            backend.set_clip(None);
+            stats.clip_changed();
+        }
+        backend.clear_masks();
+    }
+
+    fn pending_parallel_intersects_run<B: ParallelRenderBackend>(
+        &self,
+        backend: &B,
+        run: DrawChainRun,
+    ) -> bool {
+        backend
+            .pending_draw_chain_bounds()
+            .map(|bounds| bounds.intersects(run.bounds))
+            .unwrap_or(false)
+    }
+
+    fn flush_parallel_pending<B: ParallelRenderBackend>(
+        &self,
+        backend: &mut B,
+        stats: &mut RenderStats,
+        barrier: bool,
+    ) {
+        if backend.pending_draw_chain_bounds().is_none() {
+            return;
+        }
+        if barrier {
+            stats.mark_draw_chain_parallel_barrier();
+        }
+        let result = backend.flush_pending_draw_chain(stats);
+        if result != DrawChainSubmitResult::Submitted {
+            stats.mark_draw_chain_parallel_fallback();
+        }
     }
 
     fn execute_command_range<B: RenderBackend>(
@@ -1969,6 +2336,93 @@ fn chain_op_kind(cmd: DrawCommand) -> Option<DrawChainOpKind> {
     }
 }
 
+fn chain_op_payload(cmd: DrawCommand) -> DrawChainOpPayload {
+    match cmd {
+        DrawCommand::SetClip(rect) => DrawChainOpPayload::Clip { clip: Some(rect) },
+        DrawCommand::FillRect { rect, color, .. } => DrawChainOpPayload::FillRect { rect, color },
+        DrawCommand::FillStyled { rect, style, .. }
+            if style.radius == 0
+                && style.gradient == GradientStyle::None
+                && style.blend == BlendMode::Normal =>
+        {
+            DrawChainOpPayload::FillRect {
+                rect,
+                color: style.color,
+            }
+        }
+        DrawCommand::DrawImage {
+            rect,
+            image,
+            opacity,
+            ..
+        } => DrawChainOpPayload::Image {
+            rect,
+            image,
+            opacity,
+            fit: ImageFit::Stretch,
+            tint: None,
+        },
+        DrawCommand::DrawImageFit {
+            rect,
+            image,
+            opacity,
+            fit,
+            ..
+        } => DrawChainOpPayload::Image {
+            rect,
+            image,
+            opacity,
+            fit,
+            tint: None,
+        },
+        DrawCommand::DrawImageTint {
+            rect,
+            image,
+            opacity,
+            fit,
+            tint,
+            ..
+        } => DrawChainOpPayload::Image {
+            rect,
+            image,
+            opacity,
+            fit,
+            tint: Some(tint),
+        },
+        DrawCommand::DrawImageStyled {
+            rect, image, style, ..
+        } if style.blend == BlendMode::Normal
+            && style.tint.is_none()
+            && style.clip_radius == 0
+            && !style.tile =>
+        {
+            DrawChainOpPayload::Image {
+                rect,
+                image,
+                opacity: style.opacity,
+                fit: style.fit,
+                tint: None,
+            }
+        }
+        DrawCommand::DrawMask { spec, .. } | DrawCommand::PushMask { spec, .. } => {
+            DrawChainOpPayload::Mask { spec }
+        }
+        DrawCommand::PushBitmapMask {
+            rect,
+            image,
+            inverted,
+            opacity,
+            ..
+        } => DrawChainOpPayload::Mask {
+            spec: MaskSpec::bitmap(rect, image)
+                .inverted(inverted)
+                .opacity(opacity),
+        },
+        DrawCommand::BeginLayer { rect, spec, .. } => DrawChainOpPayload::Layer { rect, spec },
+        _ => DrawChainOpPayload::None,
+    }
+}
+
 fn chain_op_bounds(cmd: DrawCommand, clip: Option<Rect>) -> Rect {
     match cmd {
         DrawCommand::SetClip(rect) => rect,
@@ -1990,6 +2444,79 @@ fn chain_op_culls_with_clip(op: DrawChainOpKind) -> bool {
             | DrawChainOpKind::ImageBlend
             | DrawChainOpKind::FallbackRange
     )
+}
+
+fn run_contract_from_ops<const OPS: usize>(
+    chain: &DrawChain<OPS>,
+    op_start: usize,
+    op_end: usize,
+) -> DrawChainRunContract<OPS> {
+    let mut contract = DrawChainRunContract::EMPTY;
+    let mut bounds = Rect::EMPTY;
+    let mut command_start = 0u16;
+    let mut command_end = 0u16;
+    let mut has_clip = false;
+    let mut has_mask = false;
+    let mut has_layer = false;
+    let mut op_index = op_start;
+    let mut seen_ops = false;
+    let mut seen_command_span = false;
+    while op_index < op_end {
+        let op = chain.ops()[op_index];
+        let _ = contract.push_kind(op.kind);
+        bounds = bounds.union(op.bounds);
+        seen_ops = true;
+        if op.command_len > 0 {
+            let end = op.command_start.saturating_add(op.command_len);
+            if !seen_command_span {
+                command_start = op.command_start;
+                command_end = end;
+                seen_command_span = true;
+            } else {
+                if op.command_start < command_start {
+                    command_start = op.command_start;
+                }
+                if end > command_end {
+                    command_end = end;
+                }
+            }
+        }
+        if matches!(op.kind, DrawChainOpKind::Clip) {
+            has_clip = true;
+        }
+        if matches!(
+            op.kind,
+            DrawChainOpKind::MaskEnter | DrawChainOpKind::MaskExit
+        ) {
+            has_mask = true;
+        }
+        if matches!(
+            op.kind,
+            DrawChainOpKind::LayerEnter | DrawChainOpKind::LayerExit
+        ) {
+            has_layer = true;
+        }
+        op_index = op_index.saturating_add(1);
+    }
+
+    if !seen_ops {
+        return contract;
+    }
+
+    if !seen_command_span {
+        command_start = chain.ops()[op_start].command_start;
+        command_end = command_start;
+    }
+
+    contract.set_descriptor(DrawChainRunDescriptor {
+        command_start,
+        command_end,
+        has_clip,
+        has_mask,
+        has_layer,
+        bounds,
+    });
+    contract
 }
 
 fn saturating_u16(value: usize) -> u16 {
@@ -2061,4 +2588,618 @@ fn translate_fill_style(mut style: FillStyle, dx: i32, dy: i32) -> FillStyle {
         other => other,
     };
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::{
+        BackendCapabilities, DrawChainOpPayload, DrawChainSubmitResult, DrawFeatureFlags,
+        RenderBackend, RenderStats,
+    };
+    use crate::PixelFormat;
+
+    struct PartialFallbackBackend {
+        capabilities: BackendCapabilities,
+        submit_calls: u32,
+        software_draw_commands: u32,
+    }
+
+    impl PartialFallbackBackend {
+        fn new() -> Self {
+            let mut capabilities = BackendCapabilities::software(PixelFormat::Rgb565);
+            capabilities.draw_chain = true;
+            capabilities.max_chain_ops = 4;
+            capabilities.chain_draw_features = DrawFeatureFlags::FILL;
+            Self {
+                capabilities,
+                submit_calls: 0,
+                software_draw_commands: 0,
+            }
+        }
+    }
+
+    impl RenderBackend for PartialFallbackBackend {
+        fn capabilities(&self) -> BackendCapabilities {
+            self.capabilities
+        }
+
+        fn submit_draw_chain_with_contract<const OPS: usize>(
+            &mut self,
+            _chain: &crate::backend::DrawChain<OPS>,
+            contract: &crate::backend::DrawChainRunContract<OPS>,
+            _stats: &mut RenderStats,
+        ) -> DrawChainSubmitResult {
+            self.submit_calls = self.submit_calls.saturating_add(1);
+            let command_len = contract
+                .descriptor
+                .command_end
+                .saturating_sub(contract.descriptor.command_start);
+            if command_len > 1 {
+                return DrawChainSubmitResult::Fallback;
+            }
+            if contract.descriptor.command_start == 0 {
+                DrawChainSubmitResult::Submitted
+            } else {
+                DrawChainSubmitResult::Fallback
+            }
+        }
+
+        fn draw_command(&mut self, _cmd: DrawCommand) {
+            self.software_draw_commands = self.software_draw_commands.saturating_add(1);
+        }
+    }
+
+    struct ProbeChainBackend {
+        capabilities: BackendCapabilities,
+        submit_calls: u32,
+        payload_ops: u32,
+        clip_payloads: u32,
+        fill_payloads: u32,
+        image_payloads: u32,
+        zero_span_ops: u32,
+        software_draw_commands: u32,
+    }
+
+    impl ProbeChainBackend {
+        fn new() -> Self {
+            let mut capabilities = BackendCapabilities::software(PixelFormat::Rgb565);
+            capabilities.draw_chain = true;
+            capabilities.max_chain_ops = 8;
+            capabilities.chain_draw_features = DrawFeatureFlags::ALL_SOFTWARE;
+            capabilities.chain_mix_alpha = true;
+            capabilities.chain_mix_clip = true;
+            capabilities.chain_mix_mask = true;
+            capabilities.chain_mix_layer = true;
+            Self {
+                capabilities,
+                submit_calls: 0,
+                payload_ops: 0,
+                clip_payloads: 0,
+                fill_payloads: 0,
+                image_payloads: 0,
+                zero_span_ops: 0,
+                software_draw_commands: 0,
+            }
+        }
+    }
+
+    impl RenderBackend for ProbeChainBackend {
+        fn capabilities(&self) -> BackendCapabilities {
+            self.capabilities
+        }
+
+        fn submit_draw_chain_with_contract<const OPS: usize>(
+            &mut self,
+            chain: &crate::backend::DrawChain<OPS>,
+            contract: &crate::backend::DrawChainRunContract<OPS>,
+            _stats: &mut RenderStats,
+        ) -> DrawChainSubmitResult {
+            self.submit_calls = self.submit_calls.saturating_add(1);
+            if contract.len != chain.len() {
+                return DrawChainSubmitResult::Fallback;
+            }
+
+            for op in chain.ops() {
+                self.payload_ops = self.payload_ops.saturating_add(1);
+                if op.command_len == 0 {
+                    self.zero_span_ops = self.zero_span_ops.saturating_add(1);
+                }
+                match (op.kind, op.payload) {
+                    (DrawChainOpKind::SolidFill, DrawChainOpPayload::FillRect { color, .. })
+                        if color.a == 255 =>
+                    {
+                        self.fill_payloads = self.fill_payloads.saturating_add(1);
+                    }
+                    (DrawChainOpKind::AlphaFill, DrawChainOpPayload::FillRect { color, .. })
+                        if color.a < 255 =>
+                    {
+                        self.fill_payloads = self.fill_payloads.saturating_add(1);
+                    }
+                    (DrawChainOpKind::ImageBlit, DrawChainOpPayload::Image { opacity, .. })
+                        if opacity == 255 =>
+                    {
+                        self.image_payloads = self.image_payloads.saturating_add(1);
+                    }
+                    (DrawChainOpKind::ImageBlend, DrawChainOpPayload::Image { opacity, .. })
+                        if opacity < 255 =>
+                    {
+                        self.image_payloads = self.image_payloads.saturating_add(1);
+                    }
+                    (DrawChainOpKind::Clip, DrawChainOpPayload::Clip { .. }) => {
+                        self.clip_payloads = self.clip_payloads.saturating_add(1);
+                    }
+                    (DrawChainOpKind::MaskEnter, DrawChainOpPayload::Mask { .. })
+                    | (DrawChainOpKind::LayerEnter, DrawChainOpPayload::Layer { .. })
+                    | (DrawChainOpKind::MaskExit, DrawChainOpPayload::None)
+                    | (DrawChainOpKind::LayerExit, DrawChainOpPayload::None) => {}
+                    _ => return DrawChainSubmitResult::Fallback,
+                }
+            }
+            DrawChainSubmitResult::Submitted
+        }
+
+        fn draw_command(&mut self, _cmd: DrawCommand) {
+            self.software_draw_commands = self.software_draw_commands.saturating_add(1);
+        }
+    }
+
+    #[test]
+    fn draw_chain_fallback_isolated_to_failed_op() {
+        let mut list = DrawList::<4>::new();
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(0, 0, 8, 8),
+            depth: 0,
+            color: Color::WHITE,
+        }));
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(4, 0, 8, 8),
+            depth: 0,
+            color: Color::WHITE,
+        }));
+
+        let mut backend = PartialFallbackBackend::new();
+        let chain = list.compile_draw_chain::<4>(None);
+        assert_eq!(chain.len(), 2);
+        let plan = list.plan_draw_chain_runs::<4>(&chain, backend.capabilities());
+        assert_eq!(plan.len, 1);
+        assert!(plan.runs[0].candidate);
+        let mut stats = RenderStats::new();
+        list.execute_tracked_on(&mut backend, &mut stats);
+
+        assert_eq!(backend.submit_calls, 3);
+        assert_eq!(stats.draw_chain_submitted, 1);
+        assert_eq!(stats.draw_chain_fallbacks, 1);
+        assert_eq!(stats.draw_chain_runs, 2);
+        assert_eq!(stats.draw_chain_hw_runs, 1);
+        assert_eq!(stats.draw_chain_sw_runs, 1);
+        assert_eq!(backend.software_draw_commands, 1);
+        assert_eq!(stats.commands_seen, 1);
+        assert_eq!(stats.commands_drawn, 1);
+    }
+
+    #[test]
+    fn synthetic_clip_marker_has_no_command_span() {
+        let mut list = DrawList::<4>::new();
+        let clip = Some(Rect::new(0, 0, 16, 16));
+        assert!(list.push_clipped(
+            DrawCommand::FillRect {
+                rect: Rect::new(0, 0, 8, 8),
+                depth: 0,
+                color: Color::WHITE,
+            },
+            clip,
+        ));
+
+        let chain = list.compile_draw_chain::<4>(None);
+        assert_eq!(chain.len(), 2);
+        assert_eq!(chain.ops()[0].kind, DrawChainOpKind::Clip);
+        assert_eq!(chain.ops()[0].payload, DrawChainOpPayload::Clip { clip });
+        assert_eq!(chain.ops()[0].command_start, 0);
+        assert_eq!(chain.ops()[0].command_len, 0);
+        assert_eq!(chain.ops()[1].kind, DrawChainOpKind::SolidFill);
+        assert!(matches!(
+            chain.ops()[1].payload,
+            DrawChainOpPayload::FillRect { .. }
+        ));
+        assert_eq!(chain.ops()[1].command_start, 0);
+        assert_eq!(chain.ops()[1].command_len, 1);
+
+        let clip_contract = run_contract_from_ops::<4>(&chain, 0, 1);
+        assert_eq!(clip_contract.descriptor.command_start, 0);
+        assert_eq!(clip_contract.descriptor.command_end, 0);
+        assert!(clip_contract.descriptor.has_clip);
+
+        let full_contract = run_contract_from_ops::<4>(&chain, 0, 2);
+        assert_eq!(full_contract.descriptor.command_start, 0);
+        assert_eq!(full_contract.descriptor.command_end, 1);
+    }
+
+    #[test]
+    fn probe_chain_backend_consumes_payload_without_draw_command_lookup() {
+        let clip = Some(Rect::new(0, 0, 32, 32));
+        let mut list = DrawList::<8>::new();
+        assert!(list.push_clipped(
+            DrawCommand::FillRect {
+                rect: Rect::new(0, 0, 12, 12),
+                depth: 0,
+                color: Color::WHITE,
+            },
+            clip,
+        ));
+        assert!(list.push_clipped(
+            DrawCommand::DrawImageFit {
+                rect: Rect::new(8, 8, 16, 16),
+                depth: 0,
+                image: ImageId(7),
+                opacity: 160,
+                fit: ImageFit::Contain,
+            },
+            clip,
+        ));
+
+        let chain = list.compile_draw_chain::<8>(None);
+        assert_eq!(chain.len(), 3);
+        let mut backend = ProbeChainBackend::new();
+        let mut stats = RenderStats::new();
+        list.execute_tracked_on(&mut backend, &mut stats);
+
+        assert_eq!(backend.submit_calls, 1);
+        assert_eq!(backend.payload_ops, 3);
+        assert_eq!(backend.clip_payloads, 1);
+        assert_eq!(backend.fill_payloads, 1);
+        assert_eq!(backend.image_payloads, 1);
+        assert_eq!(backend.zero_span_ops, 1);
+        assert_eq!(backend.software_draw_commands, 0);
+        assert_eq!(stats.draw_chain_hw_runs, 1);
+        assert_eq!(stats.draw_chain_sw_runs, 0);
+        assert_eq!(stats.commands_seen, 0);
+    }
+
+    #[test]
+    fn draw_chain_splits_alpha_and_non_alpha_when_chain_mix_alpha_disabled() {
+        let mut list = DrawList::<4>::new();
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(0, 0, 8, 8),
+            depth: 0,
+            color: Color::rgba(255, 255, 255, 255),
+        }));
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(4, 0, 8, 8),
+            depth: 0,
+            color: Color::rgba(255, 255, 255, 128),
+        }));
+
+        let backend = PartialFallbackBackend::new();
+        let chain = list.compile_draw_chain::<4>(None);
+        let mut capabilities = backend.capabilities();
+        capabilities.chain_mix_alpha = false;
+        let plan = list.plan_draw_chain_runs::<4>(&chain, capabilities);
+
+        assert_eq!(plan.len, 2);
+        assert!(plan.runs[0].candidate);
+        assert!(plan.runs[1].candidate);
+    }
+
+    #[test]
+    fn draw_chain_splits_clip_marker_and_render_when_chain_mix_clip_disabled() {
+        let mut list = DrawList::<4>::new();
+        let clip = Some(Rect::new(0, 0, 16, 16));
+        assert!(list.push_clipped(
+            DrawCommand::FillRect {
+                rect: Rect::new(0, 0, 8, 8),
+                depth: 0,
+                color: Color::rgba(0, 0, 0, 255),
+            },
+            clip,
+        ));
+        assert!(list.push_clipped(
+            DrawCommand::FillRect {
+                rect: Rect::new(4, 0, 8, 8),
+                depth: 0,
+                color: Color::rgba(0, 0, 0, 255),
+            },
+            clip,
+        ));
+
+        let backend = PartialFallbackBackend::new();
+        let chain = list.compile_draw_chain::<4>(None);
+        let mut capabilities = backend.capabilities();
+        capabilities.chain_mix_clip = false;
+        let plan = list.plan_draw_chain_runs::<4>(&chain, capabilities);
+
+        assert_eq!(plan.len, 2);
+    }
+
+    #[test]
+    fn run_contract_receives_minimal_state_slice() {
+        let mut list = DrawList::<4>::new();
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(0, 0, 4, 4),
+            depth: 0,
+            color: Color::WHITE,
+        }));
+
+        let mut backend = PartialFallbackBackend::new();
+        let chain = list.compile_draw_chain::<4>(None);
+        assert_eq!(chain.len(), 1);
+        let plan = list.plan_draw_chain_runs::<4>(&chain, backend.capabilities());
+        assert_eq!(plan.len, 1);
+        assert!(plan.runs[0].candidate);
+        let mut stats = RenderStats::new();
+        list.execute_tracked_on(&mut backend, &mut stats);
+
+        assert_eq!(backend.submit_calls, 1);
+        assert_eq!(stats.draw_chain_submitted, 1);
+        assert_eq!(stats.draw_chain_fallbacks, 0);
+        assert_eq!(stats.commands_seen, 0);
+        assert_eq!(stats.commands_drawn, 0);
+    }
+
+    #[test]
+    fn draw_chain_splits_mask_marker_and_render_when_chain_mix_mask_disabled() {
+        let mut list = DrawList::<4>::new();
+        assert!(list.push(DrawCommand::PushBitmapMask {
+            rect: Rect::new(0, 0, 16, 16),
+            depth: 0,
+            image: ImageId(1),
+            inverted: false,
+            opacity: 255,
+        }));
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(0, 0, 16, 16),
+            depth: 0,
+            color: Color::rgba(255, 255, 255, 128),
+        }));
+
+        let backend = PartialFallbackBackend::new();
+        let mut capabilities = backend.capabilities();
+        capabilities.chain_draw_features = DrawFeatureFlags::ALL_SOFTWARE;
+        capabilities.mask = true;
+        capabilities.chain_mix_mask = false;
+        let chain = list.compile_draw_chain::<4>(None);
+        let plan = list.plan_draw_chain_runs::<4>(&chain, capabilities);
+
+        assert_eq!(plan.len, 2);
+        assert!(!plan.runs[0].candidate);
+        assert!(!plan.runs[1].candidate);
+    }
+
+    #[test]
+    fn draw_chain_keeps_masked_render_run_self_contained_when_mask_mix_enabled() {
+        let mut list = DrawList::<8>::new();
+        assert!(list.push(DrawCommand::PushMask {
+            depth: 0,
+            spec: MaskSpec::rounded(Rect::new(0, 0, 16, 16), 4),
+        }));
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(0, 0, 16, 16),
+            depth: 0,
+            color: Color::rgba(255, 255, 255, 128),
+        }));
+        assert!(list.push(DrawCommand::PopMask));
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(20, 0, 8, 8),
+            depth: 0,
+            color: Color::rgba(255, 255, 255, 255),
+        }));
+
+        let backend = PartialFallbackBackend::new();
+        let mut capabilities = backend.capabilities();
+        capabilities.chain_draw_features = DrawFeatureFlags::ALL_SOFTWARE;
+        capabilities.mask = true;
+        capabilities.chain_mix_mask = true;
+        let chain = list.compile_draw_chain::<8>(None);
+        let plan = list.plan_draw_chain_runs::<8>(&chain, capabilities);
+
+        assert_eq!(plan.len, 2);
+        assert!(plan.runs[0].candidate);
+        assert_eq!(plan.runs[0].op_start, 0);
+        assert_eq!(plan.runs[0].op_end, 3);
+        assert_eq!(plan.runs[0].command_start, 0);
+        assert_eq!(plan.runs[0].command_end, 3);
+        assert!(plan.runs[1].candidate);
+    }
+
+    #[test]
+    fn stateful_mask_run_fallback_replays_whole_run_in_software() {
+        struct MaskRunFallbackBackend {
+            capabilities: BackendCapabilities,
+            submit_calls: u32,
+            software_draw_commands: u32,
+            pushed_masks: u32,
+            popped_masks: u32,
+        }
+
+        impl MaskRunFallbackBackend {
+            fn new() -> Self {
+                let mut capabilities = BackendCapabilities::software(PixelFormat::Rgb565);
+                capabilities.draw_chain = true;
+                capabilities.max_chain_ops = 8;
+                capabilities.mask = true;
+                capabilities.chain_mix_mask = true;
+                capabilities.chain_draw_features = DrawFeatureFlags::ALL_SOFTWARE;
+                Self {
+                    capabilities,
+                    submit_calls: 0,
+                    software_draw_commands: 0,
+                    pushed_masks: 0,
+                    popped_masks: 0,
+                }
+            }
+        }
+
+        impl RenderBackend for MaskRunFallbackBackend {
+            fn capabilities(&self) -> BackendCapabilities {
+                self.capabilities
+            }
+
+            fn submit_draw_chain_with_contract<const OPS: usize>(
+                &mut self,
+                _chain: &crate::backend::DrawChain<OPS>,
+                _contract: &crate::backend::DrawChainRunContract<OPS>,
+                _stats: &mut RenderStats,
+            ) -> DrawChainSubmitResult {
+                self.submit_calls = self.submit_calls.saturating_add(1);
+                DrawChainSubmitResult::Fallback
+            }
+
+            fn push_mask(&mut self, _spec: MaskSpec) -> bool {
+                self.pushed_masks = self.pushed_masks.saturating_add(1);
+                true
+            }
+
+            fn pop_mask(&mut self) -> bool {
+                self.popped_masks = self.popped_masks.saturating_add(1);
+                true
+            }
+
+            fn draw_command(&mut self, _cmd: DrawCommand) {
+                self.software_draw_commands = self.software_draw_commands.saturating_add(1);
+            }
+        }
+
+        let mut list = DrawList::<8>::new();
+        assert!(list.push(DrawCommand::PushMask {
+            depth: 0,
+            spec: MaskSpec::rounded(Rect::new(0, 0, 16, 16), 4),
+        }));
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(0, 0, 16, 16),
+            depth: 0,
+            color: Color::rgba(255, 255, 255, 128),
+        }));
+        assert!(list.push(DrawCommand::PopMask));
+
+        let mut backend = MaskRunFallbackBackend::new();
+        let mut stats = RenderStats::new();
+        list.execute_tracked_on(&mut backend, &mut stats);
+
+        assert_eq!(backend.submit_calls, 1);
+        assert_eq!(backend.pushed_masks, 1);
+        assert_eq!(backend.popped_masks, 1);
+        assert_eq!(backend.software_draw_commands, 1);
+        assert_eq!(stats.draw_chain_fallbacks, 1);
+        assert_eq!(stats.draw_chain_runs, 1);
+        assert_eq!(stats.draw_chain_sw_runs, 1);
+        assert_eq!(stats.commands_seen, 3);
+        assert_eq!(stats.commands_drawn, 1);
+    }
+
+    #[test]
+    fn draw_chain_splits_layer_marker_and_render_when_chain_mix_layer_disabled() {
+        let mut list = DrawList::<4>::new();
+        assert!(list.push(DrawCommand::BeginLayer {
+            rect: Rect::new(0, 0, 16, 16),
+            depth: 0,
+            spec: LayerSpec {
+                opacity: 255,
+                recolor: None,
+                blur_radius: 0,
+                mask: None,
+            },
+        }));
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(0, 0, 16, 16),
+            depth: 0,
+            color: Color::rgba(255, 255, 255, 255),
+        }));
+
+        let backend = PartialFallbackBackend::new();
+        let mut capabilities = backend.capabilities();
+        capabilities.chain_draw_features = DrawFeatureFlags::ALL_SOFTWARE;
+        capabilities.layers = true;
+        capabilities.chain_mix_layer = false;
+        let chain = list.compile_draw_chain::<4>(None);
+        let plan = list.plan_draw_chain_runs::<4>(&chain, capabilities);
+
+        assert_eq!(plan.len, 2);
+        assert!(!plan.runs[0].candidate);
+        assert!(!plan.runs[1].candidate);
+    }
+
+    #[test]
+    fn draw_chain_fallback_isolated_to_single_failed_op_in_candidate_run() {
+        struct SingleFailingOpBackend {
+            capabilities: BackendCapabilities,
+            submit_calls: u32,
+            software_draw_commands: u32,
+            fail_at_command_start: u16,
+        }
+
+        impl SingleFailingOpBackend {
+            fn new() -> Self {
+                let mut capabilities = BackendCapabilities::software(PixelFormat::Rgb565);
+                capabilities.draw_chain = true;
+                capabilities.max_chain_ops = 4;
+                capabilities.chain_draw_features = DrawFeatureFlags::FILL;
+                Self {
+                    capabilities,
+                    submit_calls: 0,
+                    software_draw_commands: 0,
+                    fail_at_command_start: 1,
+                }
+            }
+        }
+
+        impl RenderBackend for SingleFailingOpBackend {
+            fn capabilities(&self) -> BackendCapabilities {
+                self.capabilities
+            }
+
+            fn submit_draw_chain_with_contract<const OPS: usize>(
+                &mut self,
+                _chain: &crate::backend::DrawChain<OPS>,
+                contract: &crate::backend::DrawChainRunContract<OPS>,
+                _stats: &mut RenderStats,
+            ) -> DrawChainSubmitResult {
+                self.submit_calls = self.submit_calls.saturating_add(1);
+                let command_len = contract
+                    .descriptor
+                    .command_end
+                    .saturating_sub(contract.descriptor.command_start);
+                if command_len > 1 {
+                    DrawChainSubmitResult::Fallback
+                } else if contract.descriptor.command_start == self.fail_at_command_start {
+                    DrawChainSubmitResult::Fallback
+                } else {
+                    DrawChainSubmitResult::Submitted
+                }
+            }
+
+            fn draw_command(&mut self, _cmd: DrawCommand) {
+                self.software_draw_commands = self.software_draw_commands.saturating_add(1);
+            }
+        }
+
+        let mut list = DrawList::<4>::new();
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(0, 0, 8, 8),
+            depth: 0,
+            color: Color::rgba(255, 255, 255, 255),
+        }));
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(8, 0, 8, 8),
+            depth: 0,
+            color: Color::rgba(255, 255, 255, 255),
+        }));
+        assert!(list.push(DrawCommand::FillRect {
+            rect: Rect::new(16, 0, 8, 8),
+            depth: 0,
+            color: Color::rgba(255, 255, 255, 255),
+        }));
+
+        let mut backend = SingleFailingOpBackend::new();
+        let mut stats = RenderStats::new();
+        list.execute_tracked_on(&mut backend, &mut stats);
+        assert_eq!(backend.submit_calls, 4);
+        assert_eq!(backend.software_draw_commands, 1);
+        assert_eq!(stats.draw_chain_submitted, 2);
+        assert_eq!(stats.draw_chain_fallbacks, 1);
+        assert_eq!(stats.draw_chain_runs, 3);
+        assert_eq!(stats.draw_chain_hw_runs, 2);
+        assert_eq!(stats.draw_chain_sw_runs, 1);
+        assert_eq!(stats.commands_seen, 1);
+        assert_eq!(stats.commands_drawn, 1);
+    }
 }

@@ -5,6 +5,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 normalize_timestamp() {
     if [ -e "$1" ]; then
         touch -d '2 seconds ago' "$1" 2>/dev/null || touch -c "$1"

@@ -26,6 +26,8 @@ use fhre::{
     GLYPH_RUN_FLAG_KERN, GLYPH_RUN_RESOLVER_CAPACITY, IMAGE_MASK_DOT, IMAGE_SWATCH,
     SVG_DOCUMENT_COMMANDS, SVG_DOCUMENT_PATHS,
 };
+#[cfg(feature = "sim-opengl-egl")]
+use fhre::EglParallelAccelBackend;
 
 #[path = "../../../common/fhre_nuttx_runtime.rs"]
 mod fhre_nuttx_runtime;
@@ -1667,6 +1669,26 @@ pub extern "C" fn fhre_demo_main(_argc: i32, _argv: *mut *mut u8) -> i32 {
     }
 }
 
+fn execute_scene_draw_list<const N: usize, const D: usize>(
+    list: &DrawList<N>,
+    fb: &mut NuttxFramebuffer,
+    dirty: &fhre::DirtyRegion<D>,
+    stats: &mut RenderStats,
+) {
+    #[cfg(feature = "sim-opengl-egl")]
+    {
+        if EglParallelAccelBackend::<8, { fhre::DEFAULT_DRAW_CHAIN_OPS }>::worker_available() {
+            let mut backend =
+                EglParallelAccelBackend::<8, { fhre::DEFAULT_DRAW_CHAIN_OPS }>::new(fb.surface);
+            list.execute_dirty_parallel_tracked_on(&mut backend, dirty, stats);
+            fb.surface = backend.into_surface();
+            return;
+        }
+    }
+
+    list.execute_dirty_tracked_on(&mut fb.surface, dirty, stats);
+}
+
 fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: FrameStats) -> bool {
     fb.surface.set_image_resolver(Some(demo_image_resolver));
     fb.surface.set_glyph_resolver(Some(demo_glyph_resolver));
@@ -2416,7 +2438,7 @@ fn draw_scene(fb: &mut NuttxFramebuffer, state: &mut DemoState, frame_stats: Fra
     }
     let dirty_copy_bytes = fb.prepare_dirty_frame(state.dirty.region());
     let mut stats = RenderStats::new();
-    list.execute_dirty_tracked_on(&mut fb.surface, state.dirty.region(), &mut stats);
+    execute_scene_draw_list(&list, fb, state.dirty.region(), &mut stats);
     let cache_stats = demo_image_cache_stats();
     let svg_doc_cache_stats = demo_svg_document_cache_stats();
     let glyph_run_cache_stats = demo_glyph_run_cache_stats();
@@ -3270,7 +3292,7 @@ fn push_stats_commands(
         list,
         x + 72,
         y + 475,
-        "P/P",
+        "PAR PRE PH",
         Color::rgba(238, 250, 255, 170),
     );
     push_bar(
@@ -3283,6 +3305,14 @@ fn push_stats_commands(
             .min(w as u32),
         5,
         Color::rgba(194, 92, 230, 220),
+    );
+    push_bar(
+        list,
+        x + 138,
+        y + 475,
+        stats.cache_decode_placeholders.saturating_mul(12).min(w as u32),
+        5,
+        Color::rgba(255, 96, 96, 220),
     );
 }
 

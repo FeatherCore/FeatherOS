@@ -1,7 +1,5 @@
 use crate::{
-    backend::{
-        CodecAcceleratorCapabilities, CodecPipelinePlan, CodecStageKind, CodecStagePlan,
-    },
+    backend::{CodecAcceleratorCapabilities, CodecPipelinePlan, CodecStageKind, CodecStagePlan},
     ImageFormat, ImageView,
 };
 use alloc::vec::Vec;
@@ -124,15 +122,27 @@ impl PngDecoder {
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Read, false, true));
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Inspect, false, true));
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Header, true, supported));
-        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Entropy, true, supported));
-        let _ = plan.push(CodecStagePlan::new(CodecStageKind::Transform, true, supported));
+        let _ = plan.push(CodecStagePlan::new(
+            CodecStageKind::Entropy,
+            true,
+            supported,
+        ));
+        let _ = plan.push(CodecStagePlan::new(
+            CodecStageKind::Transform,
+            true,
+            supported,
+        ));
         let _ = plan.push(CodecStagePlan::new(
             CodecStageKind::ColorConvert,
             true,
             supported,
         ));
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Pack, true, supported));
-        let _ = plan.push(CodecStagePlan::new(CodecStageKind::CacheInsert, false, true));
+        let _ = plan.push(CodecStagePlan::new(
+            CodecStageKind::CacheInsert,
+            false,
+            true,
+        ));
         plan
     }
 }

@@ -105,7 +105,6 @@ extern "C" {
     fn read(fd: c_int, buffer: *mut u8, count: usize) -> isize;
     fn usleep(usec: u32) -> c_int;
     fn clock_gettime(clockid: c_int, tp: *mut Timespec) -> c_int;
-    fn sim_x11events();
 }
 
 pub struct NuttxFramebuffer {
@@ -542,9 +541,11 @@ impl ResourceLoader for NuttxResourceLoader {
 }
 
 pub fn poll_sim_events() {
-    unsafe {
-        sim_x11events();
-    }
+    // NuttX sim already owns X11 event/update pumping from sim_loop_task.
+    // Calling sim_x11events() again from the demo thread races on Xlib's
+    // process-wide Display without XInitThreads/XLockDisplay and can freeze
+    // the window after a while. Keep this hook as a no-op so demo loops stay
+    // portable without taking ownership of the simulator event loop.
 }
 
 pub fn now_us() -> u64 {

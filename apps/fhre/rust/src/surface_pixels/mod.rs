@@ -334,7 +334,5 @@ pub(crate) fn blend_rgb565_raw(dst: u16, src_r: u32, src_g: u32, src_b: u32, alp
     let r = (src_r.min(255) * alpha + dst_r * inv_alpha) / 255;
     let g = (src_g.min(255) * alpha + dst_g * inv_alpha) / 255;
     let b = (src_b.min(255) * alpha + dst_b * inv_alpha) / 255;
-    (((r as u16 >> 3) & 0x1f) << 11)
-        | (((g as u16 >> 2) & 0x3f) << 5)
-        | ((b as u16 >> 3) & 0x1f)
+    (((r as u16 >> 3) & 0x1f) << 11) | (((g as u16 >> 2) & 0x3f) << 5) | ((b as u16 >> 3) & 0x1f)
 }

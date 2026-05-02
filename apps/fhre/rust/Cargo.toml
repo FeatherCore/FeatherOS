@@ -2,6 +2,7 @@
 name = "fhre"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [lib]
 name = "fhre"
@@ -16,5 +17,10 @@ panic = "abort"
 lto = true
 codegen-units = 1
 opt-level = "z"
+
+[features]
+default = []
+sim-opengl = []
+sim-opengl-egl = ["sim-opengl"]
 
 [dependencies]

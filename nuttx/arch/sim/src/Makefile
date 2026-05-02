@@ -189,6 +189,16 @@ ifeq ($(CONFIG_HOST_MACOS),y)
   STDLIBS += -L/opt/X11/lib
 endif
   STDLIBS += -lX11 -lXext
+ifeq ($(FHRE_SIM_OPENGL),egl)
+  FHRE_EGL_LINK_TEST := $(shell tmp=/tmp/fhre_egl_link_test_$$$$; \
+    printf 'int main(void){return 0;}\n' > $$tmp.c; \
+    $(CC) $$tmp.c -lEGL -lGL -lpthread -o $$tmp >/dev/null 2>&1; \
+    status=$$?; rm -f $$tmp.c $$tmp; \
+    if [ $$status -eq 0 ]; then echo y; fi)
+ifeq ($(FHRE_EGL_LINK_TEST),y)
+  STDLIBS += -lEGL -lGL
+endif
+endif
 ifeq ($(CONFIG_SIM_TOUCHSCREEN),y)
   CSRCS += sim_touchscreen.c
   HOSTSRCS += sim_x11eventloop.c

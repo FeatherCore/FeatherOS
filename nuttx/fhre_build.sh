@@ -5,6 +5,9 @@
 
 set -e  # 遇到错误立即退出
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 STASHED_INCLUDE_ARCH=""
 
 restore_tracked_include_arch() {
@@ -76,6 +79,14 @@ trap cleanup_feather_build EXIT
 echo "=========================================="
 echo "FeatherOS FHRE 构建脚本"
 echo "=========================================="
+case "${FHRE_SIM_OPENGL:-0}" in
+    1)
+        echo "FHRE_SIM_OPENGL=1: 启用 FHRE sim OpenGL packet probe feature（默认仍走 /dev/fb0 present）"
+        ;;
+    egl)
+        echo "FHRE_SIM_OPENGL=egl: 启用 FHRE EGL/OpenGL offscreen shim feature（默认仍走 /dev/fb0 present）"
+        ;;
+esac
 echo ""
 
 prepare_tracked_include_arch

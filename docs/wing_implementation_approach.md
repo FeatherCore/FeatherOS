@@ -11,6 +11,81 @@ FHRE = no_std Rust 纯 3D 轻量游戏/图形引擎核心 + 绘制后端抽象 +
 
 FHRE 的“纯 3D 世界模型”不是历史参考，而是底层主线：Wing 的 UI 节点也应该是 FHRE 3D 世界中位于默认 Screen Canvas 平面 `z=0` 的对象。Wing 第一版不需要做复杂 3D UI，但它不能绕过 `Transform3D + Camera + Screen Canvas` 这套模型。FHRE 本身仍然要具备游戏运行时能力，后续 Wing 内的游戏应用可以直接基于 FHRE 开发。
 
+## V4.7 对 FHRE EGL/OpenGL Worker 并行后端的适配边界
+
+V4.7 继续 FHRE-first，Wing 不新增 route/page，不持有 EGL context、GL worker、packet、ring 或 fence：
+
+- Wing 可以观察 FHRE 暴露的 `draw_chain_parallel_*`、`accel2d_ring_*`、`accel2d_fences_*` 统计，但不调用 `queue_draw_chain_with_contract()`，也不决定哪些 run 可并行。
+- Wing 不生成或解析 `Accel2dCommandList`；`EglParallelAccelBackend` 的 worker submit、fence/readback、fallback/software replay 都由 FHRE backend 管理。
+- Wing 不直接依赖 `sim-opengl-egl` feature；默认 `wing_build.sh` 不启用 OpenGL，不新增 EGL/OpenGL/pthread 链接依赖。
+- 即使 `FHRE_SIM_OPENGL=egl` 编入 FHRE demo，Wing 仍不接管 NuttX sim 的 X11 framebuffer present 或 event loop。
+- Wing 页面层继续只声明 UI tree，资源、placeholder、硬件/软件并行提交策略仍由 FHRE 管理。
+
+## V4.6 对 FHRE Hybrid Parallel Renderer 的适配边界
+
+V4.6 继续 FHRE-first，Wing 不新增 route/page，不持有 parallel scheduler、OpenGL context、packet、ring 或 fence：
+
+- Wing 可以观察 FHRE 暴露的 `draw_chain_parallel_*`、draw-chain、executor/ring/fence stats，但不调用 `queue_draw_chain_with_contract()`。
+- Wing 不生成或解析 `Accel2dCommandList`，也不决定哪些 run 可并行；overlap/barrier/fallback 由 FHRE `DrawList` 调度器处理。
+- Wing 不直接依赖 `sim-opengl` 或 `sim-opengl-egl` feature；默认 `wing_build.sh` 不启用 OpenGL，不新增 GLX/EGL/OpenGL 链接依赖。
+- `EglOpenGlAccel2dExecutor` 当前只是 FHRE 的 offscreen shim 边界，Wing 不参与 EGL pbuffer/surfaceless context、texture upload、FBO/readback 或 X11 event loop。
+- Wing 页面层继续只声明 UI tree，资源、placeholder、硬件/软件并行提交策略仍由 FHRE 管理。
+
+## V4.5 对 FHRE OpenGL/Executor 边界的适配边界
+
+V4.5 继续 FHRE-first，Wing 不新增 route/page，不持有 OpenGL context、packet、ring 或 fence：
+
+- Wing 可以观察 FHRE 暴露的 draw-chain、executor/ring/fence stats，但不生成或解析 `Accel2dCommandList`。
+- Wing 不直接依赖 `sim-opengl` feature；默认 `wing_build.sh` 不启用 OpenGL，不新增 GLX/EGL/OpenGL 链接依赖。
+- `SimOpenGlAccel2dExecutor` 只是 FHRE 的 renderer backend probe，Wing 不参与 context 创建、texture upload、FBO/readback 或 X11 event loop。
+- Wing 页面层继续只声明 UI tree，资源、fallback、placeholder、硬件提交策略仍由 FHRE 管理。
+- 当前仍不恢复 demo 线程内 `sim_x11events()`；NuttX sim 的 X11 event/update pumping 继续由 sim loop task 负责。
+
+## V4.4 对 FHRE Descriptor Ring 的适配边界
+
+V4.4 继续 FHRE-first，Wing 不新增 route/page，不实现私有 ring/fence 或 codec token：
+
+- Wing 可以观察 FHRE 暴露的 `accel2d_ring_*` / `accel2d_fences_*` stats，但不生成或解析 `Accel2dSubmissionRing`。
+- Wing 不直接持有 fence、framebuffer descriptor 或 source descriptor；硬件提交由 FHRE backend 管理。
+- Wing 不拥有 `CodecPipelineJobToken`；资源准备、fallback、placeholder 仍由 FHRE 管理。
+- `wing_build.sh` 仍是 FHRE V4.4 的兼容性回归入口，当前不新增 Windows 10 Mobile 风格页面实现。
+
+## V4.3 对 FHRE 2D Packet 化的适配边界
+
+V4.3 继续 FHRE-first，Wing 不新增 route/page，不实现私有硬件 packet 或 codec executor：
+
+- Wing 可以观察 FHRE 暴露的 draw chain / codec stats，但不生成或解析 `Accel2dCommandList`。
+- Wing 不直接持有 framebuffer/source descriptor，不参与 DMA2D/PXP/VG-Lite packet build。
+- Wing 不拥有 `CodecPipelineBackend`；资源准备、fallback、placeholder 仍由 FHRE 管理。
+- `wing_build.sh` 仍是 FHRE V4.3 的兼容性回归入口，当前不新增 Windows 10 Mobile 风格页面实现。
+
+## V4.2 对 FHRE Mock 加速闭环的适配边界
+
+V4.2 继续 FHRE-first，Wing 不新增 route/page，不实现私有硬件后端：
+
+- Wing 可以观察 `MockAccelBackend` 带来的 `draw_chain_hw_runs/draw_chain_sw_runs/draw_chain_fallbacks`，但不生成或解析 `DrawChainImageDescriptor`。
+- Wing 不拥有 codec job 状态机，只消费 FHRE 暴露的 `codec_pipeline_*` 与资源 cache stats。
+- missing image、mask/layer fallback、placeholder 仍由 FHRE 底座处理；Wing 页面层继续只声明 UI tree。
+- `wing_build.sh` 仍是 FHRE V4.2 的兼容性回归入口，当前不新增 Windows 10 Mobile 风格页面实现。
+
+## V4.1 对 FHRE 底座清理的适配边界
+
+V4.1 仍然 FHRE-first，Wing 不新增 route/page，不实现私有硬件后端：
+
+- Wing 只消费 FHRE 输出的 `DrawCommand`、`RenderStats` 和资源 cache 结果，不生成私有 `DrawChainOpPayload`。
+- Wing 不反查 FHRE draw-chain payload，不关心 DMA2D/GPU descriptor 如何生成；真实后端成功、fallback 或 unsupported 都由 FHRE stats 呈现。
+- Wing 对 missing resource 的观察改看 `cache_load_failures` / `codec_missing_resources` / `cache_decode_placeholder_missing`；`cache_decode_failures` 不再包含 missing。
+- `wing_build.sh` 继续是 FHRE V4.1 的兼容性回归入口，当前不新增 Windows 10 Mobile 风格页面实现。
+
+## V4.0 对 FHRE 底座收口的适配边界
+
+V4.0 阶段继续 FHRE-first，Wing 不新增页面能力，只做只读消费和回归验证：
+
+- Wing 不实现私有 draw-chain、DMA2D/GPU 提交、mask/layer 合并或资源硬件 decode 策略。
+- Wing 只通过 FHRE `RenderStats` 观察 `draw_chain_*`、`codec_pipeline_*`、`cache_decode_placeholders` 与 `cache_decode_placeholder_*`。
+- 对资源缺失或格式不支持，Wing 页面仍只声明 `UiBuilder -> UiTree -> FHRE DrawCommand`；具体 `ResourceDecodeResult::Placeholder`、fallback image 和 cache stats 由 FHRE 处理。
+- `wing_build.sh` 本阶段是 FHRE 改动的兼容性回归入口：必须继续同时编入 `fhre_demo` 与 `wing_demo`，但不因为 FHRE V4.0 增加新的 Wing route/page。
+
 ## V3.10 对 FHRE run 级链路调度的适配边界
 
 V3.10 继续保持 Wing 不扩页面/route 的边界，只把 FHRE 的 run 级链路调度能力纳入 shell 观测和适配：

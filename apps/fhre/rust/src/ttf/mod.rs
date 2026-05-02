@@ -224,7 +224,11 @@ impl TtfDecoder {
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Parse, true, supported));
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Raster, true, supported));
         let _ = plan.push(CodecStagePlan::new(CodecStageKind::Pack, true, supported));
-        let _ = plan.push(CodecStagePlan::new(CodecStageKind::CacheInsert, false, true));
+        let _ = plan.push(CodecStagePlan::new(
+            CodecStageKind::CacheInsert,
+            false,
+            true,
+        ));
         plan
     }
 }

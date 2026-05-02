@@ -14,11 +14,19 @@ FHRE_RESOURCE_MANIFEST := $(FHRE_RESOURCE)/romfs_manifest.txt
 FHRE_SIM_ROOT := $(TOPDIR)/boards/sim/sim/sim/src/etc/fhre
 FHRE_SIM_RESOURCE := $(FHRE_SIM_ROOT)/resource
 RESOURCE_BUDGET_CHECK := $(APPDIR)/tools/check_resource_budget.sh
+FHRE_CARGO_FEATURES :=
+
+ifeq ($(FHRE_SIM_OPENGL),1)
+FHRE_CARGO_FEATURES += --features sim-opengl
+endif
+ifeq ($(FHRE_SIM_OPENGL),egl)
+FHRE_CARGO_FEATURES += --features sim-opengl-egl
+endif
 
 ifeq ($(CONFIG_ARCH_SIM),y)
 context::
 	@echo "Checking FHRE Rust core (native, no_std)..."
-	cargo build --manifest-path $(RUST_CARGO_PATH)/Cargo.toml --no-default-features
+	cargo build --manifest-path $(RUST_CARGO_PATH)/Cargo.toml --no-default-features $(FHRE_CARGO_FEATURES)
 	@echo "Checking and installing FHRE demo resources into sim ROMFS..."
 	@rm -rf $(FHRE_SIM_ROOT)
 	@mkdir -p $(FHRE_SIM_RESOURCE)
@@ -27,7 +35,7 @@ else
 context::
 	@echo "Checking FHRE Rust core..."
 	@echo "Target: $(RUST_TARGET)"
-	cargo build --manifest-path $(RUST_CARGO_PATH)/Cargo.toml --target $(RUST_TARGET) --no-default-features
+	cargo build --manifest-path $(RUST_CARGO_PATH)/Cargo.toml --target $(RUST_TARGET) --no-default-features $(FHRE_CARGO_FEATURES)
 endif
 
 clean::
